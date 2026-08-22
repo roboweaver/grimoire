@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"net/http"
 	"strconv"
 
@@ -58,8 +59,16 @@ func (s *Server) category(w http.ResponseWriter, r *http.Request) error {
 	return s.renderHTML(w, "category", data)
 }
 
-// renderHTML sets the HTML content type and renders kind with data.
+// renderHTML renders kind with data into a buffer first, so a template
+// execution error surfaces before any bytes reach the client. This lets the
+// error middleware map failures to a clean 404/500 instead of appending an
+// error to a partially written 200 response.
 func (s *Server) renderHTML(w http.ResponseWriter, kind string, data any) error {
+	var buf bytes.Buffer
+	if err := s.render.Render(&buf, kind, data); err != nil {
+		return err
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	return s.render.Render(w, kind, data)
+	_, err := w.Write(buf.Bytes())
+	return err
 }

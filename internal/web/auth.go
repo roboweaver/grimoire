@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"net/url"
 	"strings"
 
 	"github.com/roboweaver/grimoire/internal/auth"
@@ -97,10 +98,22 @@ func constantTimeEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-// safeRedirect returns dst if it is a local path (single leading slash, no
+// safeRedirect returns dst only if it is a local path (single leading slash, no
 // scheme/host), else "/". This blocks open-redirect via the post-login target.
+//
+// Backslashes are rejected outright because browsers normalize "\" to "/", so a
+// value like "/\evil.com" would be treated as the scheme-relative URL
+// "//evil.com" pointing at an external host. As a belt-and-suspenders check the
+// value is also parsed and must yield an empty Host and empty Scheme.
 func safeRedirect(dst string) string {
 	if dst == "" || !strings.HasPrefix(dst, "/") || strings.HasPrefix(dst, "//") {
+		return "/"
+	}
+	if strings.Contains(dst, `\`) {
+		return "/"
+	}
+	u, err := url.Parse(dst)
+	if err != nil || u.Host != "" || u.Scheme != "" {
 		return "/"
 	}
 	return dst

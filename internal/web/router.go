@@ -38,6 +38,7 @@ func (s *Server) Routes() http.Handler {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok"))
 	})
+	registerStatic(r)
 	r.Method(http.MethodGet, "/category/{slug}", s.handler(s.category))
 	r.Method(http.MethodGet, "/", s.handler(s.home))
 	r.Method(http.MethodGet, "/{slug}", s.handler(s.single))

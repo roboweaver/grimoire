@@ -282,6 +282,34 @@ func TestSessionManager_LoginRehashesPhpass(t *testing.T) {
 	}
 }
 
+// wpGoldenHash is the synthetic WordPress 6.8 "$wp$" hash for "grimoire-test-123"
+// (see internal/auth/password). A "$wp$" login must succeed WITHOUT triggering a
+// rehash: the format is already strong and grimoire verifies it in place.
+const (
+	wpGoldenHash  = "$wp$2y$12$iWN5xRwDE7i9R5jVJvCyqOxS1CNnwUggQaF8O2W9Bg8TuXQz.ngrS"
+	wpGoldenLogin = "grimoire-test-123"
+)
+
+func TestSessionManager_LoginWPHashNoRehash(t *testing.T) {
+	now := time.Now().UTC()
+	m, users, _, sess := newTestManager(now)
+	users.add(domain.User{ID: 7, Login: "wpuser", Pass: wpGoldenHash})
+
+	token, _, err := m.Login(context.Background(), "wpuser", wpGoldenLogin)
+	if err != nil {
+		t.Fatalf("Login with $wp$ hash: %v", err)
+	}
+	if token == "" {
+		t.Fatal("expected a non-empty session token for a $wp$ user")
+	}
+	if len(sess.m) != 1 {
+		t.Fatalf("expected 1 session created, got %d", len(sess.m))
+	}
+	if newHash, ok := users.updated[7]; ok {
+		t.Fatalf("a $wp$ hash must NOT be rehashed on login; UpdatePass wrote %q", newHash)
+	}
+}
+
 func TestSessionManager_AuthenticateSuccessAndRollingRefresh(t *testing.T) {
 	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	m, users, meta, sess := newTestManager(now)

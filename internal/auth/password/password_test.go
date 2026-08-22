@@ -65,6 +65,45 @@ func TestVerifyUnknownFormat(t *testing.T) {
 	}
 }
 
+// wpGolden is the synthetic WordPress 6.8 "$wp$" hash for wpGoldenPlain. It was
+// produced by a live wp_hash_password and confirmed against wp_check_password;
+// it is the only "$wp$" vector asserted by the always-on unit tests (no real
+// user hashes are ever embedded in the repo).
+const (
+	wpGolden      = "$wp$2y$12$iWN5xRwDE7i9R5jVJvCyqOxS1CNnwUggQaF8O2W9Bg8TuXQz.ngrS"
+	wpGoldenPlain = "grimoire-test-123"
+)
+
+func TestVerifyWPHash(t *testing.T) {
+	ok, err := Verify(wpGoldenPlain, wpGolden)
+	if err != nil || !ok {
+		t.Fatalf("Verify($wp$ correct) = (%v, %v), want (true, nil)", ok, err)
+	}
+	ok, err = Verify("grimoire-test-124", wpGolden)
+	if err != nil || ok {
+		t.Fatalf("Verify($wp$ wrong) = (%v, %v), want (false, nil)", ok, err)
+	}
+	// A "$wp$" prefix must be recognized (not ErrUnknownFormat) even when the
+	// embedded remainder is malformed; verification simply fails.
+	for _, bad := range []string{"$wp$", "$wp$notbcrypt", "$wp$2y$12$short"} {
+		ok, err := Verify(wpGoldenPlain, bad)
+		if ok {
+			t.Fatalf("Verify(malformed %q) ok = true, want false", bad)
+		}
+		if err == ErrUnknownFormat {
+			t.Fatalf("Verify(malformed %q) err = ErrUnknownFormat, want format recognized", bad)
+		}
+	}
+}
+
+func TestNeedsRehashWPHash(t *testing.T) {
+	// "$wp$" is WordPress's current strong standard (HMAC-SHA384 pre-hash +
+	// bcrypt); grimoire verifies it in place and never rehashes it.
+	if NeedsRehash(wpGolden) {
+		t.Fatalf("NeedsRehash($wp$) = true, want false")
+	}
+}
+
 func TestNeedsRehash(t *testing.T) {
 	strong, err := bcrypt.GenerateFromPassword([]byte("pw"), DefaultCost)
 	if err != nil {

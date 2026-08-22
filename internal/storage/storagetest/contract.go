@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/storage"
@@ -176,6 +177,346 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 		}
 		if _, err := repos.Options.Get(ctx, "missing"); !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("missing option err = %v, want ErrNotFound", err)
+		}
+	})
+
+	runUserContract(t, newRepos)
+	runSessionContract(t, newRepos)
+	runWriterContract(t, newRepos)
+}
+
+// runUserContract covers UserRepository + UserMetaRepository, including the
+// PHP-serialized {prefix}capabilities round-trip that carries a user's roles.
+func runUserContract(t *testing.T, newRepos NewReposFunc) {
+	t.Helper()
+	ctx := context.Background()
+
+	t.Run("UserRepository ByLogin, ByID, and not-found", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		u, err := repos.Users.ByLogin(ctx, "admin")
+		if err != nil {
+			t.Fatalf("ByLogin: %v", err)
+		}
+		if u.ID != 1 || u.Login != "admin" {
+			t.Errorf("unexpected user: %+v", u)
+		}
+		byID, err := repos.Users.ByID(ctx, 1)
+		if err != nil {
+			t.Fatalf("ByID: %v", err)
+		}
+		if byID.Login != "admin" {
+			t.Errorf("ByID login = %q, want admin", byID.Login)
+		}
+		if _, err := repos.Users.ByLogin(ctx, "ghost"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("unknown login err = %v, want ErrNotFound", err)
+		}
+		if _, err := repos.Users.ByID(ctx, 9999); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("unknown id err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("UserRepository Create returns id and round-trips", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		reg := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+		id, err := repos.Users.Create(ctx, domain.User{
+			Login:       "editor",
+			Nicename:    "editor",
+			DisplayName: "Ed Editor",
+			Pass:        "$2a$10$abcdefghijklmnopqrstuv",
+			Email:       "ed@example.com",
+			URL:         "https://ed.example.com",
+			Registered:  reg,
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if id <= 1 {
+			t.Fatalf("Create id = %d, want > 1", id)
+		}
+		got, err := repos.Users.ByID(ctx, id)
+		if err != nil {
+			t.Fatalf("ByID after create: %v", err)
+		}
+		if got.Login != "editor" || got.Email != "ed@example.com" || got.DisplayName != "Ed Editor" {
+			t.Errorf("created user mismatch: %+v", got)
+		}
+		if !got.Registered.Equal(reg) {
+			t.Errorf("registered = %v, want %v", got.Registered, reg)
+		}
+	})
+
+	t.Run("UserRepository UpdatePass and not-found", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		const newHash = "$2a$10$0000000000000000000000000000000000000000000000000000"
+		if err := repos.Users.UpdatePass(ctx, 1, newHash); err != nil {
+			t.Fatalf("UpdatePass: %v", err)
+		}
+		got, err := repos.Users.ByID(ctx, 1)
+		if err != nil {
+			t.Fatalf("ByID: %v", err)
+		}
+		if got.Pass != newHash {
+			t.Errorf("pass = %q, want %q", got.Pass, newHash)
+		}
+		if err := repos.Users.UpdatePass(ctx, 9999, newHash); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("UpdatePass missing err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("UserMetaRepository Set/Get upsert, capabilities round-trip, ByUser", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		// PHP-serialized capabilities array, exactly as WordPress stores roles.
+		const caps = `a:1:{s:13:"administrator";b:1;}`
+		capsKey := "wp_capabilities"
+		levelKey := "wp_user_level"
+		if err := repos.UserMeta.Set(ctx, 1, capsKey, caps); err != nil {
+			t.Fatalf("Set caps: %v", err)
+		}
+		if err := repos.UserMeta.Set(ctx, 1, levelKey, "10"); err != nil {
+			t.Fatalf("Set level: %v", err)
+		}
+		got, err := repos.UserMeta.Get(ctx, 1, capsKey)
+		if err != nil {
+			t.Fatalf("Get caps: %v", err)
+		}
+		if got != caps {
+			t.Errorf("caps round-trip = %q, want %q", got, caps)
+		}
+		// Set again on the same key must update in place, not duplicate.
+		const caps2 = `a:1:{s:6:"editor";b:1;}`
+		if err := repos.UserMeta.Set(ctx, 1, capsKey, caps2); err != nil {
+			t.Fatalf("Set caps2: %v", err)
+		}
+		got2, err := repos.UserMeta.Get(ctx, 1, capsKey)
+		if err != nil {
+			t.Fatalf("Get caps2: %v", err)
+		}
+		if got2 != caps2 {
+			t.Errorf("caps update = %q, want %q", got2, caps2)
+		}
+		all, err := repos.UserMeta.ByUser(ctx, 1)
+		if err != nil {
+			t.Fatalf("ByUser: %v", err)
+		}
+		if all[capsKey] != caps2 || all[levelKey] != "10" {
+			t.Errorf("ByUser map = %+v", all)
+		}
+		if _, err := repos.UserMeta.Get(ctx, 1, "no_such_key"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("missing meta err = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// runSessionContract covers SessionRepository create/lookup/rolling-refresh/
+// revoke/garbage-collect against the {prefix}sessions table.
+func runSessionContract(t *testing.T, newRepos NewReposFunc) {
+	t.Helper()
+	ctx := context.Background()
+
+	t.Run("SessionRepository Create, ByID, Touch, Delete", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		created := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		expires := created.Add(14 * 24 * time.Hour)
+		s := domain.Session{ID: "hash-a", UserID: 1, CSRFToken: "csrf-a", Created: created, Expires: expires}
+		if err := repos.Sessions.Create(ctx, s); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		got, err := repos.Sessions.ByID(ctx, "hash-a")
+		if err != nil {
+			t.Fatalf("ByID: %v", err)
+		}
+		if got.UserID != 1 || got.CSRFToken != "csrf-a" {
+			t.Errorf("session mismatch: %+v", got)
+		}
+		if !got.Expires.Equal(expires) {
+			t.Errorf("expires = %v, want %v", got.Expires, expires)
+		}
+		newExpiry := expires.Add(24 * time.Hour)
+		if err := repos.Sessions.Touch(ctx, "hash-a", newExpiry); err != nil {
+			t.Fatalf("Touch: %v", err)
+		}
+		touched, err := repos.Sessions.ByID(ctx, "hash-a")
+		if err != nil {
+			t.Fatalf("ByID after touch: %v", err)
+		}
+		if !touched.Expires.Equal(newExpiry) {
+			t.Errorf("touched expires = %v, want %v", touched.Expires, newExpiry)
+		}
+		if err := repos.Sessions.Touch(ctx, "missing", newExpiry); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("Touch missing err = %v, want ErrNotFound", err)
+		}
+		if err := repos.Sessions.Delete(ctx, "hash-a"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := repos.Sessions.ByID(ctx, "hash-a"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("ByID after delete err = %v, want ErrNotFound", err)
+		}
+		// Delete is idempotent: removing a missing session is not an error.
+		if err := repos.Sessions.Delete(ctx, "hash-a"); err != nil {
+			t.Errorf("Delete idempotent err = %v, want nil", err)
+		}
+	})
+
+	t.Run("SessionRepository DeleteByUser and DeleteExpired", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		mk := func(id string, exp time.Time) domain.Session {
+			return domain.Session{ID: id, UserID: 1, CSRFToken: "c", Created: base, Expires: exp}
+		}
+		if err := repos.Sessions.Create(ctx, mk("old-1", base.Add(1*time.Hour))); err != nil {
+			t.Fatalf("create old-1: %v", err)
+		}
+		if err := repos.Sessions.Create(ctx, mk("old-2", base.Add(2*time.Hour))); err != nil {
+			t.Fatalf("create old-2: %v", err)
+		}
+		if err := repos.Sessions.Create(ctx, mk("fresh", base.Add(100*time.Hour))); err != nil {
+			t.Fatalf("create fresh: %v", err)
+		}
+		// GC everything expiring before base+3h: removes old-1 and old-2 only.
+		n, err := repos.Sessions.DeleteExpired(ctx, base.Add(3*time.Hour))
+		if err != nil {
+			t.Fatalf("DeleteExpired: %v", err)
+		}
+		if n != 2 {
+			t.Errorf("DeleteExpired count = %d, want 2", n)
+		}
+		if _, err := repos.Sessions.ByID(ctx, "fresh"); err != nil {
+			t.Errorf("fresh should survive GC: %v", err)
+		}
+		// Revoke-all removes the remaining session for the user.
+		removed, err := repos.Sessions.DeleteByUser(ctx, 1)
+		if err != nil {
+			t.Fatalf("DeleteByUser: %v", err)
+		}
+		if removed != 1 {
+			t.Errorf("DeleteByUser count = %d, want 1", removed)
+		}
+	})
+}
+
+// runWriterContract covers the content writer ports: Post/Term/Option
+// create/update/delete, verified through the existing read ports.
+func runWriterContract(t *testing.T, newRepos NewReposFunc) {
+	t.Helper()
+	ctx := context.Background()
+
+	t.Run("PostWriter Create, Update, Delete", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		id, err := repos.PostWriter.Create(ctx, domain.Post{
+			Author:  1,
+			Date:    time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC),
+			Content: "<p>new</p>",
+			Title:   "Fresh Post",
+			Excerpt: "ex",
+			Status:  "publish",
+			Slug:    "fresh-post",
+			Type:    "post",
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if id == 0 {
+			t.Fatal("Create returned zero id")
+		}
+		got, err := repos.Posts.BySlug(ctx, "fresh-post")
+		if err != nil {
+			t.Fatalf("BySlug after create: %v", err)
+		}
+		if got.Title != "Fresh Post" {
+			t.Errorf("title = %q, want Fresh Post", got.Title)
+		}
+		got.Title = "Edited Post"
+		got.Content = "<p>edited</p>"
+		if err := repos.PostWriter.Update(ctx, got); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		reread, err := repos.Posts.BySlug(ctx, "fresh-post")
+		if err != nil {
+			t.Fatalf("BySlug after update: %v", err)
+		}
+		if reread.Title != "Edited Post" || reread.Content != "<p>edited</p>" {
+			t.Errorf("update not applied: %+v", reread)
+		}
+		if err := repos.PostWriter.Delete(ctx, id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := repos.Posts.BySlug(ctx, "fresh-post"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("BySlug after delete err = %v, want ErrNotFound", err)
+		}
+		if err := repos.PostWriter.Update(ctx, domain.Post{ID: 999999, Slug: "x"}); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("Update missing err = %v, want ErrNotFound", err)
+		}
+		if err := repos.PostWriter.Delete(ctx, 999999); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("Delete missing err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("TermWriter Create and Delete", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		id, err := repos.TermWriter.Create(ctx, domain.Term{Name: "Go", Slug: "go", Taxonomy: "post_tag"})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if id == 0 {
+			t.Fatal("Create returned zero term_id")
+		}
+		got, err := repos.Terms.BySlug(ctx, "post_tag", "go")
+		if err != nil {
+			t.Fatalf("BySlug after create: %v", err)
+		}
+		if got.Name != "Go" || got.Taxonomy != "post_tag" {
+			t.Errorf("term mismatch: %+v", got)
+		}
+		if err := repos.TermWriter.Delete(ctx, id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := repos.Terms.BySlug(ctx, "post_tag", "go"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("BySlug after delete err = %v, want ErrNotFound", err)
+		}
+		if err := repos.TermWriter.Delete(ctx, 999999); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("Delete missing err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("OptionWriter Set upsert and Delete", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		if err := repos.OptionWriter.Set(ctx, "siteurl", "https://a.example"); err != nil {
+			t.Fatalf("Set insert: %v", err)
+		}
+		v, err := repos.Options.Get(ctx, "siteurl")
+		if err != nil {
+			t.Fatalf("Get after insert: %v", err)
+		}
+		if v != "https://a.example" {
+			t.Errorf("siteurl = %q", v)
+		}
+		if err := repos.OptionWriter.Set(ctx, "siteurl", "https://b.example"); err != nil {
+			t.Fatalf("Set update: %v", err)
+		}
+		v2, err := repos.Options.Get(ctx, "siteurl")
+		if err != nil {
+			t.Fatalf("Get after update: %v", err)
+		}
+		if v2 != "https://b.example" {
+			t.Errorf("siteurl updated = %q", v2)
+		}
+		if err := repos.OptionWriter.Delete(ctx, "siteurl"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if _, err := repos.Options.Get(ctx, "siteurl"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("Get after delete err = %v, want ErrNotFound", err)
+		}
+		if err := repos.OptionWriter.Delete(ctx, "no_such_option"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("Delete missing err = %v, want ErrNotFound", err)
 		}
 	})
 }

@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // PostRepository reads posts and pages from the backing store. Implementations
 // live under internal/storage and must return ErrNotFound when a single record
@@ -25,4 +28,75 @@ type TermRepository interface {
 type OptionRepository interface {
 	// Get returns an option value by name, or ErrNotFound.
 	Get(ctx context.Context, name string) (string, error)
+}
+
+// UserRepository reads and writes users ({prefix}users).
+type UserRepository interface {
+	// ByLogin returns a user by user_login, or ErrNotFound.
+	ByLogin(ctx context.Context, login string) (User, error)
+	// ByID returns a user by ID, or ErrNotFound.
+	ByID(ctx context.Context, id int64) (User, error)
+	// Create inserts a new user and returns its generated ID.
+	Create(ctx context.Context, u User) (int64, error)
+	// UpdatePass replaces the stored password hash for a user. It returns
+	// ErrNotFound when no user has the given ID.
+	UpdatePass(ctx context.Context, id int64, passHash string) error
+}
+
+// UserMetaRepository reads and writes user metadata ({prefix}usermeta). It
+// models single-valued meta (the last write for a key wins), which is how
+// grimoire stores {prefix}capabilities and {prefix}user_level.
+type UserMetaRepository interface {
+	// Get returns the value for a user's meta key, or ErrNotFound.
+	Get(ctx context.Context, userID int64, key string) (string, error)
+	// Set upserts a single-valued meta row for the user/key pair.
+	Set(ctx context.Context, userID int64, key, value string) error
+	// ByUser returns all single-valued meta for a user keyed by meta_key.
+	ByUser(ctx context.Context, userID int64) (map[string]string, error)
+}
+
+// SessionRepository persists server-side sessions ({prefix}sessions).
+type SessionRepository interface {
+	// Create inserts a new session row.
+	Create(ctx context.Context, s Session) error
+	// ByID returns a session by its ID (hashed token), or ErrNotFound.
+	ByID(ctx context.Context, id string) (Session, error)
+	// Touch extends a session's expiry (rolling refresh). It returns
+	// ErrNotFound when no session has the given ID.
+	Touch(ctx context.Context, id string, expires time.Time) error
+	// Delete removes a single session (logout).
+	Delete(ctx context.Context, id string) error
+	// DeleteByUser removes all of a user's sessions (revoke-all) and returns
+	// the number of rows deleted.
+	DeleteByUser(ctx context.Context, userID int64) (int64, error)
+	// DeleteExpired removes sessions whose expiry is before the given time
+	// (garbage collection) and returns the number of rows deleted.
+	DeleteExpired(ctx context.Context, before time.Time) (int64, error)
+}
+
+// PostWriter creates, updates, and deletes posts and pages ({prefix}posts).
+type PostWriter interface {
+	// Create inserts a new post and returns its generated ID.
+	Create(ctx context.Context, p Post) (int64, error)
+	// Update replaces an existing post's fields by ID, or ErrNotFound.
+	Update(ctx context.Context, p Post) error
+	// Delete removes a post by ID, or ErrNotFound.
+	Delete(ctx context.Context, id int64) error
+}
+
+// TermWriter creates and deletes taxonomy terms ({prefix}terms +
+// {prefix}term_taxonomy).
+type TermWriter interface {
+	// Create inserts a term and its taxonomy row, returning the term_id.
+	Create(ctx context.Context, t Term) (int64, error)
+	// Delete removes a term and its taxonomy rows by term_id, or ErrNotFound.
+	Delete(ctx context.Context, id int64) error
+}
+
+// OptionWriter sets and deletes site options ({prefix}options).
+type OptionWriter interface {
+	// Set upserts an option value by name.
+	Set(ctx context.Context, name, value string) error
+	// Delete removes an option by name, or ErrNotFound.
+	Delete(ctx context.Context, name string) error
 }

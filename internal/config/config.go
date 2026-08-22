@@ -5,7 +5,9 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,11 +20,29 @@ type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Theme    string         `yaml:"theme"`
 	Database DatabaseConfig `yaml:"database"`
+	Session  SessionConfig  `yaml:"session"`
 }
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
 	Addr string `yaml:"addr"`
+}
+
+// SessionConfig configures authenticated session cookies. No signing secret is
+// needed: the cookie holds an opaque random token and the server stores only
+// its hash (see internal/auth.SessionManager).
+type SessionConfig struct {
+	// CookieName is the session cookie name (default "grimoire_session").
+	CookieName string `yaml:"cookie_name"`
+	// CookieSecure sets the Secure attribute; enable when serving over TLS.
+	CookieSecure bool `yaml:"cookie_secure"`
+	// TTLHours is the rolling session lifetime in hours (default 336 = 14 days).
+	TTLHours int `yaml:"ttl_hours"`
+}
+
+// TTL returns the rolling session lifetime as a time.Duration.
+func (s SessionConfig) TTL() time.Duration {
+	return time.Duration(s.TTLHours) * time.Hour
 }
 
 // DatabaseConfig selects and configures the storage backend.
@@ -69,6 +89,17 @@ func (c *Config) applyEnv() {
 	if v, ok := os.LookupEnv("GRIMOIRE_DATABASE_TABLE_PREFIX"); ok {
 		c.Database.TablePrefix = v
 	}
+	if v, ok := os.LookupEnv("GRIMOIRE_SESSION_COOKIE_NAME"); ok {
+		c.Session.CookieName = v
+	}
+	if v, ok := os.LookupEnv("GRIMOIRE_SESSION_COOKIE_SECURE"); ok {
+		c.Session.CookieSecure = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v, ok := os.LookupEnv("GRIMOIRE_SESSION_TTL_HOURS"); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Session.TTLHours = n
+		}
+	}
 }
 
 func (c *Config) applyDefaults() {
@@ -80,6 +111,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Database.TablePrefix == "" {
 		c.Database.TablePrefix = "wp_"
+	}
+	if c.Session.CookieName == "" {
+		c.Session.CookieName = "grimoire_session"
+	}
+	if c.Session.TTLHours <= 0 {
+		c.Session.TTLHours = 24 * 14
 	}
 }
 

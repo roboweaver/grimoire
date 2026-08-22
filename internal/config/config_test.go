@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeTempConfig(t *testing.T, body string) string {
@@ -141,5 +142,55 @@ func TestRedactDSN(t *testing.T) {
 				t.Errorf("RedactDSN(%q) = %q, must contain %q", tc.dsn, got, tc.mustContain)
 			}
 		})
+	}
+}
+
+func TestLoadSessionDefaults(t *testing.T) {
+	path := writeTempConfig(t, `
+database:
+  vendor: sqlite
+  dsn: "file:grimoire.db"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.CookieName != "grimoire_session" {
+		t.Errorf("session.cookie_name = %q, want default grimoire_session", cfg.Session.CookieName)
+	}
+	if cfg.Session.TTLHours != 24*14 {
+		t.Errorf("session.ttl_hours = %d, want default 336", cfg.Session.TTLHours)
+	}
+	if cfg.Session.CookieSecure {
+		t.Error("session.cookie_secure should default to false")
+	}
+	if got := cfg.Session.TTL(); got != 14*24*time.Hour {
+		t.Errorf("Session.TTL() = %s, want 336h", got)
+	}
+}
+
+func TestLoadSessionExplicitAndEnvOverride(t *testing.T) {
+	path := writeTempConfig(t, `
+database:
+  vendor: sqlite
+  dsn: "file:grimoire.db"
+session:
+  cookie_name: sess
+  cookie_secure: true
+  ttl_hours: 48
+`)
+	t.Setenv("GRIMOIRE_SESSION_COOKIE_NAME", "envsess")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Session.CookieName != "envsess" {
+		t.Errorf("cookie_name = %q, want env override envsess", cfg.Session.CookieName)
+	}
+	if !cfg.Session.CookieSecure {
+		t.Error("cookie_secure should be true from file")
+	}
+	if cfg.Session.TTLHours != 48 {
+		t.Errorf("ttl_hours = %d, want 48", cfg.Session.TTLHours)
 	}
 }

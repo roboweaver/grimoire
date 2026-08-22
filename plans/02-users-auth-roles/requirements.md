@@ -159,4 +159,33 @@ _This section is populated during implementation, mirroring M1. It records
 decisions that refine the design while preserving the ports-and-adapters
 boundaries, the swappable-vendor guarantee, and the security requirements above._
 
-_(none yet)_
+- **Login page reuses the public `base.tmpl` chrome.** Rather than add a second
+  render path, the login view is registered as a normal content template:
+  `"login"` was appended to the render engine's `contentTemplates` list and
+  `hierarchy` map, and `themes/default/templates/login.tmpl` defines the
+  `title`/`content` blocks. `render.LoginData` carries `SiteTitle` (required by
+  `base.tmpl`) plus `CSRFToken`, `Error`, and `Redirect`. This keeps a single
+  render engine and buffered-write path.
+- **Auth is opt-in on the web server via `Server.WithAuth`.** `web.NewServer`
+  keeps its M1 signature; `WithAuth(sessions, AuthConfig)` attaches the
+  `Sessions` port and cookie config and returns the server for chaining.
+  `Routes()` only mounts `SessionMiddleware` and the `/login`,`/logout` routes
+  when auth is configured, so M1 call sites and handler tests stay valid.
+- **`web` depends on a local `Sessions` interface, not `*auth.SessionManager`.**
+  The three methods the handlers need (`Login`/`Authenticate`/`Logout`) are
+  declared as an interface in `internal/web`, which `*auth.SessionManager`
+  satisfies. This keeps the web layer testable with a fake and avoids a hard
+  dependency from `web` onto `auth`'s concretes.
+- **No user-enumeration timing guard lives in `SessionManager.Login`.** When the
+  username does not exist, `Login` performs a throwaway bcrypt compare against a
+  fixed dummy hash before returning the generic `ErrInvalidCredentials`, so a
+  missing user and a wrong password take the same time (Req 2.5). A test asserts
+  both paths go through the password comparator.
+- **`createadmin` reads the password from `-password` or
+  `GRIMOIRE_ADMIN_PASSWORD`.** The env var is preferred so the secret need not
+  appear in shell history; the password is never echoed. The command refuses to
+  overwrite an existing `user_login`.
+- **Session config needs no signing secret.** `SessionConfig` exposes only
+  `cookie_name`, `cookie_secure`, and `ttl_hours` (default 336h/14d) because the
+  cookie carries an opaque random token and the server stores only its SHA-256;
+  there is nothing to sign.

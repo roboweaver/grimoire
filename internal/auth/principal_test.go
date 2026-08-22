@@ -65,6 +65,38 @@ func TestParseCapabilities_invalid(t *testing.T) {
 	}
 }
 
+// TestParseCapabilitiesStringOne locks in that a truthy scalar string ("1")
+// grants a role identically to boolean true. Real WordPress databases store
+// {prefix}capabilities using BOTH b:1 and s:1:"1" to mean "has role"; grimoire
+// must treat them the same, and a falsy scalar ("0") must not grant.
+func TestParseCapabilitiesStringOne(t *testing.T) {
+	got, err := ParseCapabilities(`a:1:{s:13:"administrator";s:1:"1";}`)
+	if err != nil {
+		t.Fatalf("ParseCapabilities(string-one) error: %v", err)
+	}
+	if !reflect.DeepEqual(got, []string{"administrator"}) {
+		t.Errorf(`ParseCapabilities(s:1:"1") = %v, want [administrator]`, got)
+	}
+
+	// The string form must match the boolean form exactly.
+	boolGot, err := ParseCapabilities(`a:1:{s:13:"administrator";b:1;}`)
+	if err != nil {
+		t.Fatalf("ParseCapabilities(bool) error: %v", err)
+	}
+	if !reflect.DeepEqual(got, boolGot) {
+		t.Errorf(`s:1:"1" result %v differs from b:1 result %v`, got, boolGot)
+	}
+
+	// A falsy scalar string must not grant the role.
+	falsy, err := ParseCapabilities(`a:1:{s:13:"administrator";s:1:"0";}`)
+	if err != nil {
+		t.Fatalf("ParseCapabilities(string-zero) error: %v", err)
+	}
+	if len(falsy) != 0 {
+		t.Errorf(`ParseCapabilities(s:1:"0") = %v, want no roles`, falsy)
+	}
+}
+
 func TestSerializeCapabilities_roundTrip(t *testing.T) {
 	s, err := SerializeCapabilities(RoleAdministrator)
 	if err != nil {

@@ -20,11 +20,20 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// Set bundles the three repository ports for a single backend.
+// Set bundles the repository ports for a single backend: the M1 read ports plus
+// the M2 user/session ports and content writer ports.
 type Set struct {
 	Posts   domain.PostRepository
 	Terms   domain.TermRepository
 	Options domain.OptionRepository
+
+	Users    domain.UserRepository
+	UserMeta domain.UserMetaRepository
+	Sessions domain.SessionRepository
+
+	PostWriter   domain.PostWriter
+	TermWriter   domain.TermWriter
+	OptionWriter domain.OptionWriter
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -97,11 +106,25 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 		return nil, err
 	}
 	prefix := cfg.TablePrefix
+	// The content writers are additional methods on the same concrete read
+	// repos, so each backing repo is constructed once and exposed under both
+	// its read port and its writer port.
+	posts := wprepo.NewPostRepo(bunDB, prefix)
+	terms := wprepo.NewTermRepo(bunDB, prefix)
+	options := wprepo.NewOptionRepo(bunDB, prefix)
 	return &Repositories{
 		Set: Set{
-			Posts:   wprepo.NewPostRepo(bunDB, prefix),
-			Terms:   wprepo.NewTermRepo(bunDB, prefix),
-			Options: wprepo.NewOptionRepo(bunDB, prefix),
+			Posts:   posts,
+			Terms:   terms,
+			Options: options,
+
+			Users:    wprepo.NewUserRepo(bunDB, prefix),
+			UserMeta: wprepo.NewUserMetaRepo(bunDB, prefix),
+			Sessions: wprepo.NewSessionRepo(bunDB, prefix),
+
+			PostWriter:   posts,
+			TermWriter:   terms,
+			OptionWriter: options,
 		},
 		db:    db,
 		bunDB: bunDB,

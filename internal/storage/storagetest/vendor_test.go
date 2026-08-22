@@ -15,7 +15,7 @@ import (
 // cleanup of the scratch prefix on env-gated backends.
 var tables = []string{
 	"term_relationships", "term_taxonomy", "terms", "postmeta",
-	"posts", "options", "users", "schema_migrations",
+	"posts", "options", "sessions", "usermeta", "users", "schema_migrations",
 }
 
 // newReposFromDSN builds a migrated + seeded backend against a scratch prefix

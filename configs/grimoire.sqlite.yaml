@@ -5,3 +5,9 @@ database:
   vendor: sqlite
   dsn: "file:grimoire.db?_pragma=busy_timeout(5000)"
   table_prefix: "wp_"
+session:
+  cookie_name: "grimoire_session"
+  # Enable cookie_secure when serving over HTTPS/TLS.
+  cookie_secure: false
+  # Rolling session lifetime in hours (default 336 = 14 days).
+  ttl_hours: 336

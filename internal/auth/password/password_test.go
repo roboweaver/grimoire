@@ -1,0 +1,95 @@
+package password
+
+import (
+	"strings"
+	"testing"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+func TestHashAndVerify(t *testing.T) {
+	h, err := Hash("s3cret-passphrase")
+	if err != nil {
+		t.Fatalf("Hash error: %v", err)
+	}
+	if !strings.HasPrefix(h, "$2") {
+		t.Fatalf("Hash = %q, want a bcrypt $2 hash", h)
+	}
+	ok, err := Verify("s3cret-passphrase", h)
+	if err != nil || !ok {
+		t.Fatalf("Verify(correct) = (%v, %v), want (true, nil)", ok, err)
+	}
+	ok, err = Verify("wrong", h)
+	if err != nil || ok {
+		t.Fatalf("Verify(wrong) = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+func TestVerifyPhpass(t *testing.T) {
+	// Genuine WordPress portable hash for "hunter2".
+	const h = "$P$6WXYZ7890QmrM8eXI0pZSYhKFDWsuF0"
+	ok, err := Verify("hunter2", h)
+	if err != nil || !ok {
+		t.Fatalf("Verify(phpass correct) = (%v, %v), want (true, nil)", ok, err)
+	}
+	ok, err = Verify("nope", h)
+	if err != nil || ok {
+		t.Fatalf("Verify(phpass wrong) = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+func TestVerifyBcrypt2yNormalization(t *testing.T) {
+	// Go's bcrypt emits $2a$; WordPress/PHP often stores the functionally
+	// identical $2y$ variant, which Go's bcrypt rejects outright. Verify must
+	// normalize it and still match.
+	raw, err := bcrypt.GenerateFromPassword([]byte("php-side"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword: %v", err)
+	}
+	h2y := "$2y$" + strings.TrimPrefix(string(raw), "$2a$")
+	if !strings.HasPrefix(h2y, "$2y$") {
+		t.Fatalf("test setup: expected $2a$ hash, got %q", raw)
+	}
+	ok, err := Verify("php-side", h2y)
+	if err != nil || !ok {
+		t.Fatalf("Verify($2y$) = (%v, %v), want (true, nil)", ok, err)
+	}
+}
+
+func TestVerifyUnknownFormat(t *testing.T) {
+	if _, err := Verify("x", "not-a-hash"); err == nil {
+		t.Fatalf("Verify(unknown) err = nil, want error")
+	}
+	if _, err := Verify("x", ""); err == nil {
+		t.Fatalf("Verify(empty) err = nil, want error")
+	}
+}
+
+func TestNeedsRehash(t *testing.T) {
+	strong, err := bcrypt.GenerateFromPassword([]byte("pw"), DefaultCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword: %v", err)
+	}
+	weak, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		hash string
+		want bool
+	}{
+		{"phpass always rehash", "$P$6WXYZ7890QmrM8eXI0pZSYhKFDWsuF0", true},
+		{"bcrypt default cost", string(strong), false},
+		{"bcrypt below default cost", string(weak), true},
+		{"unknown format", "garbage", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := NeedsRehash(c.hash); got != c.want {
+				t.Fatalf("NeedsRehash(%q) = %v, want %v", c.hash, got, c.want)
+			}
+		})
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/render"
@@ -54,13 +55,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	sm := &auth.SessionManager{
+		Users:    repos.Users,
+		Meta:     repos.UserMeta,
+		Sessions: repos.Sessions,
+		TTL:      cfg.Session.TTL(),
+		Prefix:   cfg.Database.TablePrefix,
+	}
+
 	handler := web.NewServer(
 		content.NewPostService(repos.Posts),
 		content.NewTermService(repos.Terms, repos.Posts),
 		content.NewOptionService(repos.Options),
 		eng,
 		log,
-	).Routes()
+	).WithAuth(sm, web.AuthConfig{
+		CookieName: cfg.Session.CookieName,
+		Secure:     cfg.Session.CookieSecure,
+		MaxAge:     cfg.Session.TTLHours * 3600,
+	}).Routes()
 
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: handler}
 

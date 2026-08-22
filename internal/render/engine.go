@@ -16,7 +16,7 @@ const (
 
 // contentTemplates are the content-level templates that may exist in a theme.
 // Each is parsed together with base.tmpl when present.
-var contentTemplates = []string{"index", "single", "page", "category", "archive"}
+var contentTemplates = []string{"index", "single", "page", "category", "archive", "login"}
 
 // hierarchy maps a requested render kind to the ordered list of content
 // templates to try; the first one loaded in the theme wins (a WordPress-style
@@ -27,6 +27,7 @@ var hierarchy = map[string][]string{
 	"page":     {"page", "single", "index"},
 	"category": {"category", "archive", "index"},
 	"archive":  {"archive", "index"},
+	"login":    {"login"},
 }
 
 // Engine holds the compiled templates for one theme, keyed by content-template

@@ -9,7 +9,7 @@
 package phpass
 
 import (
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // WordPress phpass compatibility: MD5 is required for verifying legacy $P$/$H$ hashes, verification-only
 	"crypto/subtle"
 	"strings"
 )
@@ -48,13 +48,13 @@ func Verify(password, stored string) bool {
 	}
 
 	// Iterated MD5: md5(salt+password), then md5(prev+password) count times.
-	sum := md5.Sum([]byte(salt + password))
+	sum := md5.Sum([]byte(salt + password)) //nolint:gosec // WordPress phpass compatibility: MD5 required for legacy hash verification, verification-only
 	digest := sum[:]
 	buf := make([]byte, 0, len(digest)+len(password))
 	for i := 0; i < count; i++ {
 		buf = append(buf[:0], digest...)
 		buf = append(buf, password...)
-		next := md5.Sum(buf)
+		next := md5.Sum(buf) //nolint:gosec // WordPress phpass compatibility: MD5 required for legacy hash verification, verification-only
 		digest = append(digest[:0], next[:]...)
 	}
 

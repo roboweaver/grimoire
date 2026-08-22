@@ -20,3 +20,6 @@ coverage.*
 .DS_Store
 .idea/
 .vscode/
+
+# Local preview runtime (db, logs)
+/data/

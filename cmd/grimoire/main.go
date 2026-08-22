@@ -1,6 +1,6 @@
-// Command grimoire is the public web server. In M1 it loads configuration,
-// serves a health check, and shuts down gracefully. Full routing/rendering is
-// wired in Phase 8.
+// Command grimoire is the public web server. It loads configuration, opens the
+// configured database, wires content services and the theme render engine into
+// the HTTP router, serves the site, and shuts down gracefully.
 package main
 
 import (
@@ -14,13 +14,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/roboweaver/grimoire/internal/config"
+	"github.com/roboweaver/grimoire/internal/content"
+	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/internal/storage"
+	"github.com/roboweaver/grimoire/internal/web"
 )
 
 func main() {
 	cfgPath := flag.String("config", "configs/grimoire.sqlite.yaml", "path to grimoire config YAML")
+	themesDir := flag.String("themes", "themes", "path to the themes directory")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -38,13 +41,28 @@ func main() {
 		"dsn", config.RedactDSN(cfg.Database.Vendor, cfg.Database.DSN),
 	)
 
-	mux := chi.NewRouter()
-	mux.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte("ok"))
-	})
+	repos, err := storage.New(cfg.Database)
+	if err != nil {
+		log.Error("open storage", "err", err)
+		os.Exit(1)
+	}
+	defer repos.Close()
 
-	srv := &http.Server{Addr: cfg.Server.Addr, Handler: mux}
+	eng, err := render.Load(*themesDir, cfg.Theme)
+	if err != nil {
+		log.Error("load theme", "theme", cfg.Theme, "err", err)
+		os.Exit(1)
+	}
+
+	handler := web.NewServer(
+		content.NewPostService(repos.Posts),
+		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewOptionService(repos.Options),
+		eng,
+		log,
+	).Routes()
+
+	srv := &http.Server{Addr: cfg.Server.Addr, Handler: handler}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

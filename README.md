@@ -58,6 +58,70 @@ See [`plans/`](./plans) for the full, Kiro-format specifications.
 | `web/admin` | (M3) React Spectrum SPA |
 | `plans/` | Kiro specs (requirements / design / tasks) |
 
+## Running (M1)
+
+grimoire ships two binaries: `grimoire` (the HTTP server) and `grimoire-cli`
+(`migrate` / `seed`). Configuration is a YAML file (see [`configs/`](./configs));
+every field can be overridden by an environment variable
+(`GRIMOIRE_SERVER_ADDR`, `GRIMOIRE_THEME`, `GRIMOIRE_DATABASE_VENDOR`,
+`GRIMOIRE_DATABASE_DSN`, `GRIMOIRE_DATABASE_TABLE_PREFIX`).
+
+### SQLite (zero external services)
+
+```bash
+make migrate   # apply embedded schema to grimoire.db
+make seed      # insert sample posts, a page, a category, options
+make run       # serve on :8080
+# then browse http://localhost:8080/  ·  /about  ·  /category/news
+```
+
+Or without make:
+
+```bash
+go run ./cmd/grimoire-cli migrate -config configs/grimoire.sqlite.yaml
+go run ./cmd/grimoire-cli seed    -config configs/grimoire.sqlite.yaml
+go run ./cmd/grimoire            -config configs/grimoire.sqlite.yaml
+```
+
+### MySQL / MariaDB
+
+Edit `configs/grimoire.mysql.yaml` (or set `GRIMOIRE_DATABASE_DSN`). The DSN
+**must** include `parseTime=true` so `DATETIME` columns scan into `time.Time`:
+
+```
+user:pass@tcp(127.0.0.1:3306)/wordpress?parseTime=true&charset=utf8mb4
+```
+
+```bash
+go run ./cmd/grimoire-cli migrate -config configs/grimoire.mysql.yaml
+go run ./cmd/grimoire-cli seed    -config configs/grimoire.mysql.yaml
+go run ./cmd/grimoire            -config configs/grimoire.mysql.yaml
+```
+
+To read an **existing** WordPress database, skip `migrate`/`seed`, point the DSN
+at it, and set `table_prefix` to match the site (default `wp_`).
+
+### PostgreSQL
+
+Edit `configs/grimoire.postgres.yaml` (DSN form
+`postgres://user:pass@127.0.0.1:5432/wordpress?sslmode=disable`), then run the
+same `migrate` / `seed` / server commands with that config.
+
+### Testing
+
+```bash
+go test ./...   # SQLite unit + contract + e2e tests, no external services
+```
+
+The cross-vendor contract suite runs against MySQL and PostgreSQL only when their
+DSNs are provided; otherwise those runners skip:
+
+```bash
+GRIMOIRE_TEST_MYSQL_DSN='user:pass@tcp(127.0.0.1:3306)/grimoire_test?parseTime=true' \
+GRIMOIRE_TEST_POSTGRES_DSN='postgres://user:pass@127.0.0.1:5432/grimoire_test?sslmode=disable' \
+  go test ./internal/storage/storagetest/... -v
+```
+
 ## Milestones
 
 - **M1 (current spec):** content core + switchable DB + WP-compatible schema + public read rendering + default theme.

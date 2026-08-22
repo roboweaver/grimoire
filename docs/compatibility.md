@@ -31,9 +31,22 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   rows) are never rendered.
 - No `INSERT`/`UPDATE`/`DELETE` is issued against content tables by the server.
   `grimoire-cli migrate`/`seed` are opt-in operator commands, not part of serving.
-- Post content is emitted as trusted `template.HTML` (matching WordPress's stored
-  HTML); this is safe only because M1 reads a trusted database and never accepts
-  user input.
+
+## Trusted-content boundary
+
+`post_content` is emitted verbatim as `template.HTML` (`internal/web/view.go`,
+`postView`), bypassing `html/template` auto-escaping — matching WordPress, which
+stores already-rendered post HTML.
+
+This is safe **only** because M1 is a read-only reader of a *trusted* WordPress
+database whose content was authored and sanitized upstream by WordPress. grimoire
+accepts no user input on the serving path.
+
+The moment that assumption changes — a future write/admin path, comment
+ingestion, or importing content from an untrusted source — `post_content` (and
+any other stored HTML) MUST be sanitized (e.g. with `bluemonday`) before it is
+cast to `template.HTML`. The cast site carries a matching `TRUST BOUNDARY`
+comment so it is not copied blindly into a write path.
 
 ## Verifying against a real WordPress database
 

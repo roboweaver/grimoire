@@ -7,31 +7,20 @@ defines entities and repository *interfaces* (ports); database vendors and the
 HTTP/rendering surface are *adapters* around that core. The database vendor and
 the render target are the two things we explicitly make swappable.
 
-```
-                      ┌────────────────────────────────────────────┐
-   HTTP request  ───▶ │ internal/web  (net/http + chi router)       │
-                      │   handlers + middleware (logging, recovery) │
-                      └───────────────┬───────────────┬────────────┘
-                                      │               │
-                                      ▼               ▼
-                      ┌────────────────────┐  ┌─────────────────────┐
-                      │ internal/content   │  │ internal/render     │
-                      │ Post/Term/Option   │  │ theme + WP template │
-                      │ services           │  │ hierarchy (html/tmpl)│
-                      └─────────┬──────────┘  └─────────────────────┘
-                                │ depends on (interfaces only)
-                                ▼
-                      ┌────────────────────────────────────────────┐
-                      │ internal/domain  — entities + repo PORTS    │
-                      │   PostRepository, TermRepository,           │
-                      │   OptionRepository (no driver imports)      │
-                      └───────────────┬────────────────────────────┘
-                                      │ implemented by
-                 ┌────────────────────┼────────────────────┐
-                 ▼                    ▼                    ▼
-        internal/storage/mysql  .../postgres        .../sqlite
-        per-dialect SQL over database/sql (+ Bun query builder)
-        per-dialect migrations under storage/migrations/<vendor>
+```mermaid
+flowchart TD
+    req([HTTP request]) --> web["internal/web — net/http + chi router<br/>handlers + middleware (logging, recovery)"]
+    web --> content["internal/content<br/>Post / Term / Option services"]
+    web --> render["internal/render<br/>theme + WP template hierarchy (html/template)"]
+    content -->|"depends on (interfaces only)"| domain["internal/domain — entities + repo PORTS<br/>PostRepository, TermRepository, OptionRepository<br/>(no driver imports)"]
+    domain -->|implemented by| mysql["internal/storage/mysql"]
+    domain -->|implemented by| postgres["internal/storage/postgres"]
+    domain -->|implemented by| sqlite["internal/storage/sqlite"]
+    subgraph adapters["per-dialect SQL over database/sql (+ Bun) · migrations under storage/migrations/&lt;vendor&gt;"]
+      mysql
+      postgres
+      sqlite
+    end
 ```
 
 **Key property:** `content`, `web`, and `render` depend only on `domain`. Adding
@@ -115,19 +104,21 @@ migration owns its exact DDL.
 
 ## Sequence Diagram — single post request
 
-```
-Visitor        web.Handler        content.PostService     domain.PostRepository     render
-   │  GET /hello  │                       │                        │                   │
-   │─────────────▶│                       │                        │                   │
-   │              │  BySlug("hello")      │                        │                   │
-   │              │──────────────────────▶│  BySlug(ctx,"hello")   │                   │
-   │              │                       │───────────────────────▶│ (vendor SQL)      │
-   │              │                       │◀───────────────────────│ Post | ErrNotFound│
-   │              │  OptionService.Get     │                        │                   │
-   │              │  (blogname, tagline)   │                        │                   │
-   │              │  view model            │                        │                   │
-   │              │────────────────────────────────────────────────────────────────▶  │ Render(single)
-   │◀─────────────│                 200 OK text/html                                    │
+```mermaid
+sequenceDiagram
+    participant Visitor
+    participant Web as web.Handler
+    participant Svc as content.PostService
+    participant Repo as domain.PostRepository
+    participant Render as render
+    Visitor->>Web: GET /hello
+    Web->>Svc: BySlug("hello")
+    Svc->>Repo: BySlug(ctx, "hello")
+    Repo-->>Svc: Post | ErrNotFound (vendor SQL)
+    Web->>Svc: OptionService.Get(blogname, tagline)
+    Note over Web: build view model
+    Web->>Render: Render(single)
+    Web-->>Visitor: 200 OK text/html
 ```
 
 ## Data Flow — template selection

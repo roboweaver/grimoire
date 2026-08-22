@@ -214,3 +214,29 @@ _Populated during implementation._
   matching the golden vector (correct pw true, wrong pw false). The golden vector
   string in the brief is genuine and unchanged; only the algorithm description was
   corrected.
+
+- **Real-DB validation results (read-only, MariaDB 12.3.2, DB `wordpress`, prefix
+  `accuweaver`, 118,958 users / 148 posts).** Ran `TestRealWordPressDB` with
+  `GRIMOIRE_TEST_WP_DSN` set:
+  - reads real posts ✅ (newest: _"How to Painlessly Run Multiple GitHub Accounts on
+    One Machine"_);
+  - phpass `$P$` format recognized ✅ (sampled user `mpower`; wrong password rejected,
+    no `ErrUnknownFormat`);
+  - WordPress 6.8 `$wp$` format recognized ✅ (sampled user `oDRIHZWmfe`; wrong
+    password rejected) — the core M2.1 win, closing the ~84% of real users that M2
+    could not verify.
+  - Full gate stayed green with the DB gate off (`go test ./...` all `ok`; the real-DB
+    test SKIPs without the env var).
+
+- **Optional known-plaintext e2e left skip-by-default.** The always-on unit test in
+  `internal/auth/password` already proves the synthetic golden vector round-trips
+  (`grimoire-test-123` → verify true). A real end-to-end login would require a real
+  account's known plaintext, which we do not have, and inserting a test user into the
+  live demo `wordpress` DB would violate the read-only guardrail. The e2e subtest is
+  therefore wired but gated behind `GRIMOIRE_TEST_WP_LOGIN` / `GRIMOIRE_TEST_WP_PASSWORD`
+  and skips unless both are supplied.
+
+- **Capabilities scalar-truthiness needed no production change.** `truthy()` already
+  treated a non-empty, non-`"0"` string as enabled, so `s:1:"1"` grants identically to
+  `b:1` and `s:1:"0"` does not grant. M2.1 adds `TestParseCapabilitiesStringOne` as a
+  regression lock only.

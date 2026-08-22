@@ -1,0 +1,7 @@
+server:
+  addr: ":8080"
+theme: default
+database:
+  vendor: sqlite
+  dsn: "file:grimoire.db?_pragma=busy_timeout(5000)"
+  table_prefix: "wp_"

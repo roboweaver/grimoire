@@ -1,0 +1,22 @@
+# Binaries
+/bin/
+grimoire
+grimoire-cli
+*.exe
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Local
+*.db
+*.sqlite
+*.sqlite3
+.env
+*.local.yaml
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

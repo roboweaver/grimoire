@@ -1,0 +1,7 @@
+server:
+  addr: ":8080"
+theme: default
+database:
+  vendor: postgres
+  dsn: "postgres://user:pass@127.0.0.1:5432/wordpress?sslmode=disable"
+  table_prefix: "wp_"

@@ -1,0 +1,7 @@
+server:
+  addr: ":8080"
+theme: default
+database:
+  vendor: mysql            # mysql | postgres | sqlite
+  dsn: "user:pass@tcp(127.0.0.1:3306)/wordpress?parseTime=true&charset=utf8mb4"
+  table_prefix: "wp_"

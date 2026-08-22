@@ -146,6 +146,17 @@ func (r *UserMetaRepo) Get(ctx context.Context, userID int64, key string) (strin
 
 // Set upserts a single-valued meta row for the user/key pair. Existing rows for
 // the key are updated in place; if none exist a new row is inserted.
+//
+// NOTE (concurrency): this UPDATE-then-INSERT is not atomic, and the WordPress
+// usermeta schema intentionally has no UNIQUE(user_id, meta_key) constraint —
+// WP allows multi-valued meta, so adding one would diverge from the compat
+// contract. Two concurrent first-writes for the same (user_id, meta_key) can
+// therefore both find zero rows and both insert, leaving duplicate rows. This
+// is tolerated: readers resolve duplicates deterministically as last-row-wins
+// (Get orders umeta_id DESC LIMIT 1; ByUser applies later rows over earlier
+// ones), matching WordPress behavior. A UNIQUE index + native upsert is the
+// stronger fix but is deliberately out of scope to preserve WP-schema
+// compatibility and migration stability.
 func (r *UserMetaRepo) Set(ctx context.Context, userID int64, key, value string) error {
 	res, err := r.db.NewUpdate().
 		TableExpr("?", bun.Ident(r.prefix+"usermeta")).

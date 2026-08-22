@@ -120,19 +120,25 @@ database:
 
 func TestRedactDSN(t *testing.T) {
 	tests := []struct {
-		name    string
-		vendor  string
-		dsn     string
-		mustNot string
+		name        string
+		vendor      string
+		dsn         string
+		mustNot     string
+		mustContain string
 	}{
-		{"mysql", "mysql", "user:secretpass@tcp(127.0.0.1:3306)/wordpress?parseTime=true", "secretpass"},
-		{"postgres-url", "postgres", "postgres://user:topsecret@127.0.0.1:5432/wordpress?sslmode=disable", "topsecret"},
+		{"mysql", "mysql", "user:secretpass@tcp(127.0.0.1:3306)/wordpress?parseTime=true", "secretpass", ""},
+		{"postgres-url", "postgres", "postgres://u:topsecret@127.0.0.1:5432/wordpress?sslmode=disable", "topsecret", ""},
+		{"postgres-keyword", "postgres", "host=127.0.0.1 user=grim password=secretpass dbname=wordpress sslmode=disable", "secretpass", "password=***"},
+		{"postgres-keyword-quoted", "postgres", "host=127.0.0.1 password='se cret' dbname=wp", "se cret", "password=***"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := RedactDSN(tc.vendor, tc.dsn)
 			if strings.Contains(got, tc.mustNot) {
 				t.Errorf("RedactDSN(%q) = %q, must not contain %q", tc.dsn, got, tc.mustNot)
+			}
+			if tc.mustContain != "" && !strings.Contains(got, tc.mustContain) {
+				t.Errorf("RedactDSN(%q) = %q, must contain %q", tc.dsn, got, tc.mustContain)
 			}
 		})
 	}

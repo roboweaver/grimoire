@@ -108,6 +108,11 @@ func isSupportedVendor(v string) bool {
 
 var mysqlCredRE = regexp.MustCompile(`^[^:/@]+:[^@]*@`)
 
+// libpqPasswordRE matches the password token in a libpq keyword-style DSN
+// (e.g. "host=... password=secret dbname=..."), including single- or
+// double-quoted values.
+var libpqPasswordRE = regexp.MustCompile(`(?i)(password\s*=\s*)('[^']*'|"[^"]*"|\S+)`)
+
 // RedactDSN returns a copy of the DSN safe for logging, with any embedded
 // credentials removed.
 func RedactDSN(vendor, dsn string) string {
@@ -124,6 +129,10 @@ func RedactDSN(vendor, dsn string) string {
 	// Go MySQL DSN: user:pass@tcp(host:port)/db
 	if mysqlCredRE.MatchString(dsn) {
 		return mysqlCredRE.ReplaceAllString(dsn, "***@")
+	}
+	// libpq keyword DSN: host=... password=secret dbname=...
+	if libpqPasswordRE.MatchString(dsn) {
+		return libpqPasswordRE.ReplaceAllString(dsn, "${1}***")
 	}
 	return dsn
 }

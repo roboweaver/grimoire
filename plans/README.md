@@ -20,7 +20,7 @@ format**. Each milestone is a self-contained spec directory with three files:
 | # | Spec | Status | Summary |
 |---|------|--------|---------|
 | 01 | [`01-content-core-read-rendering`](./01-content-core-read-rendering) | 📝 Specified | Content core + switchable DB (MySQL/Postgres/SQLite) + WordPress-compatible schema + public read rendering + default theme |
-| 02 | [`02-users-auth-roles`](./02-users-auth-roles) | 📝 Specified | Users + WordPress-compatible auth (phpass→bcrypt), server-side sessions, 5 default roles/capabilities, CSRF, internal content write API, minimal login UI |
+| 02 | [`02-users-auth-roles`](./02-users-auth-roles) | 🚧 In progress | Users + WordPress-compatible auth (phpass→bcrypt), server-side sessions, 5 default roles/capabilities, CSRF, internal content write API, minimal login UI |
 | 03 | _(planned)_ spectrum-admin | ⬜ Not started | Adobe React Spectrum admin SPA (CRUD posts/pages/media) |
 | 04 | _(planned)_ comments-media-menus | ⬜ Not started | Comments, media library, navigation menus |
 | 05 | _(planned)_ extensions-rest-api | ⬜ Not started | Extension/plugin system + REST API parity |

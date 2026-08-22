@@ -85,11 +85,15 @@ func sessionFrom(ctx context.Context) (domain.Session, bool) {
 	return s, ok
 }
 
-// randToken returns a 256-bit random token, hex-encoded (64 chars).
-func randToken() string {
+// randToken returns a 256-bit random token, hex-encoded (64 chars). It fails
+// closed: if the system CSPRNG is unavailable it returns the error rather than
+// emitting a low-entropy token (mirrors internal/auth/session.go randToken).
+func randToken() (string, error) {
 	var b [32]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // constantTimeEqual compares two strings without leaking length-independent

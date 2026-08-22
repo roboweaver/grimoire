@@ -36,3 +36,23 @@ func TestSafeRedirect(t *testing.T) {
 		}
 	}
 }
+
+// TestRandTokenNonEmptyDistinct is a light sanity check that randToken produces
+// non-empty, distinct tokens. The crypto/rand error path is effectively
+// unreachable in normal operation; this just guards the happy path.
+func TestRandTokenNonEmptyDistinct(t *testing.T) {
+	a, err := randToken()
+	if err != nil {
+		t.Fatalf("randToken: %v", err)
+	}
+	b, err := randToken()
+	if err != nil {
+		t.Fatalf("randToken: %v", err)
+	}
+	if a == "" || b == "" {
+		t.Fatal("randToken returned empty token")
+	}
+	if a == b {
+		t.Fatal("randToken returned identical tokens")
+	}
+}

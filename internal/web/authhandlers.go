@@ -74,7 +74,10 @@ func (s *Server) loginForm(w http.ResponseWriter, r *http.Request) error {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return nil
 	}
-	csrf := randToken()
+	csrf, err := randToken()
+	if err != nil {
+		return err
+	}
 	s.setCSRFCookie(w, csrf)
 	title, _ := s.options.SiteInfo(r.Context())
 	data := render.LoginData{
@@ -102,7 +105,10 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) error {
 	token, _, err := s.auth.Login(r.Context(), r.PostFormValue("log"), r.PostFormValue("pwd"))
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) {
-			csrf := randToken()
+			csrf, tokErr := randToken()
+			if tokErr != nil {
+				return tokErr
+			}
 			s.setCSRFCookie(w, csrf)
 			title, _ := s.options.SiteInfo(r.Context())
 			return s.renderLogin(w, http.StatusUnauthorized, render.LoginData{

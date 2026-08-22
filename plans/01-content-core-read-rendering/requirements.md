@@ -143,3 +143,36 @@ behaves identically, so that "switchable database" is guaranteed, not assumed.
 2. WHEN the contract suite runs against `sqlite`, THEN it SHALL execute by default with no external services (in-memory or file-based).
 3. WHEN the contract suite runs against `mysql` and `postgres`, THEN it SHALL execute against ephemeral instances (e.g. containers) AND SHALL be skippable in constrained environments via an explicit opt-out.
 4. THE contract suite SHALL assert identical results for posts, taxonomy, and options access across all vendors for the same seed data.
+
+---
+
+## Implementation deviations (recorded during M1 build)
+
+These decisions refine the design during implementation. They preserve the
+ports-and-adapters boundaries and the swappable-vendor guarantee; they are noted
+here (not in `design.md`, whose diagrams are maintained separately) so the spec
+and the code stay reconciled.
+
+1. **`post_status='publish'` filtering lives in the repository SQL**, not in the
+   content services. It is part of the read contract verified identically across
+   vendors by the contract suite (Req 11). Services still own pagination clamping,
+   orchestration, and the options not-found→empty translation (Req 6.3). This is a
+   minor divergence from the design prose, which placed publish-only in services.
+2. **Shared Bun query core** (`internal/storage/wprepo`) implements the three
+   repositories over `*bun.DB` + table prefix. Each vendor package
+   (`sqlite`/`postgres`/`mysql`) owns only driver + dialect wiring and returns a
+   `wprepo`-backed set. "One adapter package per vendor" (the swappable unit) is
+   preserved while staying DRY; Bun handles dialect + placeholder differences.
+3. **Cross-vendor contract tests are env-gated instead of using testcontainers**
+   (Req 11.3's "e.g. containers"). SQLite always runs with no external services;
+   MySQL/PostgreSQL runners execute only when `GRIMOIRE_TEST_MYSQL_DSN` /
+   `GRIMOIRE_TEST_POSTGRES_DSN` are set, and `t.Skip` otherwise. No testcontainers
+   dependency is added in M1.
+4. **Migrations are embedded `.sql` files** (`embed.FS`) per vendor plus a
+   lightweight runner that records applied versions in a prefixed
+   `{{prefix}}schema_migrations` table. The `{{prefix}}` token is substituted at
+   apply time so the configurable table prefix flows through the DDL. Runs are
+   idempotent (`CREATE TABLE IF NOT EXISTS` + version tracking).
+5. **Themes load from the filesystem** (`themes/<name>`) in M1; embedding themes
+   into the binary is deferred. Post content is rendered as `template.HTML`
+   because M1 reads trusted database HTML and accepts no user input.

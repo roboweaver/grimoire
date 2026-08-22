@@ -1,0 +1,12 @@
+{{define "title"}}{{.Term.Name}} · {{.SiteTitle}}{{end}}
+{{define "content"}}
+<h1>{{.Term.Name}}</h1>
+{{range .Posts}}
+  <article>
+    <h2><a href="/{{.Slug}}">{{.Title}}</a></h2>
+    <div>{{.Excerpt}}</div>
+  </article>
+{{else}}
+  <p>No posts in this category yet.</p>
+{{end}}
+{{end}}

@@ -1,7 +1,7 @@
-# Binaries
+# Binaries (root-level build artifacts only; do not match cmd/ packages)
 /bin/
-grimoire
-grimoire-cli
+/grimoire
+/grimoire-cli
 *.exe
 
 # Go
@@ -20,3 +20,6 @@ coverage.*
 .DS_Store
 .idea/
 .vscode/
+
+# Local preview runtime (db, logs)
+/data/

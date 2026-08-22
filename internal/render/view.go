@@ -44,3 +44,14 @@ type CategoryData struct {
 	Term      TermView
 	Posts     []PostView
 }
+
+// LoginData backs the login template. CSRFToken is embedded as a hidden form
+// field for the double-submit check; Error is set (without detail) after a
+// failed attempt so the form shows a generic message without enumerating users;
+// Redirect carries the post-login destination.
+type LoginData struct {
+	SiteTitle string
+	CSRFToken string
+	Error     bool
+	Redirect  string
+}

@@ -35,10 +35,10 @@ func TestSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MigrationsFS: %v", err)
 	}
-	if _, err := migrate.Apply(ctx, repos.DB(), migFS, cfg.TablePrefix); err != nil {
+	if _, err := migrate.Apply(ctx, repos.DB(), migFS, cfg.Vendor, cfg.TablePrefix); err != nil {
 		t.Fatalf("migrate.Apply: %v", err)
 	}
-	if err := seed.Run(ctx, repos.DB(), cfg.TablePrefix); err != nil {
+	if err := seed.Run(ctx, repos.DB(), cfg.Vendor, cfg.TablePrefix); err != nil {
 		t.Fatalf("seed.Run: %v", err)
 	}
 

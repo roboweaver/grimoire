@@ -39,7 +39,7 @@ func TestApplyCreatesTablesAndIsIdempotent(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	v, err := Apply(ctx, db, migFS, "wp_")
+	v, err := Apply(ctx, db, migFS, "sqlite", "wp_")
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestApplyCreatesTablesAndIsIdempotent(t *testing.T) {
 	}
 
 	// Second run applies nothing new.
-	v2, err := Apply(ctx, db, migFS, "wp_")
+	v2, err := Apply(ctx, db, migFS, "sqlite", "wp_")
 	if err != nil {
 		t.Fatalf("Apply (2nd): %v", err)
 	}
@@ -76,7 +76,7 @@ func TestApplyMultipleVersionsAndPrefix(t *testing.T) {
 		"0001_a.up.sql": {Data: []byte("CREATE TABLE IF NOT EXISTS {{prefix}}a (id INTEGER PRIMARY KEY);")},
 		"0002_b.up.sql": {Data: []byte("CREATE TABLE IF NOT EXISTS {{prefix}}b (id INTEGER PRIMARY KEY);\nCREATE TABLE IF NOT EXISTS {{prefix}}c (id INTEGER PRIMARY KEY);")},
 	}
-	v, err := Apply(context.Background(), db, migFS, "gr_")
+	v, err := Apply(context.Background(), db, migFS, "sqlite", "gr_")
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

@@ -32,10 +32,10 @@ func newTestServer(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatalf("MigrationsFS: %v", err)
 	}
-	if _, err := migrate.Apply(ctx, repos.DB(), migFS, cfg.TablePrefix); err != nil {
+	if _, err := migrate.Apply(ctx, repos.DB(), migFS, cfg.Vendor, cfg.TablePrefix); err != nil {
 		t.Fatalf("migrate.Apply: %v", err)
 	}
-	if err := storagetest.SeedFixtures(ctx, repos.DB(), cfg.TablePrefix); err != nil {
+	if err := storagetest.SeedFixtures(ctx, repos.DB(), cfg.Vendor, cfg.TablePrefix); err != nil {
 		t.Fatalf("SeedFixtures: %v", err)
 	}
 

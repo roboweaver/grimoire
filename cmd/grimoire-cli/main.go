@@ -61,7 +61,7 @@ func runMigrate(args []string) error {
 	if err != nil {
 		return err
 	}
-	version, err := migrate.Apply(context.Background(), db, migFS, cfg.Database.TablePrefix)
+	version, err := migrate.Apply(context.Background(), db, migFS, cfg.Database.Vendor, cfg.Database.TablePrefix)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func runSeed(args []string) error {
 		return err
 	}
 	defer db.Close()
-	if err := seed.Run(context.Background(), db, cfg.Database.TablePrefix); err != nil {
+	if err := seed.Run(context.Background(), db, cfg.Database.Vendor, cfg.Database.TablePrefix); err != nil {
 		return err
 	}
 	fmt.Printf("seeded %s sample content\n", cfg.Database.Vendor)

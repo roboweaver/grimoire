@@ -12,6 +12,7 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/storage"
+	"github.com/roboweaver/grimoire/internal/storage/rebind"
 )
 
 // NewReposFunc builds a migrated + seeded Repositories bundle and a cleanup.
@@ -23,7 +24,7 @@ type NewReposFunc func(t *testing.T) (*storage.Repositories, func())
 //   - 1 published page (slug "about")
 //   - category term "news" related to hello-3 and hello-2
 //   - options blogname + blogdescription
-func SeedFixtures(ctx context.Context, db *sql.DB, prefix string) error {
+func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error {
 	stmts := []struct {
 		q    string
 		args []any
@@ -49,7 +50,7 @@ func SeedFixtures(ctx context.Context, db *sql.DB, prefix string) error {
 			[]any{"blogdescription", "tagline", "yes"}},
 	}
 	for _, s := range stmts {
-		if _, err := db.ExecContext(ctx, s.q, s.args...); err != nil {
+		if _, err := db.ExecContext(ctx, rebind.Rebind(vendor, s.q), s.args...); err != nil {
 			return fmt.Errorf("seed %q: %w", s.q, err)
 		}
 	}

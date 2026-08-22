@@ -27,7 +27,7 @@ func newMigratedRepos(t *testing.T) *storage.Repositories {
 	if err != nil {
 		t.Fatalf("MigrationsFS: %v", err)
 	}
-	if _, err := migrate.Apply(ctx, repos.DB(), migFS, cfg.TablePrefix); err != nil {
+	if _, err := migrate.Apply(ctx, repos.DB(), migFS, cfg.Vendor, cfg.TablePrefix); err != nil {
 		t.Fatalf("migrate.Apply: %v", err)
 	}
 	return repos
@@ -37,7 +37,7 @@ func TestRunSeedsContent(t *testing.T) {
 	ctx := context.Background()
 	repos := newMigratedRepos(t)
 
-	if err := seed.Run(ctx, repos.DB(), "wp_"); err != nil {
+	if err := seed.Run(ctx, repos.DB(), "sqlite", "wp_"); err != nil {
 		t.Fatalf("seed.Run: %v", err)
 	}
 
@@ -81,10 +81,10 @@ func TestRunIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	repos := newMigratedRepos(t)
 
-	if err := seed.Run(ctx, repos.DB(), "wp_"); err != nil {
+	if err := seed.Run(ctx, repos.DB(), "sqlite", "wp_"); err != nil {
 		t.Fatalf("first seed.Run: %v", err)
 	}
-	if err := seed.Run(ctx, repos.DB(), "wp_"); err != nil {
+	if err := seed.Run(ctx, repos.DB(), "sqlite", "wp_"); err != nil {
 		t.Fatalf("second seed.Run: %v", err)
 	}
 

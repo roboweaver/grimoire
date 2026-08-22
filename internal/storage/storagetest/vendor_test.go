@@ -34,11 +34,11 @@ func newReposFromDSN(t *testing.T, vendor, dsn string) (*storage.Repositories, f
 		repos.Close()
 		t.Fatalf("MigrationsFS: %v", err)
 	}
-	if _, err := migrate.Apply(ctx, repos.DB(), migFS, prefix); err != nil {
+	if _, err := migrate.Apply(ctx, repos.DB(), migFS, vendor, prefix); err != nil {
 		repos.Close()
 		t.Fatalf("migrate.Apply: %v", err)
 	}
-	if err := SeedFixtures(ctx, repos.DB(), prefix); err != nil {
+	if err := SeedFixtures(ctx, repos.DB(), vendor, prefix); err != nil {
 		repos.Close()
 		t.Fatalf("SeedFixtures: %v", err)
 	}

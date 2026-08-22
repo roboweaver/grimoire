@@ -25,11 +25,11 @@ func TestSQLiteContract(t *testing.T) {
 			repos.Close()
 			t.Fatalf("MigrationsFS: %v", err)
 		}
-		if _, err := migrate.Apply(ctx, repos.DB(), migFS, cfg.TablePrefix); err != nil {
+		if _, err := migrate.Apply(ctx, repos.DB(), migFS, cfg.Vendor, cfg.TablePrefix); err != nil {
 			repos.Close()
 			t.Fatalf("migrate.Apply: %v", err)
 		}
-		if err := SeedFixtures(ctx, repos.DB(), cfg.TablePrefix); err != nil {
+		if err := SeedFixtures(ctx, repos.DB(), cfg.Vendor, cfg.TablePrefix); err != nil {
 			repos.Close()
 			t.Fatalf("SeedFixtures: %v", err)
 		}

@@ -7,6 +7,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/roboweaver/grimoire/internal/storage/rebind"
 )
 
 type stmt struct {
@@ -15,9 +17,10 @@ type stmt struct {
 }
 
 // Run inserts sample options, a user, posts, a page, and a category. It is
-// idempotent, guarded by the presence of the "hello-world" post.
-func Run(ctx context.Context, db *sql.DB, prefix string) error {
-	seeded, err := alreadySeeded(ctx, db, prefix)
+// idempotent, guarded by the presence of the "hello-world" post. vendor selects
+// the placeholder dialect (see internal/storage/rebind).
+func Run(ctx context.Context, db *sql.DB, vendor, prefix string) error {
+	seeded, err := alreadySeeded(ctx, db, vendor, prefix)
 	if err != nil {
 		return err
 	}
@@ -55,7 +58,7 @@ func Run(ctx context.Context, db *sql.DB, prefix string) error {
 		return err
 	}
 	for _, s := range stmts {
-		if _, err := tx.ExecContext(ctx, s.q, s.args...); err != nil {
+		if _, err := tx.ExecContext(ctx, rebind.Rebind(vendor, s.q), s.args...); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("seed %q: %w", s.q, err)
 		}
@@ -63,9 +66,10 @@ func Run(ctx context.Context, db *sql.DB, prefix string) error {
 	return tx.Commit()
 }
 
-func alreadySeeded(ctx context.Context, db *sql.DB, prefix string) (bool, error) {
+func alreadySeeded(ctx context.Context, db *sql.DB, vendor, prefix string) (bool, error) {
 	var n int
-	row := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+prefix+`posts WHERE post_name = ?`, "hello-world")
+	query := rebind.Rebind(vendor, `SELECT COUNT(*) FROM `+prefix+`posts WHERE post_name = ?`)
+	row := db.QueryRowContext(ctx, query, "hello-world")
 	if err := row.Scan(&n); err != nil {
 		return false, fmt.Errorf("seed guard: %w", err)
 	}

@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/roboweaver/grimoire/internal/storage/rebind"
 )
 
 // prefixToken is replaced with the configured table prefix in migration SQL.
@@ -21,8 +23,9 @@ const prefixToken = "{{prefix}}"
 // Apply runs all migrations in migFS with a version greater than the highest
 // already applied, replacing prefixToken with prefix. It returns the highest
 // applied version. Apply is safe to call repeatedly; already-applied
-// migrations are skipped.
-func Apply(ctx context.Context, db *sql.DB, migFS fs.FS, prefix string) (int, error) {
+// migrations are skipped. vendor selects the placeholder dialect for the
+// version-tracking INSERT (see internal/storage/rebind).
+func Apply(ctx context.Context, db *sql.DB, migFS fs.FS, vendor, prefix string) (int, error) {
 	migTable := prefix + "schema_migrations"
 	if _, err := db.ExecContext(ctx, fmt.Sprintf(
 		`CREATE TABLE IF NOT EXISTS %s (version BIGINT PRIMARY KEY, applied_at VARCHAR(64) NOT NULL)`,
@@ -49,7 +52,7 @@ func Apply(ctx context.Context, db *sql.DB, migFS fs.FS, prefix string) (int, er
 			}
 			continue
 		}
-		if err := applyOne(ctx, db, migTable, m, prefix); err != nil {
+		if err := applyOne(ctx, db, migTable, m, vendor, prefix); err != nil {
 			return highest, err
 		}
 		highest = m.version
@@ -109,7 +112,7 @@ func parseVersion(name string) (int, error) {
 	return version, nil
 }
 
-func applyOne(ctx context.Context, db *sql.DB, migTable string, m migration, prefix string) error {
+func applyOne(ctx context.Context, db *sql.DB, migTable string, m migration, vendor, prefix string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("migrate: begin tx for %s: %w", m.name, err)
@@ -122,8 +125,9 @@ func applyOne(ctx context.Context, db *sql.DB, migTable string, m migration, pre
 			return fmt.Errorf("migrate: exec %s: %w\nSQL: %s", m.name, err, stmt)
 		}
 	}
-	if _, err := tx.ExecContext(ctx,
-		fmt.Sprintf(`INSERT INTO %s (version, applied_at) VALUES (%d, ?)`, migTable, m.version),
+	versionInsert := rebind.Rebind(vendor,
+		fmt.Sprintf(`INSERT INTO %s (version, applied_at) VALUES (%d, ?)`, migTable, m.version))
+	if _, err := tx.ExecContext(ctx, versionInsert,
 		time.Now().UTC().Format(time.RFC3339),
 	); err != nil {
 		return fmt.Errorf("migrate: record version %d: %w", m.version, err)
@@ -136,6 +140,12 @@ func applyOne(ctx context.Context, db *sql.DB, migTable string, m migration, pre
 
 // splitStatements splits a SQL script into individual statements on semicolon
 // boundaries, stripping full-line comments (-- ...) and blank statements.
+//
+// Limitation: the split is naive — it treats every ';' as a statement
+// terminator and does not account for semicolons inside single-quoted string
+// literals, dollar-quoted bodies ($$...$$), or trigger/function definitions.
+// This is safe for the current per-vendor DDL (plain CREATE TABLE/INDEX with no
+// embedded ';'); revisit this if migrations ever add such constructs.
 func splitStatements(script string) []string {
 	var cleaned strings.Builder
 	for _, line := range strings.Split(script, "\n") {

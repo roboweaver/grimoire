@@ -1,0 +1,11 @@
+{{define "content"}}
+<h1>Archive</h1>
+{{range .Posts}}
+  <article>
+    <h2><a href="/{{.Slug}}">{{.Title}}</a></h2>
+    <div>{{.Excerpt}}</div>
+  </article>
+{{else}}
+  <p>Nothing here yet.</p>
+{{end}}
+{{end}}

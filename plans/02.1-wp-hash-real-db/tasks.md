@@ -40,5 +40,5 @@ gated on `GRIMOIRE_TEST_WP_DSN`). Commit in logical increments with the trailer
 ## Phase 5 — Gate, docs, PR
 - [x] 5.1 Full gate: `gofmt -l .` (empty), `go vet ./...`, `go build ./...`, `go test -count=1 ./...` (green). Fill the `design.md` Implementation Deviations section with anything discovered.
 - [x] 5.2 Run the real-DB gate ON once end-to-end; record the post count and the `$P$`/`$wp$` recognition results (and real-credential e2e if run) for the creator report.
-- [ ] 5.3 Commit; open a PR against `main` using the `roboweaver` gh identity (`unset GH_TOKEN && gh auth switch -u roboweaver`, verify `gh api user -q .login`, then restore `robw_adobe`). Do **not** merge.
+- [x] 5.3 Commit; open a PR against `main` using the `roboweaver` gh identity (`unset GH_TOKEN && gh auth switch -u roboweaver`, verify `gh api user -q .login`, then restore `robw_adobe`). Do **not** merge.
   - _Acceptance:_ Full gate green; real-DB validation results captured; PR opened against `main` (not merged); creator notified with PR link + validation results + the two design decisions. _(Req 5.1–5.4)_

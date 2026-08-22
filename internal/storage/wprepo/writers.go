@@ -2,6 +2,8 @@ package wprepo
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/storage/rebind"
@@ -9,6 +11,26 @@ import (
 )
 
 // --- PostRepo write methods (domain.PostWriter) ---
+
+// ByID returns the stored post/page by primary key regardless of status or
+// type, or ErrNotFound. Write services use it to load the authoritative record
+// before running capability checks, so authorization never trusts caller input.
+func (r *PostRepo) ByID(ctx context.Context, id int64) (domain.Post, error) {
+	var row postRow
+	err := r.db.NewSelect().
+		TableExpr("?", bun.Ident(r.prefix+"posts")).
+		Column(postColumns...).
+		Where("? = ?", bun.Ident("ID"), id).
+		Limit(1).
+		Scan(ctx, &row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Post{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.Post{}, err
+	}
+	return row.toDomain(), nil
+}
 
 // Create inserts a new post and returns its generated ID. The autoincrement
 // "ID" column is omitted from the insert, so the unquoted SQL is vendor-safe.

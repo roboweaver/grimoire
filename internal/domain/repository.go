@@ -74,8 +74,13 @@ type SessionRepository interface {
 	DeleteExpired(ctx context.Context, before time.Time) (int64, error)
 }
 
-// PostWriter creates, updates, and deletes posts and pages ({prefix}posts).
+// PostWriter creates, updates, and deletes posts and pages ({prefix}posts). It
+// also reads a single post by ID so write services can authorize against the
+// authoritative stored record rather than caller-supplied fields.
 type PostWriter interface {
+	// ByID returns the stored post/page by primary key regardless of status or
+	// type, or ErrNotFound. Used to load the authoritative record for authz.
+	ByID(ctx context.Context, id int64) (Post, error)
 	// Create inserts a new post and returns its generated ID.
 	Create(ctx context.Context, p Post) (int64, error)
 	// Update replaces an existing post's fields by ID, or ErrNotFound.

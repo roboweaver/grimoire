@@ -11,9 +11,22 @@ import (
 // --- fakes for the writer ports ---------------------------------------------
 
 type fakePostWriter struct {
+	store            map[int64]domain.Post // persisted records, keyed by ID
 	created, updated *domain.Post
 	deleted          int64
 	nextID           int64
+	byIDErr          error
+}
+
+func (f *fakePostWriter) ByID(_ context.Context, id int64) (domain.Post, error) {
+	if f.byIDErr != nil {
+		return domain.Post{}, f.byIDErr
+	}
+	p, ok := f.store[id]
+	if !ok {
+		return domain.Post{}, domain.ErrNotFound
+	}
+	return p, nil
 }
 
 func (f *fakePostWriter) Create(_ context.Context, p domain.Post) (int64, error) {
@@ -111,15 +124,23 @@ func TestPostWriteCreateDeniedReturnsForbiddenAndSkipsWriter(t *testing.T) {
 }
 
 func TestPostWriteUpdateAndDeleteEnforceOwnership(t *testing.T) {
-	w := &fakePostWriter{}
-	svc := NewPostWriteService(w)
-	othersPublished := domain.Post{ID: 3, Author: 999, Type: "post", Status: "publish"}
+	// The authoritative record lives in the store; the service must authorize
+	// against it, not against the caller-supplied struct.
+	seed := func() *fakePostWriter {
+		return &fakePostWriter{store: map[int64]domain.Post{
+			3: {ID: 3, Author: 999, Type: "post", Status: "publish"},
+		}}
+	}
 
-	// Author cannot edit/delete someone else's published post.
-	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, 5), othersPublished); err != ErrForbidden {
+	// Author cannot edit/delete someone else's published post, even though the
+	// input struct is otherwise valid.
+	w := seed()
+	svc := NewPostWriteService(w)
+	input := domain.Post{ID: 3, Author: 999, Type: "post", Status: "publish"}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, 5), input); err != ErrForbidden {
 		t.Errorf("author update others: err = %v, want ErrForbidden", err)
 	}
-	if err := svc.Delete(context.Background(), actor(auth.RoleAuthor, 5), othersPublished); err != ErrForbidden {
+	if err := svc.Delete(context.Background(), actor(auth.RoleAuthor, 5), input); err != ErrForbidden {
 		t.Errorf("author delete others: err = %v, want ErrForbidden", err)
 	}
 	if w.updated != nil || w.deleted != 0 {
@@ -127,14 +148,93 @@ func TestPostWriteUpdateAndDeleteEnforceOwnership(t *testing.T) {
 	}
 
 	// Editor can.
-	if err := svc.Update(context.Background(), actor(auth.RoleEditor, 5), othersPublished); err != nil {
+	w = seed()
+	svc = NewPostWriteService(w)
+	if err := svc.Update(context.Background(), actor(auth.RoleEditor, 5), input); err != nil {
 		t.Errorf("editor update: %v", err)
 	}
-	if err := svc.Delete(context.Background(), actor(auth.RoleEditor, 5), othersPublished); err != nil {
+	if err := svc.Delete(context.Background(), actor(auth.RoleEditor, 5), input); err != nil {
 		t.Errorf("editor delete: %v", err)
 	}
 	if w.deleted != 3 {
 		t.Errorf("deleted id = %d, want 3", w.deleted)
+	}
+}
+
+// TestPostWriteAuthorizesAgainstPersistedRecord is the regression for the
+// forged-field privilege escalation: an author who owns post A must not be able
+// to edit or delete post B (owned by someone else) by submitting a struct that
+// claims {ID: B.ID, Author: self}. Authorization must use the STORED record.
+func TestPostWriteAuthorizesAgainstPersistedRecord(t *testing.T) {
+	const self = 5
+	// Post B is owned by user 999 and published; the attacker owns nothing here.
+	seed := func() *fakePostWriter {
+		return &fakePostWriter{store: map[int64]domain.Post{
+			20: {ID: 20, Author: 999, Type: "post", Status: "publish"},
+		}}
+	}
+
+	// Forged input: attacker claims authorship of B to slip past a naive check.
+	forged := domain.Post{ID: 20, Author: self, Type: "post", Status: "draft", Title: "pwned"}
+
+	w := seed()
+	svc := NewPostWriteService(w)
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), forged); err != ErrForbidden {
+		t.Errorf("forged update: err = %v, want ErrForbidden", err)
+	}
+	if w.updated != nil {
+		t.Error("writer.Update must not be called when authz denies (persisted record)")
+	}
+
+	w = seed()
+	svc = NewPostWriteService(w)
+	if err := svc.Delete(context.Background(), actor(auth.RoleAuthor, self), forged); err != ErrForbidden {
+		t.Errorf("forged delete: err = %v, want ErrForbidden", err)
+	}
+	if w.deleted != 0 {
+		t.Error("writer.Delete must not be called when authz denies (persisted record)")
+	}
+}
+
+// TestPostWriteUpdateOwnerAppliesMutableFields confirms the owner can edit their
+// own post and that mutable content fields are applied to the persisted record
+// while identity/ownership (ID, Author, Type) come from the store, not input.
+func TestPostWriteUpdateOwnerAppliesMutableFields(t *testing.T) {
+	const self = 5
+	w := &fakePostWriter{store: map[int64]domain.Post{
+		7: {ID: 7, Author: self, Type: "post", Status: "draft", Title: "old"},
+	}}
+	svc := NewPostWriteService(w)
+	// Caller tries to reassign the author; that field must be ignored.
+	in := domain.Post{ID: 7, Author: 999, Title: "new title", Content: "body"}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in); err != nil {
+		t.Fatalf("owner update: %v", err)
+	}
+	if w.updated == nil {
+		t.Fatal("writer.Update not called")
+	}
+	if w.updated.Author != self {
+		t.Errorf("author = %d, want %d (must come from persisted record)", w.updated.Author, self)
+	}
+	if w.updated.Title != "new title" || w.updated.Content != "body" {
+		t.Errorf("mutable fields not applied: %+v", *w.updated)
+	}
+}
+
+// TestPostWriteUpdateNotFoundIsForbidden ensures a missing record does not leak
+// existence: the service returns the generic ErrForbidden and never writes.
+func TestPostWriteUpdateNotFoundIsForbidden(t *testing.T) {
+	w := &fakePostWriter{store: map[int64]domain.Post{}}
+	svc := NewPostWriteService(w)
+	in := domain.Post{ID: 404, Author: 5, Type: "post"}
+	if err := svc.Update(context.Background(), actor(auth.RoleAdministrator, 5), in); err != ErrForbidden {
+		t.Errorf("update missing: err = %v, want ErrForbidden", err)
+	}
+	if err := svc.Delete(context.Background(), actor(auth.RoleAdministrator, 5), in); err != ErrForbidden {
+		t.Errorf("delete missing: err = %v, want ErrForbidden", err)
+	}
+	if w.updated != nil || w.deleted != 0 {
+		t.Error("writer must not be called for a missing record")
 	}
 }
 

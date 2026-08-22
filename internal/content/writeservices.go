@@ -41,29 +41,64 @@ func (s *PostWriteService) Create(ctx context.Context, actor auth.Principal, p d
 	return s.w.Create(ctx, p)
 }
 
-// Update authorizes and replaces an existing post. Authorization is evaluated
-// against the post's Type, Status, and Author, so callers should pass the
-// authoritative current record.
+// Update authorizes and replaces an existing post. It loads the authoritative
+// stored record by ID and evaluates the edit capability against THAT record's
+// Type, Status, and Author — never the caller-supplied struct — so a forged
+// Author/Status cannot escalate into editing another user's post. The caller's
+// mutable content fields (title, content, excerpt, slug, and a non-zero date)
+// are then applied to the stored record; identity and ownership (ID, Author,
+// Type) always come from the store. A status change is authorized against the
+// resulting state, so publishing still requires the publish capability. A
+// missing record returns the generic ErrForbidden (existence is not leaked).
 func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p domain.Post) error {
-	if p.Type == "" {
-		p.Type = "post"
+	cur, err := s.w.ByID(ctx, p.ID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return ErrForbidden
+		}
+		return err
 	}
-	if !auth.CanEditPost(actor, p.Type, p.Status, p.Author) {
+	if cur.Type == "" {
+		cur.Type = "post"
+	}
+	if !auth.CanEditPost(actor, cur.Type, cur.Status, cur.Author) {
 		return ErrForbidden
 	}
-	return s.w.Update(ctx, p)
+	cur.Title = p.Title
+	cur.Content = p.Content
+	cur.Excerpt = p.Excerpt
+	cur.Slug = p.Slug
+	if !p.Date.IsZero() {
+		cur.Date = p.Date
+	}
+	if p.Status != "" && p.Status != cur.Status {
+		if !auth.CanEditPost(actor, cur.Type, p.Status, cur.Author) {
+			return ErrForbidden
+		}
+		cur.Status = p.Status
+	}
+	return s.w.Update(ctx, cur)
 }
 
-// Delete authorizes and removes a post. The full record is required so ownership
-// and status can be evaluated; only p.ID is passed to the writer.
+// Delete authorizes and removes a post. It loads the authoritative stored record
+// by ID and evaluates the delete capability against THAT record's Type, Status,
+// and Author, so a forged struct cannot delete another user's post. A missing
+// record returns the generic ErrForbidden (existence is not leaked).
 func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p domain.Post) error {
-	if p.Type == "" {
-		p.Type = "post"
+	cur, err := s.w.ByID(ctx, p.ID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return ErrForbidden
+		}
+		return err
 	}
-	if !auth.CanDeletePost(actor, p.Type, p.Status, p.Author) {
+	if cur.Type == "" {
+		cur.Type = "post"
+	}
+	if !auth.CanDeletePost(actor, cur.Type, cur.Status, cur.Author) {
 		return ErrForbidden
 	}
-	return s.w.Delete(ctx, p.ID)
+	return s.w.Delete(ctx, cur.ID)
 }
 
 // TermWriteService performs capability-checked create/delete of taxonomy terms.

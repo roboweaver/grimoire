@@ -85,6 +85,10 @@ func TestUnserializeErrors(t *testing.T) {
 		`s:13:"admin";`,     // too short
 		"a:1:{s:3:\"foo\";", // truncated array
 		"b:1",               // missing terminator
+		// A huge declared array count with a short/empty body must fail parsing
+		// quickly. The map size hint is clamped so this cannot force a giant
+		// preallocation from an attacker-controlled number (LOW 3).
+		"a:2000000000:{}",
 	}
 	for _, s := range bad {
 		t.Run(s, func(t *testing.T) {

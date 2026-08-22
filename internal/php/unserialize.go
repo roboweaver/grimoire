@@ -149,7 +149,12 @@ func (p *parser) array() (any, error) {
 	if err := p.expect("{"); err != nil {
 		return nil, err
 	}
-	m := make(map[string]any, count)
+	// Clamp the map size hint: count is attacker-controlled, so we never
+	// pre-size from it directly (e.g. a:2000000000:{} would force a huge
+	// allocation). The map still grows correctly as real elements are parsed;
+	// each element is length/consumption-validated below.
+	const maxPrealloc = 1024
+	m := make(map[string]any, min(count, maxPrealloc))
 	for i := 0; i < count; i++ {
 		key, err := p.arrayKey()
 		if err != nil {

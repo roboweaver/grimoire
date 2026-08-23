@@ -20,6 +20,11 @@ type Server struct {
 
 	auth    Sessions
 	authCfg AuthConfig
+
+	// admin backs the read-only /admin/api JSON endpoints; nil until WithAdmin.
+	admin adminReader
+	// spa serves the embedded React Spectrum admin under /admin; nil until WithAdmin.
+	spa http.Handler
 }
 
 // NewServer builds a Server. log may be nil, in which case slog.Default is used.

@@ -65,9 +65,12 @@ WordPress `the_excerpt()`:
   excerpts through `wpautop`).
 - **Auto excerpt** — an empty `post_excerpt` is generated from `post_content` the
   way `wp_trim_excerpt` does: strip Gutenberg block-delimiter comments
-  (`<!-- wp:… -->` / `<!-- /wp:… -->`), strip shortcodes and HTML tags, unescape
-  entities, collapse whitespace, trim to ~55 words, and append `…` when truncated.
-  The plain-text result is wrapped in a single `<p>…</p>` (minimal `wpautop`).
+  (`<!-- wp:… -->` / `<!-- /wp:… -->`), strip shortcodes and HTML tags, collapse
+  whitespace, trim to ~55 words, and append `…` when truncated. The plain-text
+  result is wrapped in a single `<p>…</p>` (minimal `wpautop`). HTML entities are
+  left **encoded** (matching `wp_trim_excerpt`, which does not html-decode): the
+  excerpt is emitted raw, so stored `&lt;script&gt;` renders as literal text, not
+  live markup.
 - Empty `post_excerpt` **and** empty `post_content` render nothing (no stray
   `<p></p>`).
 

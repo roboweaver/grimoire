@@ -15,7 +15,7 @@ flowchart TD
     P["domain.Post<br/>(Excerpt, Content strings)"] --> V["internal/web.postView (edit)"]
     V -->|"content.Excerpt(p) (NEW)"| D{"post_excerpt<br/>non-empty?"}
     D -- "yes (manual)" --> M["pass through trusted WP HTML"]
-    D -- "no (auto)" --> A["derive from post_content:<br/>strip &lt;!-- wp: --&gt; comments →<br/>strip shortcodes → strip tags →<br/>unescape entities → collapse ws →<br/>55-word trim (+… if truncated) → wrap &lt;p&gt;"]
+    D -- "no (auto)" --> A["derive from post_content:<br/>strip &lt;!-- wp: --&gt; comments →<br/>strip shortcodes → strip tags →<br/>collapse ws →<br/>55-word trim (+… if truncated) → wrap &lt;p&gt;"]
     M --> S["string"]
     A --> S
     S --> C["template.HTML(...) cast<br/>TRUST BOUNDARY (with Content)"]
@@ -90,7 +90,9 @@ Constants and helpers (pure `regexp`/`strings`/`html`):
 - `blockCommentRE = (?s)<!--\s*/?\s*wp:.*?-->` — strips Gutenberg delimiters.
 - `shortcodeRE = \[[^\]]*\]` — strips shortcodes (minimal; not a full shortcode parser).
 - `tagRE = <[^>]*>` — strips remaining HTML tags.
-- Entity unescape via `html.UnescapeString`; whitespace collapse via `\s+ → " "`.
+- Whitespace collapse via `\s+ → " "`. (Entities are **not** decoded — see the
+  Scout HIGH fix below — so stored `&lt;script&gt;` stays encoded and renders as
+  literal text.)
 
 Auto path (order matters — comments first so their inner text is dropped, then
 shortcodes, then tags):
@@ -99,7 +101,6 @@ shortcodes, then tags):
 content := blockCommentRE.ReplaceAllString(p.Content, " ")
 content = shortcodeRE.ReplaceAllString(content, " ")
 content = tagRE.ReplaceAllString(content, " ")
-content = html.UnescapeString(content)
 content = collapseWS(content)            // trim + \s+→" "
 if content == "" { return "" }           // empty stays empty
 words := strings.Fields(content)
@@ -219,6 +220,29 @@ None of substance — the implementation followed the approved design. Notes:
 - **Ellipsis.** Uses the single `…` glyph (per the M2.2 brief) rather than
   WordPress's default ` […]`; captured as a named constant `ellipsis`.
 - **Cast site.** The `template.HTML` cast stays in `internal/web/view.go` beside
-  the existing `Content` cast; `internal/content` imports only `html` (for
-  `UnescapeString`), never `html/template`, keeping the trust decision in one
-  place.
+  the existing `Content` cast; `internal/content` imports only `regexp` and
+  `strings`, never `html/template`, keeping the trust decision in one place.
+
+### Post-review fix (Scout HIGH)
+
+- **No entity decoding in the auto-excerpt path.** The original draft called
+  `html.UnescapeString` after tag-stripping. Because the result is emitted raw as
+  `template.HTML`, decoding would turn WordPress's intentionally-escaped content
+  (e.g. stored `&lt;script&gt;` text) into live markup on list views — the exact
+  bug class this milestone fixes, inverted, and XSS-shaped in the worst case. The
+  `html.UnescapeString` call (and the `html` import) were removed; entities now
+  pass through encoded and render as literal glyphs, matching `wp_trim_excerpt`
+  (which does not html-decode). Regression test:
+  `content.TestExcerptPreservesEscapedEntities` (asserts `&lt;script&gt;` is kept
+  and no live `<script>` is emitted; re-adding the decode makes it fail).
+
+### Deferred (optional LOW nits)
+
+- **Manual excerpt is not `wpautop`-wrapped.** WP's `the_excerpt()` runs manual
+  excerpts through `wpautop`. We return them verbatim to avoid double-wrapping
+  excerpts that already contain block-level markup (the real-DB sample is already
+  `<p>…</p>`). Cosmetic; deferred.
+- **Shortcode regex strips all bracket pairs.** `\[[^\]]*\]` removes literal prose
+  like `[important]`, whereas WP only strips *registered* shortcodes. Faithful
+  behavior needs a shortcode registry grimoire does not model; deferred as an
+  edge-case cosmetic.

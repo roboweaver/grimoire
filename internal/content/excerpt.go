@@ -1,7 +1,6 @@
 package content
 
 import (
-	"html"
 	"regexp"
 	"strings"
 
@@ -36,10 +35,12 @@ var (
 // WordPress HTML — it already renders as authored and is not re-run through
 // wpautop. An empty post_excerpt is auto-generated from post_content the way
 // wp_trim_excerpt does: strip Gutenberg block comments, shortcodes and HTML
-// tags, unescape entities, collapse whitespace, trim to excerptWords words
-// (appending the ellipsis only when truncated), and wrap the plain text in a
-// single <p>…</p> (minimal wpautop). Empty content with an empty excerpt yields
-// "" — no stray <p></p>.
+// tags, collapse whitespace, trim to excerptWords words (appending the ellipsis
+// only when truncated), and wrap the plain text in a single <p>…</p> (minimal
+// wpautop). Escaped entities are left encoded (matching wp_trim_excerpt, which
+// does not html-decode): the result is emitted raw as template.HTML, so
+// decoding would turn stored `&lt;script&gt;` text into live markup. Empty
+// content with an empty excerpt yields "" — no stray <p></p>.
 //
 // The returned string is trusted HTML. Callers cast it to template.HTML at the
 // web trust boundary (see internal/web/view.go); this package deliberately does
@@ -52,7 +53,6 @@ func Excerpt(p domain.Post) string {
 	text := blockCommentRE.ReplaceAllString(p.Content, "")
 	text = shortcodeRE.ReplaceAllString(text, "")
 	text = tagRE.ReplaceAllString(text, "")
-	text = html.UnescapeString(text)
 	text = strings.TrimSpace(wsRE.ReplaceAllString(text, " "))
 	if text == "" {
 		return ""

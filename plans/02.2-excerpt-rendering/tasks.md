@@ -21,7 +21,7 @@ Commit in logical increments with the trailer
   - `TestExcerptNoTruncateUnder55Words`: empty excerpt, content of 10 words → `<p>`+those 10 words+`</p>`, no trailing `…`.
   - `TestExcerptEmptyContentAndExcerpt`: `Excerpt(Post{})` returns `""` (no panic, no `<p></p>`); also assert tags-only content (`<p></p>`) → `""`.
 - [x] 1.2 Run `go test ./internal/content/ -run Excerpt -v`; expect FAIL (compile error — `content.Excerpt` undefined).
-- [x] 1.3 Create `internal/content/excerpt.go` implementing `Excerpt(p domain.Post) string`: manual pass-through; auto = strip `<!-- wp:… -->` block comments → shortcodes (`\[[^\]]*\]`) → tags (`<[^>]*>`) → `html.UnescapeString` → collapse whitespace → 55-word trim (append `…` only when truncated) → wrap `<p>…</p>`; empty stays `""`. No `html/template` import.
+- [x] 1.3 Create `internal/content/excerpt.go` implementing `Excerpt(p domain.Post) string`: manual pass-through; auto = strip `<!-- wp:… -->` block comments → shortcodes (`\[[^\]]*\]`) → tags (`<[^>]*>`) → collapse whitespace → 55-word trim (append `…` only when truncated) → wrap `<p>…</p>`; empty stays `""`. Entities are left encoded (no html-decode — see 6.x). No `html/template` import.
 - [x] 1.4 Run `go test ./internal/content/ -run Excerpt -v`; expect PASS. Then `go test ./internal/content/ -count=1` for no regressions.
   - _Acceptance:_ Manual excerpt preserved as HTML; auto excerpt strips block comments/shortcodes/tags, collapses whitespace, truncates at 55 words with `…`, wraps in `<p>`; empty→empty; no panics. _(Req 1.1, 2.1–2.5, 3.1–3.2, 4.1–4.2)_
 
@@ -49,3 +49,8 @@ Commit in logical increments with the trailer
 - [x] 5.1 Full gate: `gofmt -l .` (empty), `go vet ./...`, `go build ./...`, `go test -count=1 ./...` (green). Fill the `design.md` Implementation Deviations section with anything discovered.
 - [x] 5.2 Commit; open a PR against `main` using the `roboweaver` gh identity (`unset GH_TOKEN && gh auth switch -u roboweaver`, verify `gh api user -q .login`, then restore `robw_adobe`). Title: `M2.2 — WordPress-faithful excerpts (fix escaped HTML in list views)`. Do **not** merge.
   - _Acceptance:_ Full gate green; no untrusted-content path introduced; no hardcoded DSNs/hashes; PR opened against `main` (not merged); creator notified with the PR link. _(Req 6.1–6.4)_
+
+## Phase 6 — Post-review fix (Scout HIGH: no entity decode in auto-excerpt)
+- [x] 6.1 Add failing `content.TestExcerptPreservesEscapedEntities`: empty excerpt + content `"Here is code: &lt;script&gt;alert(1)&lt;/script&gt; and more text follows here."` → assert result CONTAINS `&lt;script&gt;` and NOT `<script>`; run → FAIL (pipeline decodes to live markup).
+- [x] 6.2 Remove `html.UnescapeString` from the auto path in `internal/content/excerpt.go` and drop the now-unused `html` import; run `go test ./internal/content/ -run Excerpt -v` → PASS (all cases, including the pre-existing block-comment/tags test whose input has no entities).
+  - _Acceptance:_ Auto-excerpt leaves entities encoded (WP-faithful — `wp_trim_excerpt` does not html-decode); raw emission no longer turns stored `&lt;script&gt;` into live markup; re-adding the decode fails the regression test. LOW nits (manual `wpautop` wrap; registered-shortcode-only stripping) deferred — see design.md. _(Scout HIGH)_

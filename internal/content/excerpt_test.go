@@ -74,3 +74,19 @@ func TestExcerptEmptyContentAndExcerpt(t *testing.T) {
 		t.Fatalf("whitespace-only excerpt with empty content should yield empty; got %q", got)
 	}
 }
+
+// TestExcerptPreservesEscapedEntities: WordPress stores literal/dangerous markup
+// HTML-escaped so it renders as text. The auto-excerpt path must NOT decode
+// entities — the result is emitted raw (template.HTML), so decoding would turn
+// stored `&lt;script&gt;` into a live <script>. Entities must pass through intact
+// and render as literal glyphs. Re-adding html.UnescapeString makes this fail.
+func TestExcerptPreservesEscapedEntities(t *testing.T) {
+	content := "Here is code: &lt;script&gt;alert(1)&lt;/script&gt; and more text follows here."
+	got := Excerpt(domain.Post{Excerpt: "", Content: content})
+	if !strings.Contains(got, "&lt;script&gt;") {
+		t.Fatalf("escaped entities must be preserved; got %q", got)
+	}
+	if strings.Contains(got, "<script>") {
+		t.Fatalf("auto excerpt must not emit live markup from escaped content; got %q", got)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/roboweaver/grimoire/internal/admin"
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/content"
@@ -73,7 +74,10 @@ func main() {
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,
-	}).Routes()
+	}).WithAdmin(admin.Handler("/admin"), content.NewAdminService(
+		repos.AdminPosts, repos.PostWriter, repos.PostCounter,
+		repos.UserCounter, repos.TermCounter, repos.Users,
+	)).Routes()
 
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: handler}
 

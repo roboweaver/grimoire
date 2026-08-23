@@ -148,7 +148,9 @@ func (s *Server) adminSession(w http.ResponseWriter, r *http.Request) error {
 	}
 	name, err := s.admin.DisplayName(r.Context(), p.UserID)
 	if err != nil {
-		return err
+		// The session is valid even if the user row can't be read; degrade to
+		// the login rather than leak the lookup failure (Req 2.6).
+		name = p.Login
 	}
 	var csrf string
 	if sess, ok := sessionFrom(r.Context()); ok {

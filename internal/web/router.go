@@ -67,6 +67,9 @@ func (s *Server) Routes() http.Handler {
 	}
 	r.Method(http.MethodGet, "/category/{slug}", s.handler(s.category))
 	r.Method(http.MethodGet, "/", s.handler(s.home))
+	// Admin group must be registered before the public catch-all so /admin is
+	// never shadowed by content resolution (Req 1.2).
+	s.registerAdmin(r)
 	r.Method(http.MethodGet, "/{slug}", s.handler(s.single))
 	return r
 }

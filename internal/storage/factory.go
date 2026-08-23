@@ -34,6 +34,12 @@ type Set struct {
 	PostWriter   domain.PostWriter
 	TermWriter   domain.TermWriter
 	OptionWriter domain.OptionWriter
+
+	// M3 additive read/count ports backing the read-only admin.
+	AdminPosts  domain.AdminPostRepository
+	PostCounter domain.PostCounter
+	UserCounter domain.UserCounter
+	TermCounter domain.TermCounter
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -112,19 +118,25 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 	posts := wprepo.NewPostRepo(bunDB, prefix)
 	terms := wprepo.NewTermRepo(bunDB, prefix)
 	options := wprepo.NewOptionRepo(bunDB, prefix)
+	users := wprepo.NewUserRepo(bunDB, prefix)
 	return &Repositories{
 		Set: Set{
 			Posts:   posts,
 			Terms:   terms,
 			Options: options,
 
-			Users:    wprepo.NewUserRepo(bunDB, prefix),
+			Users:    users,
 			UserMeta: wprepo.NewUserMetaRepo(bunDB, prefix),
 			Sessions: wprepo.NewSessionRepo(bunDB, prefix),
 
 			PostWriter:   posts,
 			TermWriter:   terms,
 			OptionWriter: options,
+
+			AdminPosts:  posts,
+			PostCounter: posts,
+			UserCounter: users,
+			TermCounter: terms,
 		},
 		db:    db,
 		bunDB: bunDB,

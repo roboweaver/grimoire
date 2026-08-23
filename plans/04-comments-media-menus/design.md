@@ -33,9 +33,14 @@ Two cross-cutting decisions define the milestone:
 1. **Overlay-first schema.** Comments read/write the real `{prefix}comments` /
    `{prefix}commentmeta`; media are `{prefix}posts` (`post_type='attachment'`) +
    `{prefix}postmeta`; menus are the `nav_menu` taxonomy. Against a live WordPress
-   DB there is **zero** migration. Only a greenfield DB receives the additive,
-   `IF NOT EXISTS` `0003` comments/commentmeta migration — the same contract as M2's
-   `{prefix}sessions` table. Media and menus need **no** new table.
+   DB there is **zero** migration — every column and table M4 touches already
+   exists. Only a greenfield DB receives the additive `0003` migration, which (a)
+   creates `IF NOT EXISTS` `{prefix}comments`/`{prefix}commentmeta` — the same
+   contract as M2's `{prefix}sessions` table — **and** (b) `ALTER TABLE
+   {prefix}posts ADD COLUMN`s the four columns the M1 greenfield schema omits but
+   M4 needs (`comment_status`, `post_parent`, `post_mime_type`, `menu_order`),
+   the same contract as M2's `{prefix}users` column migration (see
+   [Migrations](#migrations)). Media and menus need **no** new table.
 2. **First write paths, explicit CSRF.** Authenticated admin writes validate the
    per-session token via an `X-CSRF-Token` header (activating the contract M3
    designed but never exercised). The anonymous public comment form uses a
@@ -160,6 +165,7 @@ sequenceDiagram
   participant H as web: adminapi comments
   participant CS as content: CommentService
   participant R as wprepo: comments.go
+  participant CM as wprepo: commentmeta
   participant DB as WordPress DB
 
   SPA->>MW: POST /admin/api/comments/{id}/status (X-CSRF-Token, cookie)
@@ -171,6 +177,17 @@ sequenceDiagram
   else authorized
     MW->>H: handler
     H->>CS: SetStatus(id, target)
+    alt target == trash
+      CS->>R: current comment_approved
+      R->>DB: SELECT {prefix}comments
+      CS->>CM: save _wp_trash_meta_status / _wp_trash_meta_time
+      CM->>DB: INSERT {prefix}commentmeta
+    else target leaves trash (untrash)
+      CS->>CM: read _wp_trash_meta_status (default '0' if absent)
+      CM->>DB: SELECT {prefix}commentmeta
+      CS->>CM: delete _wp_trash_meta_status / _wp_trash_meta_time
+      CM->>DB: DELETE {prefix}commentmeta
+    end
     CS->>R: UpdateStatus(id, comment_approved)
     R->>DB: UPDATE {prefix}comments
     DB-->>R: rows affected
@@ -181,6 +198,12 @@ sequenceDiagram
     end
   end
 ```
+
+`trash`/`untrash` are the only side-effecting transitions: trashing snapshots the
+prior `comment_approved` into commentmeta before overwriting it, and untrashing
+restores that exact value and clears the meta, mirroring WordPress's
+`wp_trash_comment()`/`wp_untrash_comment()`. `trash` remains a soft-delete only —
+M4 exposes no hard-delete endpoint (Req 4.9).
 
 ### Sequence — media upload and public serving
 
@@ -201,11 +224,22 @@ sequenceDiagram
   H->>MS: Store(filename, reader, declaredType)
   MS->>MS: sniff content type, sanitize name, YYYY/MM path, de-dup
   MS->>FS: write file (non-exec perms)
-  MS->>R: Create attachment ({prefix}posts type=attachment) + _wp_attached_file meta
-  R->>DB: INSERT post + postmeta
-  DB-->>R: attachment ID
-  MS-->>H: Media{id,url,...}
-  H-->>SPA: 201 JSON
+  alt file write fails
+    MS-->>H: error (no DB insert attempted)
+    H-->>SPA: 4xx/5xx JSON, no orphan row
+  else file written
+    MS->>R: Create attachment ({prefix}posts type=attachment) + _wp_attached_file meta
+    R->>DB: INSERT post + postmeta
+    alt DB insert fails
+      MS->>FS: delete just-written file (compensating cleanup)
+      MS-->>H: error, no orphan file
+      H-->>SPA: 5xx JSON
+    else ok
+      DB-->>R: attachment ID
+      MS-->>H: Media{id,url,...}
+      H-->>SPA: 201 JSON
+    end
+  end
 
   V->>U: GET /wp-content/uploads/2024/06/pic.jpg
   U->>U: resolve within root, reject traversal
@@ -213,6 +247,11 @@ sequenceDiagram
   FS-->>U: bytes
   U-->>V: 200 (Content-Type, Cache-Control) or 404
 ```
+
+File-write and DB-insert are never both left half-done: a file-write failure
+never reaches the DB insert (no orphan row), and a DB-insert failure after a
+successful file write triggers a compensating delete of that file (no orphan
+file) — `MediaService.Store` owns this cleanup, not the repository (Req 8.7).
 
 ### Sequence — nav-menu read and public render
 
@@ -227,18 +266,35 @@ sequenceDiagram
 
   V->>H: GET /some-page
   H->>NS: Menu(location or slug)
-  NS->>R: term by nav_menu slug/location
-  R->>DB: SELECT terms + term_taxonomy (taxonomy='nav_menu')
+  alt by theme location
+    NS->>R: option theme_mods_{theme}
+    R->>DB: SELECT {prefix}options
+    NS->>NS: php.Unserialize(option_value), lookup nav_menu_locations[location]
+    Note over NS: missing row/key/undecodable value -> empty menu, no error
+  else by slug
+    NS->>R: term by nav_menu slug
+    R->>DB: SELECT terms + term_taxonomy (taxonomy='nav_menu')
+  end
   NS->>R: items for menu term
   R->>DB: SELECT nav_menu_item posts JOIN term_relationships
   NS->>R: postmeta (_menu_item_* keys) for items
   R->>DB: SELECT {prefix}postmeta
   R-->>NS: flat items + meta
   NS->>NS: build parent/child tree via _menu_item_menu_item_parent
+  NS->>NS: resolve label/URL per item type (custom: own title + _menu_item_url; post_type/taxonomy: title falls back to target, URL from target's permalink/term link)
   NS-->>H: NavMenu (tree)
   H->>H: render nested <ul>/<li>, escape labels/URLs
   H-->>V: HTML with navigation
 ```
+
+Theme-location resolution decodes `theme_mods_{active theme}` with the existing
+`internal/php` unserializer (built for M2's `{prefix}capabilities`) and looks up
+`nav_menu_locations[location]`; any missing option, missing key, or decode
+failure degrades to an empty menu (Req 10.7), never an error. Label/URL
+derivation follows WordPress's `wp_setup_nav_menu_item()`: only `type=custom`
+items trust their own `_menu_item_url` verbatim; `post_type`/`taxonomy` items
+resolve the URL from the referenced object's current permalink/term link, since
+WordPress does not keep `_menu_item_url` in sync for those types (Req 10.8).
 
 ## Directory layout
 
@@ -269,7 +325,7 @@ internal/
       menus_contract.go    ⊕ runMenusContract
       contract.go          ✎ seed comment/media/menu fixtures; call new subcontracts
     migrations/
-      mysql/0003_comments_media_menus.up.sql      ⊕ {prefix}comments + commentmeta
+      mysql/0003_comments_media_menus.up.sql      ⊕ {prefix}comments + commentmeta; ALTER {prefix}posts +4 cols
       postgres/0003_comments_media_menus.up.sql   ⊕
       sqlite/0003_comments_media_menus.up.sql     ⊕
   web/
@@ -462,6 +518,11 @@ type NavMenuRepository interface {
 	MenuBySlug(ctx context.Context, slug string) (NavMenu, error)
 	// MenuByID returns a menu (with items) by term_id, or ErrNotFound.
 	MenuByID(ctx context.Context, id int64) (NavMenu, error)
+	// MenuByLocation resolves a theme location to a menu via the
+	// theme_mods_{theme} option's nav_menu_locations map (decoded with
+	// internal/php), returning an empty menu when the option row, the
+	// location key, or the decode itself is missing/invalid.
+	MenuByLocation(ctx context.Context, location string) (NavMenu, error)
 }
 
 // CommentSpamFilter screens a submission before it is stored. Implementations
@@ -503,20 +564,31 @@ deployments — the public `/wp-content/uploads/` contract is identical either w
 ## Migrations
 
 `0003_comments_media_menus` is **greenfield-only** and **additive**, mirroring the
-M2 `{prefix}sessions` contract:
+M2 `{prefix}sessions`/`{prefix}users` contracts:
 
 - Creates `{{prefix}}comments` and `{{prefix}}commentmeta` with `IF NOT EXISTS`,
   WordPress-compatible columns and indexes (`comment_post_ID`, `comment_approved`,
   `comment_parent`, plus `comment_id` on commentmeta), templated per vendor
   (MySQL/Postgres/SQLite; SQLite quotes `"comment_ID"` and maps DATETIME→TEXT
   ISO-8601 like `0001`/`0002`).
+- **Also** `ALTER TABLE {{prefix}}posts ADD COLUMN`s the four core `wp_posts`
+  columns the M1 greenfield schema omits but M4 depends on:
+  `comment_status` (`'open'` default), `post_parent` (`0`), `post_mime_type`
+  (`''`), `menu_order` (`0`). This mirrors M2's `0002_users_auth` column-addition
+  contract exactly: Postgres uses `ADD COLUMN IF NOT EXISTS`; MySQL and SQLite
+  (neither supports that clause portably) use a plain `ADD COLUMN`, which would
+  **error** if the column already exists. Per the same M2 operational contract,
+  `migrate` is therefore only ever run against a grimoire-provisioned greenfield
+  schema — it is never invoked against an overlaid live WordPress DB, which
+  already has every one of these `wp_posts` columns and needs no migration at
+  all.
 - Creates **no** media or menu tables — attachments reuse `{prefix}posts` /
   `{prefix}postmeta` and menus reuse `{prefix}terms` / `{prefix}term_taxonomy` /
   `{prefix}term_relationships` / `{prefix}posts` / `{prefix}postmeta`, all of which
   a live WordPress DB already has.
-- A live, populated WordPress DB already has `{prefix}comments`/`{prefix}commentmeta`,
-  so `IF NOT EXISTS` makes the migration a no-op there — reads/writes overlay
-  existing data unchanged.
+- A live, populated WordPress DB already has `{prefix}comments`/`{prefix}commentmeta`
+  and every `{prefix}posts` column above, so `migrate` is never pointed at it —
+  reads/writes overlay existing data unchanged.
 
 ## Security
 
@@ -553,15 +625,31 @@ M2 `{prefix}sessions` contract:
 - **Contract tests (storagetest).** Vendor-parameterized (`SQLite` unconditional;
   MySQL/Postgres gated on `GRIMOIRE_TEST_MYSQL_DSN` / `GRIMOIRE_TEST_POSTGRES_DSN`).
   `SeedFixtures` gains deterministic comment rows (across statuses), attachment
-  posts + `_wp_attached_file` meta, and a `nav_menu` term with `nav_menu_item`
-  posts + `_menu_item_*` meta. New subcontracts `runCommentsContract` (list by
-  status/post, count, create defaults to `'0'`, `UpdateStatus`, `ErrNotFound`),
-  `runMediaContract` (list/count, URL assembly, create attachment, `SetParent`),
-  and `runMenusContract` (menus, `MenuBySlug` tree assembly, empty-menu
-  degradation) are invoked from `RunContract`, matching `runAdminContract` style.
+  posts + `_wp_attached_file` meta, a `theme_mods_{theme}` option row with a
+  PHP-serialized `nav_menu_locations` array, and a `nav_menu` term with mixed
+  `nav_menu_item` posts (`custom` items with their own title/URL, and
+  `post_type`/`taxonomy` items whose referenced object's title/permalink
+  differs from their stale `_menu_item_url`/title) plus `_menu_item_*` meta.
+  New subcontracts `runCommentsContract` (list by status/post, count, create
+  defaults to `'0'`, `UpdateStatus`, `ErrNotFound`, plus basic
+  `CommentMetaRepository` get/set/delete round-trip), `runMediaContract`
+  (list/count, URL assembly, create attachment, `SetParent`), and
+  `runMenusContract` (menus, `MenuBySlug`/`MenuByLocation` tree assembly —
+  including `theme_mods` option parsing via `internal/php.Unserialize` and
+  empty-menu degradation when the option row, key, or decode is missing/invalid
+  — and per-item-type label/URL resolution: `custom` keeps its own title/URL
+  verbatim, `post_type`/`taxonomy` fall back to the referenced object's title
+  and always recompute the URL from its current permalink/term link) are
+  invoked from `RunContract`, matching `runAdminContract` style.
 - **Content-service tests.** Moderation-queue default, spam-filter outcomes routed
-  to the right `comment_approved`, closed/missing-post rejection, attachment path
-  assembly + de-dup, menu tree building from flat items.
+  to the right `comment_approved`, closed/missing-post rejection,
+  `CommentService.SetStatus` trash/untrash orchestration (snapshots
+  `comment_approved` to `_wp_trash_meta_status`/`_wp_trash_meta_time` on trash,
+  restores and deletes both keys on untrash — Req 4.7-4.9), attachment path
+  assembly + de-dup, `MediaService.Store` deleting the on-disk file when the
+  follow-up DB insert fails and never inserting a row when the file write
+  fails first (Req 8.7), menu tree building from flat items with
+  theme-location resolution and label/URL mapping (Req 10.7-10.8).
 - **Web handler tests (`httptest`).** Public comment submit (double-submit token
   pass/fail, honeypot, held-by-default, escaped output); uploads server
   (serve/traversal-reject/404); admin comments list + status (401/403/CSRF-403/404);
@@ -584,16 +672,16 @@ M2 `{prefix}sessions` contract:
 | 1 Public comment list | `CommentRepository.List`, `render/comments.go`, `partials/comments.tmpl`, escaping |
 | 2 Comment submission | `web/comments.go` submit, `CommentService.Submit`, moderation-queue default, submit sequence |
 | 3 Spam hook | `CommentSpamFilter` port, `content/spam.go` default filter |
-| 4 Admin moderation | `adminapi_comments.go`, `CommentWriter.UpdateStatus`, moderation sequence, `moderate_comments` |
+| 4 Admin moderation | `adminapi_comments.go`, `CommentWriter.UpdateStatus`, moderation sequence (trash/untrash meta), `moderate_comments` |
 | 5 Comments schema/overlay | `Comment`/`CommentMeta` entities, `wprepo/comments.go`, `0003` migration |
 | 6 Media library listing | `MediaRepository`, `adminapi_media.go` GET, URL assembly |
 | 7 Uploads serving | `web/uploads.go`, `MediaConfig`, traversal safety, proxy alternative |
-| 8 Media upload | `adminapi_media.go` POST, `MediaService.Store`, allowlist/size, `MediaWriter.Create` |
+| 8 Media upload | `adminapi_media.go` POST, `MediaService.Store` (write-then-insert, rollback-on-insert-failure), allowlist/size, `MediaWriter.Create` |
 | 9 Attach media | `MediaWriter.SetParent`, `adminapi_media.go` attach |
-| 10 Read nav menus | `NavMenuRepository`, `wprepo/menus.go`, tree builder |
+| 10 Read nav menus | `NavMenuRepository` (incl. `MenuByLocation`), `wprepo/menus.go`, tree builder, per-item-type label/URL resolution |
 | 11 Nav render + admin view | `render/menus.go`, `partials/nav-menu.tmpl`, `adminapi_menus.go`, `views/Menus.tsx` |
 | 12 CSRF/anti-abuse | `authmiddleware.go` header path, double-submit token, spam filter, rate limit |
-| 13 Vendor-agnostic/overlay | domain ports + `wprepo` adapters, contract suite, additive-only schema |
+| 13 Vendor-agnostic/overlay | domain ports + `wprepo` adapters, contract suite, additive-only schema, `0003` posts-column ALTERs |
 | 14 Spectrum UX | `views/{Comments,Media,Menus}.tsx`, `AppShell.tsx`, `App.tsx`, `api/*` |
 | 15 Errors/observability | JSON envelope reuse, `slog`, no-leakage assertions |
 

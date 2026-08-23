@@ -31,17 +31,24 @@ write the WordPress `{prefix}comments` + `{prefix}commentmeta` tables; media are
 postmeta; navigation menus are the `nav_menu` taxonomy over `{prefix}terms`,
 `{prefix}term_taxonomy`, and `{prefix}term_relationships` with `nav_menu_item`
 posts. Reads overlay an existing, populated WordPress database with **no schema
-change**; only greenfield (grimoire-provisioned) databases get an additive,
-`IF NOT EXISTS` migration for the comments tables (which a live WordPress DB
-already has), exactly like M2's `{prefix}sessions` migration contract.
+change**; only greenfield (grimoire-provisioned) databases get an additive
+migration that creates the comments tables (`IF NOT EXISTS`, exactly like M2's
+`{prefix}sessions` migration contract) **and** adds the `{prefix}posts` columns —
+`comment_status`, `post_parent`, `post_mime_type`, `menu_order` — that M1's
+greenfield schema omits but M4's comment-closed check, media fields, and
+menu-item ordering all depend on, mirroring M2's `{prefix}users` column-migration
+contract (`ALTER TABLE ADD COLUMN`, never pointed at an overlaid live WordPress
+database, which already has every core column).
 
 Out of scope for M4: **creating or editing** navigation menus (read-only this
 milestone; the drag-and-drop menu editor is deferred to a later menus milestone);
-threaded-comment depth limits and comment editing by the public; nested media
-folders / cloud object-store drivers (a single configurable on-disk uploads root
-plus a documented proxy alternative is the M4 surface); image resizing / thumbnail
-generation; the full WordPress REST API surface (milestone 05); and the rich post
-editor / post create-update-delete (milestone 06).
+threaded-comment depth limits, comment editing by the public, and permanent
+(hard) comment deletion (`trash` is a soft-delete status only, restorable via
+untrash — Req 4.7–4.9); nested media folders / cloud object-store drivers (a
+single configurable on-disk uploads root plus a documented proxy alternative is
+the M4 surface); image resizing / thumbnail generation; the full WordPress REST
+API surface (milestone 05); and the rich post editor / post create-update-delete
+(milestone 06).
 
 ## Requirements
 
@@ -96,6 +103,9 @@ so that I can approve legitimate discussion and remove spam.
 4. WHEN a moderator approves a held comment, THEN the change SHALL be persisted to `{prefix}comments` (`comment_approved = '1'`) and the comment SHALL immediately appear in the public list for its post; WHEN trashed, it SHALL disappear from the public list.
 5. WHEN no comment matches the given id, THEN the status endpoint SHALL return `404` with a JSON error body.
 6. THE moderation endpoints SHALL return identical shapes/behavior across MySQL, PostgreSQL, and SQLite, and SHALL NOT leak SQL text, driver errors, or secrets.
+7. WHEN a comment is trashed (`status` transitions to `'trash'`), THEN the system SHALL first save its current `comment_approved` value to `{prefix}commentmeta` (`_wp_trash_meta_status`, plus a `_wp_trash_meta_time` timestamp) before overwriting `comment_approved` to `'trash'`, matching WordPress's `wp_trash_comment()` contract, so the comment can later be restored to its exact prior state.
+8. WHEN a trashed comment is untrashed (`status = 'untrash'`, or any target status transition away from `'trash'`), THEN the system SHALL restore `comment_approved` from the saved `_wp_trash_meta_status` value (defaulting to `'0'`/held if none was saved) and SHALL remove the `_wp_trash_meta_status`/`_wp_trash_meta_time` commentmeta keys, matching WordPress's `wp_untrash_comment()` contract.
+9. `trash` SHALL remain a **soft-delete** status only: the comment row is never physically deleted by M4. A permanent hard-delete action is **out of scope** for this milestone (deferred, consistent with the menu-editing deferral in Req 11.6).
 
 ### Requirement 5 — Comments schema and existing-WP-DB overlay
 
@@ -146,6 +156,7 @@ that I can add media to the site.
 4. THE upload handler SHALL enforce a configurable **maximum size** and an **allowed MIME/extension allowlist**, rejecting disallowed or oversized uploads with `400`/`413` and not persisting a row or file.
 5. WHEN an upload succeeds, THEN the endpoint SHALL return `201` with the created attachment's JSON (`id`, `url`, `filename`, `mimeType`), suitable for the admin to display immediately.
 6. THE upload handler SHALL detect content type from the file bytes (not trust the client-supplied type) and SHALL store the file with non-executable permissions.
+7. IF the database insert for the attachment row (or its `_wp_attached_file` postmeta) fails after the file has already been written to disk, THEN the system SHALL delete the just-written file before returning an error, so a failed upload never leaves an orphaned file with no corresponding attachment; conversely, IF the file write itself fails, THEN the system SHALL NOT attempt the database insert, so no attachment row is ever created without a backing file.
 
 ### Requirement 9 — Attaching media to a post
 
@@ -171,6 +182,8 @@ render the site's real menu structure.
 4. THE menu read ports SHALL be additive, read-only `SELECT`s, introducing **no** schema change and working unchanged against an existing WordPress database's menus.
 5. WHEN a requested menu (by slug or location) does not exist, THEN the reader SHALL return an empty menu (no items) rather than an error, so a theme referencing an unconfigured location degrades gracefully.
 6. THE new nav-menu ports SHALL be defined in `internal/domain` and implemented per-vendor in `internal/storage/wprepo`, with no driver import above the storage layer.
+7. WHEN resolving a **theme location**, THE system SHALL read the `option_value` for the `{prefix}options` row where `option_name = 'theme_mods_' + <active theme>` (the theme configured for the site), decode it with the existing PHP-serialize decoder (`internal/php`, first built for M2's `{prefix}capabilities`), and look up `nav_menu_locations[location]` for the assigned term id; a missing options row, a missing `nav_menu_locations` key for the location, or an undecodable value SHALL each be treated as "no menu assigned to this location" (Req 10.5's empty-menu degradation) rather than an error.
+8. FOR a menu item of type `custom`, THE label and URL SHALL be read directly from the item's own `post_title` and `_menu_item_url`. FOR a menu item of type `post_type` or `taxonomy`, THE label SHALL fall back to the referenced post's `post_title` (or term's `name`) when the item's own `post_title` is empty, and THE URL SHALL be derived by resolving the referenced object's current permalink/term link from `_menu_item_object_id` (+ `_menu_item_object`) rather than trusted verbatim from `_menu_item_url`, which WordPress does not keep in sync when the target is renamed or moved — matching real WordPress `wp_setup_nav_menu_item()` behavior.
 
 ### Requirement 11 — Public nav-menu rendering and admin read-only view
 
@@ -207,10 +220,11 @@ WordPress DB.
 
 #### Acceptance Criteria
 1. THE M4 read paths (comment list, media listing, menu read) SHALL introduce **no** schema change against a live WordPress database; all reads SHALL be additive `SELECT`/`COUNT` ports.
-2. THE only new migration SHALL be the greenfield-only, additive `IF NOT EXISTS` comments/commentmeta migration (Req 5.3); media and menus SHALL reuse the existing `{prefix}posts`/`{prefix}postmeta`/`{prefix}terms`/`{prefix}term_taxonomy`/`{prefix}term_relationships` tables with **no** new table.
+2. THE only new **tables** created by migration SHALL be the greenfield-only, additive `IF NOT EXISTS` `{prefix}comments`/`{prefix}commentmeta` (Req 5.3); media and menus SHALL reuse the existing `{prefix}posts`/`{prefix}postmeta`/`{prefix}terms`/`{prefix}term_taxonomy`/`{prefix}term_relationships` tables with **no** new table.
 3. THE new ports SHALL return identical shapes and behavior across MySQL, PostgreSQL, and SQLite, verified by the shared vendor-parameterized contract suite; any real-WP-DB validation SHALL be environment-gated like M2.1.
 4. THE new read/write ports SHALL be defined in the domain layer and implemented per-vendor in the storage layer, with no database driver imported by the domain, content, render, or web layers.
 5. WHEN grimoire overlays an existing WordPress database, THEN comment moderation, media upload rows, and menu reads SHALL interoperate with data authored by real WordPress without corruption.
+6. BECAUSE the M1 greenfield `{prefix}posts` schema omits `comment_status`, `post_parent`, `post_mime_type`, and `menu_order` — columns Req 2.3's closed-post check, Req 6/8/9's media fields, and Req 10.2's menu-item ordering all depend on — THE same greenfield-only migration (Req 5.3) SHALL also `ALTER TABLE {prefix}posts ADD COLUMN` those four columns with WordPress-compatible defaults (`comment_status` `'open'`, `post_parent`/`menu_order` `0`, `post_mime_type` `''`), following the M2 `{prefix}users` column-migration contract: it runs only against a grimoire-provisioned schema and is never pointed at an overlaid live WordPress database, which already has every core `wp_posts` column.
 
 ### Requirement 14 — React Spectrum admin experience for the new tabs
 

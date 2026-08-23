@@ -1,5 +1,9 @@
 import type {
   ApiErrorBody,
+  CommentList,
+  MediaItem,
+  MediaList,
+  NavMenu,
   PostDetail,
   PostList,
   SessionInfo,
@@ -75,6 +79,47 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
+
+async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
+  let res: Response;
+  const session = await get<SessionInfo>("/session");
+  try {
+    res = await fetch(`/admin/api${path}`, {
+      ...init,
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "X-CSRF-Token": session.csrfToken,
+        ...(init.headers || {}),
+      },
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw err;
+    throw new ApiError(0, "network_error", "Unable to reach the server.");
+  }
+
+  if (res.status === 401) {
+    redirectToLogin();
+    throw new ApiError(401, "unauthorized", "authentication required");
+  }
+  if (res.status === 403) {
+    throw new ForbiddenError();
+  }
+  if (!res.ok) {
+    let code = "error";
+    let message = `Request failed (${res.status}).`;
+    try {
+      const body = (await res.json()) as ApiErrorBody;
+      if (body?.error) {
+        code = body.error.code || code;
+        message = body.error.message || message;
+      }
+    } catch {}
+    throw new ApiError(res.status, code, message);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
 export const api = {
   session: (signal?: AbortSignal) => get<SessionInfo>("/session", signal),
   stats: (signal?: AbortSignal) => get<Stats>("/stats", signal),
@@ -92,4 +137,38 @@ export const api = {
   },
   post: (id: number | string, signal?: AbortSignal) =>
     get<PostDetail>(`/posts/${id}`, signal),
+  comments: (params: { page?: number; perPage?: number; status?: string; postId?: number }, signal?: AbortSignal) => {
+    const q = new URLSearchParams();
+    if (params.page) q.set("page", String(params.page));
+    if (params.perPage) q.set("perPage", String(params.perPage));
+    if (params.status) q.set("status", params.status);
+    if (params.postId) q.set("postId", String(params.postId));
+    const qs = q.toString();
+    return get<CommentList>(`/comments${qs ? `?${qs}` : ""}`, signal);
+  },
+  moderateComment: (id: number, status: string) =>
+    send<{ id: number; status: string }>(`/comments/${id}/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    }),
+  media: (params: { page?: number; perPage?: number }, signal?: AbortSignal) => {
+    const q = new URLSearchParams();
+    if (params.page) q.set("page", String(params.page));
+    if (params.perPage) q.set("perPage", String(params.perPage));
+    const qs = q.toString();
+    return get<MediaList>(`/media${qs ? `?${qs}` : ""}`, signal);
+  },
+  uploadMedia: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return send<MediaItem>("/media", { method: "POST", body: form });
+  },
+  attachMedia: (id: number, parentId: number) =>
+    send<{ id: number; parentId: number }>(`/media/${id}/attach`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentId }),
+    }),
+  menus: (signal?: AbortSignal) => get<{ items: NavMenu[] }>("/menus", signal),
 };

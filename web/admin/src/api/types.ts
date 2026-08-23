@@ -50,3 +50,61 @@ export interface PostDetail {
 export interface ApiErrorBody {
   error: { code: string; message: string };
 }
+
+export interface Comment {
+  id: number;
+  postId: number;
+  postTitle: string;
+  author: string;
+  authorEmail: string;
+  authorURL: string;
+  content: string;
+  excerpt: string;
+  status: string;
+  date: string;
+}
+
+export interface CommentList {
+  items: Comment[];
+  page: number;
+  perPage: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface MediaItem {
+  id: number;
+  title: string;
+  filename: string;
+  url: string;
+  mimeType: string;
+  date: string;
+  parentId: number;
+}
+
+export interface MediaList {
+  items: MediaItem[];
+  page: number;
+  perPage: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface NavMenuItem {
+  id: number;
+  label: string;
+  url: string;
+  type: string;
+  object: string;
+  objectId: number;
+  parentId: number;
+  order: number;
+  children: NavMenuItem[];
+}
+
+export interface NavMenu {
+  id: number;
+  name: string;
+  slug: string;
+  items: NavMenuItem[];
+}

@@ -61,6 +61,17 @@ func (s *Server) adminAPIRouter() http.Handler {
 		gr.Method(http.MethodGet, "/stats", s.jsonHandler(s.adminStats))
 		gr.Method(http.MethodGet, "/posts", s.jsonHandler(s.adminPosts))
 		gr.Method(http.MethodGet, "/posts/{id}", s.jsonHandler(s.adminPost))
+		gr.Method(http.MethodGet, "/menus", s.jsonHandler(s.adminMenus))
+	})
+	r.Group(func(gr chi.Router) {
+		gr.Use(s.requireCapabilityJSON("moderate_comments"))
+		gr.Method(http.MethodGet, "/comments", s.jsonHandler(s.adminComments))
+		gr.Method(http.MethodPost, "/comments/{id}/{action}", s.jsonHandler(s.adminCommentAction))
+	})
+	r.Group(func(gr chi.Router) {
+		gr.Use(s.requireCapabilityJSON("upload_files"))
+		gr.Method(http.MethodGet, "/media", s.jsonHandler(s.adminMedia))
+		gr.Method(http.MethodPost, "/media", s.jsonHandler(s.adminMedia))
 	})
 	return r
 }

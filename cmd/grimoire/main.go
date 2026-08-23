@@ -64,13 +64,17 @@ func main() {
 		Prefix:   cfg.Database.TablePrefix,
 	}
 
+	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}))
+	menus := content.NewNavMenuService(repos.NavMenus, cfg.Theme)
+	media := content.NewMediaService(repos.Media, repos.MediaWriter, content.MediaConfig{UploadsDir: cfg.Media.UploadsDir, BaseURL: "/wp-content/uploads", AllowedMIMEs: cfg.Media.AllowedMIMEs})
+
 	handler := web.NewServer(
 		content.NewPostService(repos.Posts),
 		content.NewTermService(repos.Terms, repos.Posts),
 		content.NewOptionService(repos.Options),
 		eng,
 		log,
-	).WithAuth(sm, web.AuthConfig{
+	).WithContentFeatures(comments, media, menus).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

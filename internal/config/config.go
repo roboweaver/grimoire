@@ -21,6 +21,13 @@ type Config struct {
 	Theme    string         `yaml:"theme"`
 	Database DatabaseConfig `yaml:"database"`
 	Session  SessionConfig  `yaml:"session"`
+	Media    MediaConfig    `yaml:"media"`
+}
+
+type MediaConfig struct {
+	UploadsDir    string   `yaml:"uploads_dir"`
+	MaxUploadSize int64    `yaml:"max_upload_size"`
+	AllowedMIMEs  []string `yaml:"allowed_mime_types"`
 }
 
 // ServerConfig holds HTTP server settings.
@@ -117,6 +124,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Session.TTLHours <= 0 {
 		c.Session.TTLHours = 24 * 14
+	}
+	if c.Media.UploadsDir == "" {
+		c.Media.UploadsDir = "wp-content/uploads"
+	}
+	if c.Media.MaxUploadSize <= 0 {
+		c.Media.MaxUploadSize = 10 << 20
+	}
+	if len(c.Media.AllowedMIMEs) == 0 {
+		c.Media.AllowedMIMEs = []string{"image/png", "image/jpeg", "image/gif", "text/plain"}
 	}
 }
 

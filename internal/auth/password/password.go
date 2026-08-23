@@ -2,9 +2,11 @@
 //
 // New and updated passwords are always hashed with bcrypt. Verification also
 // accepts legacy formats found in imported WordPress databases — bcrypt written
-// by PHP as $2y$ (functionally identical to Go's $2a$) and phpass portable
-// hashes ($P$/$H$) — so existing users can log in. NeedsRehash reports when a
-// verified hash should be upgraded to a fresh bcrypt hash on successful login.
+// by PHP as $2y$ (functionally identical to Go's $2a$), phpass portable hashes
+// ($P$/$H$), and WordPress 6.8+ wrapped-bcrypt hashes ($wp$, HMAC-SHA384 pre-hash
+// + bcrypt) — so existing users can log in. NeedsRehash reports when a verified
+// hash should be upgraded to a fresh bcrypt hash on successful login; $wp$ is
+// already strong and is verified in place, never rehashed.
 package password
 
 import (
@@ -38,6 +40,8 @@ func Hash(password string) (string, error) {
 // non-nil error. Comparisons are constant-time within each scheme.
 func Verify(password, hash string) (bool, error) {
 	switch {
+	case isWPHash(hash):
+		return wpVerify(password, hash)
 	case phpass.Identify(hash):
 		return phpass.Verify(password, hash), nil
 	case isBcrypt(hash):
@@ -60,6 +64,8 @@ func Verify(password, hash string) (bool, error) {
 // DefaultCost, and any unrecognized format.
 func NeedsRehash(hash string) bool {
 	switch {
+	case isWPHash(hash):
+		return false
 	case phpass.Identify(hash):
 		return true
 	case isBcrypt(hash):

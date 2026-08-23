@@ -12,11 +12,14 @@ import (
 
 // Server wires content services and the render engine into HTTP handlers.
 type Server struct {
-	posts   *content.PostService
-	terms   *content.TermService
-	options *content.OptionService
-	render  *render.Engine
-	log     *slog.Logger
+	posts    *content.PostService
+	terms    *content.TermService
+	options  *content.OptionService
+	comments *content.CommentService
+	media    *content.MediaService
+	menus    *content.NavMenuService
+	render   *render.Engine
+	log      *slog.Logger
 
 	auth    Sessions
 	authCfg AuthConfig
@@ -64,6 +67,12 @@ func (s *Server) Routes() http.Handler {
 		r.Method(http.MethodGet, "/login", s.handler(s.loginForm))
 		r.Method(http.MethodPost, "/login", s.handler(s.loginSubmit))
 		r.Method(http.MethodPost, "/logout", s.handler(s.logoutSubmit))
+	}
+	if s.comments != nil {
+		r.Method(http.MethodPost, "/comment", s.handler(s.commentSubmit))
+	}
+	if s.media != nil {
+		r.Method(http.MethodGet, "/wp-content/uploads/*", s.handler(s.uploads))
 	}
 	r.Method(http.MethodGet, "/category/{slug}", s.handler(s.category))
 	r.Method(http.MethodGet, "/", s.handler(s.home))

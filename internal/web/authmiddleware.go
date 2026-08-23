@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"net/url"
@@ -89,6 +90,11 @@ func (s *Server) requireSessionCSRF(w http.ResponseWriter, r *http.Request) bool
 	if !ok {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return false
+	}
+	if token := r.Header.Get("X-CSRF-Token"); token != "" {
+		if sess.CSRFToken != "" && subtle.ConstantTimeCompare([]byte(token), []byte(sess.CSRFToken)) == 1 {
+			return true
+		}
 	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)

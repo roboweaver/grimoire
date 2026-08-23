@@ -59,6 +59,8 @@ func (s *MediaService) Get(ctx context.Context, id int64) (domain.Media, error) 
 
 func (s *MediaService) Delete(context.Context, int64) error { return nil }
 
+func (s *MediaService) Config() MediaConfig { return s.cfg }
+
 func (s *MediaService) Attach(ctx context.Context, id, parentID int64) error {
 	return s.writer.SetParent(ctx, id, parentID)
 }

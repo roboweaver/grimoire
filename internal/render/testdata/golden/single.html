@@ -13,10 +13,32 @@
 <body>
   <header><a href="/">grimoire</a></header>
   <main>
+
+
+
 <article>
   <h1>Hello World</h1>
   <div><p>Body <em>html</em>.</p></div>
 </article>
+
+<section id="comments">
+  <h2>0 Comments</h2>
+  
+  
+    <p>No comments yet</p>
+  
+  <form method="post" action="/comment">
+    <input type="hidden" name="post_id" value="hello-world">
+    <input type="hidden" name="comment_csrf_token" value="">
+    <p><label>Name <input name="author"></label></p>
+    <p><label>Email <input name="email"></label></p>
+    <p><label>URL <input name="url"></label></p>
+    <p style="display:none"><label>Website <input name="website"></label></p>
+    <p><label>Comment <textarea name="content"></textarea></label></p>
+    <button type="submit">Submit comment</button>
+  </form>
+</section>
+
 </main>
   <footer><small>Powered by grimoire</small></footer>
 </body>

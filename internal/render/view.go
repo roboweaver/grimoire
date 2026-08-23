@@ -35,9 +35,14 @@ type IndexData struct {
 
 // SingleData backs the single/page templates.
 type SingleData struct {
-	SiteTitle string
-	Tagline   string
-	Post      PostView
+	SiteTitle      string
+	Tagline        string
+	Post           PostView
+	Comments       []CommentView
+	CommentCount   int
+	PendingComment *CommentView
+	CommentToken   string
+	Menu           NavMenuView
 }
 
 // CategoryData backs the category/archive templates.

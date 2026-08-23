@@ -23,9 +23,10 @@ format**. Each milestone is a self-contained spec directory with three files:
 | 02 | [`02-users-auth-roles`](./02-users-auth-roles) | 🚧 In progress | Users + WordPress-compatible auth (phpass→bcrypt), server-side sessions, 5 default roles/capabilities, CSRF, internal content write API, minimal login UI |
 | 02.1 | [`02.1-wp-hash-real-db`](./02.1-wp-hash-real-db) | 🚧 In progress | WordPress 6.8 `$wp$` (HMAC-SHA384→bcrypt) password verification + capabilities scalar-truthiness lock-in + env-gated real-WordPress-DB validation |
 | 02.2 | [`02.2-excerpt-rendering`](./02.2-excerpt-rendering) | 🚧 In progress | WordPress-faithful excerpts on list views — manual excerpts render as HTML (not escaped), empty excerpts auto-generate from content (`wp_trim_excerpt`: strip Gutenberg block comments/shortcodes/tags, ~55-word trim + `…`), extend trusted-content boundary to `Excerpt` |
-| 03 | _(planned)_ spectrum-admin | ⬜ Not started | Adobe React Spectrum admin SPA (CRUD posts/pages/media) |
+| 03 | [`03-spectrum-admin`](./03-spectrum-admin) | 📝 Specified | Adobe React Spectrum **read-only** admin SPA — served by the Go binary via `go:embed` (no Node at runtime), reusing M2 session auth + a read-only `/admin/api` (session, dashboard counts, posts/pages list + detail). CRUD (create/update/delete, editor, media) deferred to milestone 06. |
 | 04 | _(planned)_ comments-media-menus | ⬜ Not started | Comments, media library, navigation menus |
 | 05 | _(planned)_ extensions-rest-api | ⬜ Not started | Extension/plugin system + REST API parity |
+| 06 | _(planned)_ admin-crud-editor | ⬜ Not started | Admin write path — create/update/delete posts & pages, rich editor, media uploads; extends the M3 read-only Spectrum admin with the M4-style CSRF-validated unsafe-request contract (X-CSRF-Token). |
 
 ## Guiding principles
 

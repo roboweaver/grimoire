@@ -381,3 +381,12 @@ logo is introduced (Req 8.1, 8.6).
 | 9 — Build/embed pipeline | Build pipeline §, Makefile, CI freshness gate |
 | 10 — Vendor/overlay compat | Additive ports §, DB-overlay note, testing strategy |
 | 11 — Error handling/observability | API error body, security no-leakage, `slog` logging |
+
+## Implementation deviations
+
+See `requirements.md` §"Implementation deviations". In summary: post content is
+shown as escaped preformatted text (not rendered HTML) in the read-only view;
+the SPA uses `react-router` bridged into the Spectrum `Provider` router prop;
+the shared empty state uses `@spectrum-icons/workflow/Document`; and CI verifies
+embedded-asset freshness in a dedicated Node job while the Go build/test job
+stays Node-free.

@@ -34,3 +34,23 @@ jobs:
 
       - name: go test (SQLite only)
         run: go test ./...
+
+  admin-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the admin SPA
+        run: make admin
+
+      - name: Verify committed dist matches source
+        run: |
+          if ! git diff --exit-code -- internal/admin/dist; then
+            echo "internal/admin/dist is stale; run 'make admin' and commit the result."
+            exit 1
+          fi

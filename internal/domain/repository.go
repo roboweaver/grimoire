@@ -24,6 +24,48 @@ type TermRepository interface {
 	BySlug(ctx context.Context, taxonomy, slug string) (Term, error)
 }
 
+// AdminPostFilter selects content for the read-only admin list. Unlike the
+// public read path it is not limited to published posts, so it can surface
+// drafts and pages. All fields are additive read filters; nothing here alters
+// schema, so the existing-WordPress-DB overlay is unaffected.
+type AdminPostFilter struct {
+	Types    []string // e.g. {"post","page"}; empty = both post and page
+	Statuses []string // e.g. {"publish","draft","pending","private"}; empty = all
+	Limit    int      // page size; <=0 means "no limit"
+	Offset   int      // rows to skip
+}
+
+// AdminPostRepository lists and counts content for the admin, including drafts
+// and pages. Both methods are pure reads (SELECT / COUNT); neither writes.
+type AdminPostRepository interface {
+	// ListForAdmin returns posts matching the filter ordered newest first
+	// (post_date DESC, ID DESC).
+	ListForAdmin(ctx context.Context, f AdminPostFilter) ([]Post, error)
+	// CountForAdmin returns the total number of posts matching the filter,
+	// ignoring Limit/Offset (used for pagination totals).
+	CountForAdmin(ctx context.Context, f AdminPostFilter) (int, error)
+}
+
+// PostCounter counts posts for the dashboard. Additive; pure COUNT(*).
+type PostCounter interface {
+	// CountByStatus counts posts of the given post_type and post_status. An
+	// empty typ matches any type; an empty status matches any status.
+	CountByStatus(ctx context.Context, typ, status string) (int, error)
+}
+
+// UserCounter counts user rows for the dashboard. Additive; pure COUNT(*).
+type UserCounter interface {
+	// CountUsers returns the number of rows in {prefix}users.
+	CountUsers(ctx context.Context) (int, error)
+}
+
+// TermCounter counts taxonomy terms for the dashboard. Additive; pure COUNT(*).
+type TermCounter interface {
+	// CountTerms returns the number of terms in the given taxonomy (e.g.
+	// "category").
+	CountTerms(ctx context.Context, taxonomy string) (int, error)
+}
+
 // OptionRepository reads site options.
 type OptionRepository interface {
 	// Get returns an option value by name, or ErrNotFound.

@@ -20,6 +20,11 @@ type Server struct {
 
 	auth    Sessions
 	authCfg AuthConfig
+
+	// admin backs the read-only /admin/api JSON endpoints; nil until WithAdmin.
+	admin adminReader
+	// spa serves the embedded React Spectrum admin under /admin; nil until WithAdmin.
+	spa http.Handler
 }
 
 // NewServer builds a Server. log may be nil, in which case slog.Default is used.
@@ -62,6 +67,9 @@ func (s *Server) Routes() http.Handler {
 	}
 	r.Method(http.MethodGet, "/category/{slug}", s.handler(s.category))
 	r.Method(http.MethodGet, "/", s.handler(s.home))
+	// Admin group must be registered before the public catch-all so /admin is
+	// never shadowed by content resolution (Req 1.2).
+	s.registerAdmin(r)
 	r.Method(http.MethodGet, "/{slug}", s.handler(s.single))
 	return r
 }

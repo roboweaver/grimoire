@@ -183,6 +183,7 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 	runUserContract(t, newRepos)
 	runSessionContract(t, newRepos)
 	runWriterContract(t, newRepos)
+	runAdminContract(t, newRepos)
 }
 
 // runUserContract covers UserRepository + UserMetaRepository, including the

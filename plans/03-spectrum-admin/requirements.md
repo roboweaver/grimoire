@@ -164,3 +164,24 @@ secrets.
 2. THE APIs SHALL NEVER include SQL text, stack traces, driver errors, password hashes, or session/CSRF secrets in a client response.
 3. THE APIs SHALL log server-side failures via the existing structured logger (`slog`) with enough context to debug, without logging secrets or full request bodies.
 4. THE APIs SHALL set `Content-Type: application/json` on all JSON responses and SHALL reject unsupported methods with `405 Method Not Allowed`.
+
+## Implementation deviations
+
+The M3 implementation follows this specification with the following minor,
+spec-consistent clarifications recorded during development:
+
+1. **Post content rendered as escaped, preformatted text.** Per the design's
+   Security considerations, the read-only detail view displays post content as
+   text (whitespace-preserving `pre-wrap`), not as rendered HTML. No
+   `dangerouslySetInnerHTML` is used; a sandboxed/rendered HTML preview is
+   deferred to the milestone 06 editor.
+2. **SPA client router.** The SPA uses `react-router` (basename `/admin`)
+   bridged into the React Spectrum `Provider` `router` prop so Spectrum
+   pressables/links perform client-side navigation. This satisfies the
+   "Spectrum components only" intent while keeping SPA-fallback routing.
+3. **Empty-state icon.** The shared empty state uses
+   `@spectrum-icons/workflow/Document` (the illustrations package
+   `NoSearchResults` is not a project dependency).
+4. **CI freshness as a dedicated job.** Asset-freshness (Req 9.4) runs in a
+   separate `admin-freshness` CI job with Node; the Go `build-test` job remains
+   Node-free (Req 9.5).

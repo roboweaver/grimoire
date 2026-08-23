@@ -27,15 +27,32 @@ func formatTS(t time.Time) string {
 	return t.UTC().Format(tsLayout)
 }
 
-// parseTS parses a stored fixed-width timestamp as UTC. Unparseable or empty
-// values yield the zero time rather than an error, so partially populated rows
-// still map cleanly to domain entities.
+// parseLayouts are the timestamp formats parseTS accepts, tried in order. The
+// fixed-width space layout is the canonical stored form (parseTime=false, the
+// lexical path). RFC3339 / RFC3339Nano are what the go-sql-driver emits when
+// parseTime=true: DATETIME columns are scanned as time.Time and bun then formats
+// them as RFC3339 into the string destination fields, so parseTS must accept
+// them or every timestamp (crucially session Expires) collapses to the zero time.
+var parseLayouts = []string{
+	tsLayout,
+	time.RFC3339,
+	time.RFC3339Nano,
+}
+
+// parseTS parses a stored timestamp as UTC, tolerating the formats the DB
+// drivers actually emit. Unparseable or empty values yield the zero time rather
+// than an error, so partially populated rows still map cleanly to domain
+// entities.
 func parseTS(s string) time.Time {
-	t, err := time.ParseInLocation(tsLayout, s, time.UTC)
-	if err != nil {
+	if s == "" {
 		return time.Time{}
 	}
-	return t
+	for _, layout := range parseLayouts {
+		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Time{}
 }
 
 // errNotFoundIfZero returns domain.ErrNotFound when a write affected no rows,

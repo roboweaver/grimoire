@@ -148,7 +148,12 @@ func (r *CommentRepo) UpdateStatus(ctx context.Context, id int64, status string)
 	if err != nil {
 		return err
 	}
-	return errNotFoundIfZero(res)
+	return errNotFoundIfMissing(ctx, res, func(ctx context.Context) (bool, error) {
+		return r.db.NewSelect().
+			TableExpr("?", bun.Ident(r.prefix+"comments")).
+			Where("comment_ID = ?", id).
+			Exists(ctx)
+	})
 }
 
 type CommentMetaRepo struct {

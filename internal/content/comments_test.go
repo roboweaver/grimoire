@@ -199,13 +199,13 @@ func TestCommentServiceCreateRoutesSpamVerdictsAndValidatesPost(t *testing.T) {
 		wantErr     error
 		wantCreated bool
 	}{
-		{name: "no filter defaults to approved", post: basePost, postID: 10, wantStatus: "1", wantCreated: true},
+		{name: "no filter defaults to held for moderation", post: basePost, postID: 10, wantStatus: "0", wantCreated: true},
 		{name: "approve verdict persists approved", post: basePost, postID: 10, filter: &fakeSpamFilter{verdict: spamVerdictApprove}, wantStatus: "1", wantCreated: true},
 		{name: "hold verdict persists moderation", post: basePost, postID: 10, filter: &fakeSpamFilter{verdict: spamVerdictHold}, wantStatus: "0", wantCreated: true},
 		{name: "spam verdict persists spam", post: basePost, postID: 10, filter: &fakeSpamFilter{verdict: spamVerdictSpam}, wantStatus: "spam", wantCreated: true},
 		{name: "missing post rejected", postID: 999, wantErr: domain.ErrNotFound},
 		{name: "unpublished post rejected", post: domain.Post{ID: 10, Status: "draft", Type: "post", Excerpt: "open"}, postID: 10, wantErr: domain.ErrNotFound},
-		{name: "closed post rejected", post: domain.Post{ID: 10, Status: "publish", Type: "post", Excerpt: "closed"}, postID: 10, wantErr: ErrCommentsClosed},
+		{name: "closed post rejected", post: domain.Post{ID: 10, Status: "publish", Type: "post", CommentStatus: "closed"}, postID: 10, wantErr: ErrCommentsClosed},
 	}
 
 	for _, tt := range tests {
@@ -216,7 +216,7 @@ func TestCommentServiceCreateRoutesSpamVerdictsAndValidatesPost(t *testing.T) {
 			}
 			writer := &fakeCommentWriter{}
 			svc := NewCommentService(&fakeCommentRepo{}, writer, &fakeCommentMeta{}, &fakePostByID{posts: posts}, tt.filter)
-			_, err := svc.Create(context.Background(), domain.Comment{PostID: tt.postID, Author: "A", AuthorEmail: "a@example.com", Content: "hello", Date: now, DateGMT: now})
+			_, _, err := svc.Create(context.Background(), domain.Comment{PostID: tt.postID, Author: "A", AuthorEmail: "a@example.com", Content: "hello", Date: now, DateGMT: now})
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Create error = %v, want %v", err, tt.wantErr)
 			}
@@ -306,8 +306,8 @@ func TestBasicCommentSpamFilterHeuristics(t *testing.T) {
 	post := domain.Post{ID: 1, Status: "publish"}
 	ctx := context.Background()
 
-	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "hello", AuthorIP: "1.2.3.4"}, post); verdict != spamVerdictApprove {
-		t.Fatalf("clean verdict = %q, want approve", verdict)
+	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "hello", AuthorIP: "1.2.3.4"}, post); verdict != spamVerdictHold {
+		t.Fatalf("clean verdict = %q, want hold", verdict)
 	}
 	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "buy viagra now", AuthorIP: "2.3.4.5"}, post); verdict != spamVerdictSpam {
 		t.Fatalf("keyword verdict = %q, want spam", verdict)
@@ -315,11 +315,11 @@ func TestBasicCommentSpamFilterHeuristics(t *testing.T) {
 	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "http://a.example http://b.example http://c.example", AuthorIP: "3.4.5.6"}, post); verdict != spamVerdictSpam {
 		t.Fatalf("link verdict = %q, want spam", verdict)
 	}
-	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "hello", AuthorIP: "9.9.9.9"}, post); verdict != spamVerdictApprove {
-		t.Fatalf("first verdict = %q, want approve", verdict)
+	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "hello", AuthorIP: "9.9.9.9"}, post); verdict != spamVerdictHold {
+		t.Fatalf("first verdict = %q, want hold", verdict)
 	}
-	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "hello again", AuthorIP: "9.9.9.9"}, post); verdict != spamVerdictApprove {
-		t.Fatalf("second verdict = %q, want approve", verdict)
+	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "hello again", AuthorIP: "9.9.9.9"}, post); verdict != spamVerdictHold {
+		t.Fatalf("second verdict = %q, want hold", verdict)
 	}
 	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "third", AuthorIP: "9.9.9.9"}, post); verdict != spamVerdictHold {
 		t.Fatalf("rate verdict = %q, want hold", verdict)

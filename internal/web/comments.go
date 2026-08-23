@@ -1,11 +1,13 @@
 package web
 
 import (
-	"fmt"
 	"html"
+	"net"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
@@ -26,6 +28,17 @@ func (s *Server) verifyCommentCSRF(r *http.Request) bool {
 	return constantTimeEqual(r.PostFormValue("comment_csrf_token"), c.Value)
 }
 
+// commentClientIP extracts the caller's IP for comment_author_IP (Req 2.5),
+// stripping the port from RemoteAddr. Falls back to the raw value when it
+// isn't a host:port pair.
+func commentClientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func (s *Server) commentSubmit(w http.ResponseWriter, r *http.Request) error {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
@@ -35,14 +48,40 @@ func (s *Server) commentSubmit(w http.ResponseWriter, r *http.Request) error {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return nil
 	}
-	postID, _ := strconv.ParseInt(r.PostFormValue("post_id"), 10, 64)
-	comment, err := s.comments.Create(r.Context(), domain.Comment{
+
+	postID, err := strconv.ParseInt(r.PostFormValue("post_id"), 10, 64)
+	if err != nil || postID <= 0 {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return nil
+	}
+
+	author := strings.TrimSpace(r.PostFormValue("author"))
+	email := strings.TrimSpace(r.PostFormValue("email"))
+	commentContent := strings.TrimSpace(r.PostFormValue("content"))
+	if author == "" || email == "" || commentContent == "" {
+		http.Error(w, "Bad Request: name, email, and comment are required", http.StatusBadRequest)
+		return nil
+	}
+	if _, err := mail.ParseAddress(email); err != nil {
+		http.Error(w, "Bad Request: invalid email address", http.StatusBadRequest)
+		return nil
+	}
+
+	c := domain.Comment{
 		PostID:      postID,
-		Author:      r.PostFormValue("author"),
-		AuthorEmail: r.PostFormValue("email"),
+		Author:      author,
+		AuthorEmail: email,
 		AuthorURL:   r.PostFormValue("url"),
-		Content:     r.PostFormValue("content"),
-	})
+		AuthorIP:    commentClientIP(r),
+		Agent:       r.UserAgent(),
+		Content:     commentContent,
+		Honeypot:    r.PostFormValue("website"),
+	}
+	if p, ok := PrincipalFrom(r.Context()); ok {
+		c.UserID = p.UserID
+	}
+
+	comment, post, err := s.comments.Create(r.Context(), c)
 	if err != nil {
 		if err == domain.ErrNotFound {
 			http.NotFound(w, r)
@@ -54,7 +93,7 @@ func (s *Server) commentSubmit(w http.ResponseWriter, r *http.Request) error {
 		}
 		return err
 	}
-	loc := fmt.Sprintf("/hello-1?comment=pending&author=%s&content=%s", url.QueryEscape(comment.Author), url.QueryEscape(comment.Content))
+	loc := "/" + url.PathEscape(post.Slug) + "?comment=pending&author=" + url.QueryEscape(comment.Author) + "&content=" + url.QueryEscape(comment.Content)
 	http.Redirect(w, r, loc, http.StatusSeeOther)
 	return nil
 }

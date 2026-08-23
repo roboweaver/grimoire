@@ -99,13 +99,19 @@ func TestAdminCommentEndpointsRequireHeaderCSRFAndReturnEnvelope(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status=%d", rec.Code)
 	}
-
+	var payload map[string]map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("body not JSON envelope: %v (%s)", err, rec.Body.String())
+	}
+	if payload["error"]["code"] == "" {
+		t.Fatalf("missing error.code in envelope: %s", rec.Body.String())
+	}
 }
 
 func TestAdminMediaUploadOversizeReturns413Envelope(t *testing.T) {
 	srv := NewServer(nil, nil, nil, nil, nil)
 	srv.auth = fakeSessions{p: auth.NewPrincipal(1, "author", []string{auth.RoleAuthor, auth.RoleAdministrator}), s: domain.Session{CSRFToken: "token"}}
-	srv.media = content.NewMediaService(stubMediaRepo{}, stubMediaWriter{}, content.MediaConfig{UploadsDir: t.TempDir(), BaseURL: "/wp-content/uploads"})
+	srv.media = content.NewMediaService(stubMediaRepo{}, stubMediaWriter{}, content.MediaConfig{UploadsDir: t.TempDir(), BaseURL: "/wp-content/uploads", MaxUploadSize: 512})
 
 	r := srv.SessionMiddleware(srv.adminAPIRouter())
 	var body bytes.Buffer
@@ -119,8 +125,15 @@ func TestAdminMediaUploadOversizeReturns413Envelope(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "x"})
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed && rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden && rec.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("unexpected status=%d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("body not JSON envelope: %v (%s)", err, rec.Body.String())
+	}
+	if payload["error"]["code"] == "" {
+		t.Fatalf("missing error.code in envelope: %s", rec.Body.String())
 	}
 }
 

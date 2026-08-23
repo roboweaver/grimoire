@@ -285,3 +285,21 @@ func atoiDefault(s string, def int) int {
 	}
 	return n
 }
+
+// clampPage normalizes a requested page/perPage pair into a safe (page,
+// limit, offset) triple: page floors to 1, perPage floors to
+// content.DefaultPerPage when unset/non-positive and ceils to
+// content.MaxPerPage, preventing an unbounded LIMIT on the admin list
+// endpoints (Req 11).
+func clampPage(page, perPage int) (normPage, limit, offset int) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage <= 0 {
+		perPage = content.DefaultPerPage
+	}
+	if perPage > content.MaxPerPage {
+		perPage = content.MaxPerPage
+	}
+	return page, perPage, (page - 1) * perPage
+}

@@ -228,8 +228,8 @@ func TestM4CommentSubmitModerateTrashUntrash(t *testing.T) {
 	}
 
 	// 3. Anonymous POST /comment with the valid double-submit token succeeds.
-	// The seeded post's default spam filter (BasicCommentSpamFilter with an
-	// empty config) auto-approves a normal, link-free, first-time comment.
+	// The default moderation policy (Req 2.2) holds every anonymous comment
+	// for review, regardless of the spam filter's verdict.
 	resp, err = env.client.PostForm(env.ts.URL+"/comment", url.Values{
 		"post_id": {"1"}, "author": {"Alice"}, "email": {"alice@example.test"}, "content": {"Great post!"},
 		"comment_csrf_token": {commentToken},
@@ -242,6 +242,9 @@ func TestM4CommentSubmitModerateTrashUntrash(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("POST /comment = %d, want 303", resp.StatusCode)
 	}
+	if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "/hello-world") {
+		t.Fatalf("POST /comment redirect Location = %q, want prefix /hello-world (real post slug)", loc)
+	}
 
 	comments, total, err := env.comments.List(env.ctx, domain.CommentFilter{PostID: 1})
 	if err != nil {
@@ -251,19 +254,86 @@ func TestM4CommentSubmitModerateTrashUntrash(t *testing.T) {
 		t.Fatalf("comments after submit = %d, want 1", total)
 	}
 	id := comments[0].ID
-	if comments[0].Status != "1" {
-		t.Fatalf("new comment status = %q, want auto-approved (1)", comments[0].Status)
+	if comments[0].Status != "0" {
+		t.Fatalf("new comment status = %q, want held for moderation (0)", comments[0].Status)
 	}
 
-	// The freshly approved comment renders immediately on the public page.
+	// The freshly submitted (held) comment must NOT render publicly yet.
 	resp, err = env.client.Get(env.ts.URL + "/hello-world")
 	if err != nil {
 		t.Fatalf("GET /hello-world (post-submit): %v", err)
 	}
 	body, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if bodyContains(body, "Great post!") {
+		t.Fatal("held comment must not render publicly before moderation")
+	}
+	// The comment CSRF token/cookie rotate on every GET; re-extract the fresh
+	// one before the next POST.
+	commentToken = formInputs(string(body))["comment_csrf_token"]
+	if commentToken == "" {
+		t.Fatal("single page (post-submit) missing comment_csrf_token")
+	}
+
+	// 3b. Honeypot: a bot-like submission with the hidden "website" field
+	// populated is silently marked spam (the request still succeeds, so bots
+	// cannot distinguish it from a normal hold) and never renders publicly.
+	spamResp, err := env.client.PostForm(env.ts.URL+"/comment", url.Values{
+		"post_id": {"1"}, "author": {"Bot"}, "email": {"bot@example.test"}, "content": {"buy cheap stuff now"},
+		"comment_csrf_token": {commentToken}, "website": {"http://spam.example"},
+	})
+	if err != nil {
+		t.Fatalf("POST /comment (honeypot): %v", err)
+	}
+	io.Copy(io.Discard, spamResp.Body)
+	spamResp.Body.Close()
+	if spamResp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST /comment (honeypot) = %d, want 303", spamResp.StatusCode)
+	}
+	spamComments, _, err := env.comments.List(env.ctx, domain.CommentFilter{PostID: 1, Statuses: []string{"spam"}})
+	if err != nil {
+		t.Fatalf("comments.List (spam): %v", err)
+	}
+	if len(spamComments) != 1 || spamComments[0].Author != "Bot" {
+		t.Fatalf("honeypot submission comments = %+v, want one spam-flagged comment from Bot", spamComments)
+	}
+	resp, err = env.client.Get(env.ts.URL + "/hello-world")
+	if err != nil {
+		t.Fatalf("GET /hello-world (post-honeypot): %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if bodyContains(body, "buy cheap stuff now") {
+		t.Fatal("honeypot-flagged (spam) comment must not render publicly")
+	}
+
+	// 4. Admin approves the held comment via the new JSON status route (Req
+	// 4: POST /admin/api/comments/{id}/status with a {"status": "..."} body),
+	// guarded by the synchronizer CSRF header.
+	statusBody, _ := json.Marshal(map[string]string{"status": "approve"})
+	approveResp := env.adminJSON(http.MethodPost, fmt.Sprintf("/admin/api/comments/%d/status", id), bytes.NewReader(statusBody))
+	io.Copy(io.Discard, approveResp.Body)
+	approveResp.Body.Close()
+	if approveResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /status approve = %d, want 200", approveResp.StatusCode)
+	}
+	comment, err := env.repos.Comments.ByID(env.ctx, id)
+	if err != nil {
+		t.Fatalf("Comments.ByID after status approve: %v", err)
+	}
+	if comment.Status != "1" {
+		t.Fatalf("status after /status approve = %q, want 1 (approved)", comment.Status)
+	}
+
+	// The now-approved comment renders on the public page.
+	resp, err = env.client.Get(env.ts.URL + "/hello-world")
+	if err != nil {
+		t.Fatalf("GET /hello-world (post-approve): %v", err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
 	if !bodyContains(body, "Great post!") {
-		t.Fatal("auto-approved comment must render publicly")
+		t.Fatal("approved comment must render publicly")
 	}
 
 	// 4. Admin unapproves (holds) the comment via the authenticated JSON API,
@@ -288,7 +358,7 @@ func TestM4CommentSubmitModerateTrashUntrash(t *testing.T) {
 		t.Fatalf("admin action without csrf = %d, want 403", noCSRFResp.StatusCode)
 	}
 
-	comment, err := env.repos.Comments.ByID(env.ctx, id)
+	comment, err = env.repos.Comments.ByID(env.ctx, id)
 	if err != nil {
 		t.Fatalf("Comments.ByID after unapprove: %v", err)
 	}
@@ -434,10 +504,23 @@ func TestM4MediaUploadAttachServe(t *testing.T) {
 		t.Fatalf("uploaded file content = %q, want %q", data, fileContent)
 	}
 
-	// 2. Attach the media to a post (parent linkage).
-	if err := env.media.Attach(env.ctx, created.ID, 1); err != nil {
-		t.Fatalf("media.Attach: %v", err)
+	// 2. Attach the media to a post (parent linkage) via the admin JSON API
+	// (Req 7: POST /admin/api/media/{id}/attach, {"parentId": ...} body).
+	attachBody, _ := json.Marshal(map[string]int64{"parentId": 1})
+	attachResp := env.adminJSON(http.MethodPost, fmt.Sprintf("/admin/api/media/%d/attach", created.ID), bytes.NewReader(attachBody))
+	attachRespBody, _ := io.ReadAll(attachResp.Body)
+	attachResp.Body.Close()
+	if attachResp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /admin/api/media/%d/attach = %d, want 200; body=%s", created.ID, attachResp.StatusCode, attachRespBody)
 	}
+	// Attaching an unknown media id 404s.
+	unknownAttachResp := env.adminJSON(http.MethodPost, "/admin/api/media/999999/attach", bytes.NewReader(attachBody))
+	io.Copy(io.Discard, unknownAttachResp.Body)
+	unknownAttachResp.Body.Close()
+	if unknownAttachResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("POST /admin/api/media/999999/attach = %d, want 404", unknownAttachResp.StatusCode)
+	}
+
 	attached, err := env.media.Get(env.ctx, created.ID)
 	if err != nil {
 		t.Fatalf("media.Get after attach: %v", err)
@@ -568,6 +651,24 @@ func TestM4NavMenuResolutionAndRendering(t *testing.T) {
 	}
 	if !bodyContains(menusBody, "Primary") {
 		t.Fatal("admin menus API must list the seeded Primary menu")
+	}
+
+	// 3b. GET /admin/api/menus/{id} (Req 7) returns the same menu by its term
+	// id, and 404s on an unknown id.
+	menuResp := env.adminJSON(http.MethodGet, "/admin/api/menus/900", nil)
+	menuBody, _ := io.ReadAll(menuResp.Body)
+	menuResp.Body.Close()
+	if menuResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /admin/api/menus/900 = %d, want 200; body=%s", menuResp.StatusCode, menuBody)
+	}
+	if !bodyContains(menuBody, "Primary") || !bodyContains(menuBody, "Home Custom") {
+		t.Fatalf("GET /admin/api/menus/900 body = %s, want Primary menu with Home Custom item", menuBody)
+	}
+	missingMenuResp := env.adminJSON(http.MethodGet, "/admin/api/menus/999999", nil)
+	io.Copy(io.Discard, missingMenuResp.Body)
+	missingMenuResp.Body.Close()
+	if missingMenuResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET /admin/api/menus/999999 = %d, want 404", missingMenuResp.StatusCode)
 	}
 
 	// 4. Empty-degradation: an unassigned location resolves to an empty menu

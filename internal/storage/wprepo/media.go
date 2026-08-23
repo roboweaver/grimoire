@@ -144,5 +144,11 @@ func (r *MediaRepo) SetParent(ctx context.Context, id, parentID int64) error {
 	if err != nil {
 		return err
 	}
-	return errNotFoundIfZero(res)
+	return errNotFoundIfMissing(ctx, res, func(ctx context.Context) (bool, error) {
+		return r.db.NewSelect().
+			TableExpr("?", bun.Ident(r.prefix+"posts")).
+			Where("? = ?", bun.Ident("ID"), id).
+			Where("post_type = ?", "attachment").
+			Exists(ctx)
+	})
 }

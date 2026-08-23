@@ -55,27 +55,29 @@ func (s *CommentService) List(ctx context.Context, filter domain.CommentFilter) 
 	return items, total, nil
 }
 
-func (s *CommentService) Create(ctx context.Context, c domain.Comment) (domain.Comment, error) {
+func (s *CommentService) Create(ctx context.Context, c domain.Comment) (domain.Comment, domain.Post, error) {
 	post, err := s.posts.ByID(ctx, c.PostID)
 	if err != nil {
-		return domain.Comment{}, err
+		return domain.Comment{}, domain.Post{}, err
 	}
 	if post.Status != "publish" {
-		return domain.Comment{}, domain.ErrNotFound
+		return domain.Comment{}, domain.Post{}, domain.ErrNotFound
 	}
-	if strings.EqualFold(post.Excerpt, "closed") {
-		return domain.Comment{}, ErrCommentsClosed
+	if strings.EqualFold(post.CommentStatus, "closed") {
+		return domain.Comment{}, domain.Post{}, ErrCommentsClosed
 	}
-	status := commentStatusOK
+	// Req 2.2: every anonymous comment defaults to held-for-moderation; only
+	// an explicit spam-filter "approve" verdict publishes immediately.
+	status := commentStatusHold
 	if s.spam != nil {
 		verdict, err := s.spam.Evaluate(ctx, c, post)
 		if err != nil {
-			return domain.Comment{}, err
+			return domain.Comment{}, domain.Post{}, err
 		}
 		switch verdict {
-		case spamVerdictApprove, "":
+		case spamVerdictApprove:
 			status = commentStatusOK
-		case spamVerdictHold:
+		case spamVerdictHold, "":
 			status = commentStatusHold
 		case spamVerdictSpam:
 			status = commentStatusSpam
@@ -84,12 +86,15 @@ func (s *CommentService) Create(ctx context.Context, c domain.Comment) (domain.C
 		}
 	}
 	c.Status = status
+	now := s.now()
+	c.Date = now
+	c.DateGMT = now.UTC()
 	id, err := s.writer.Create(ctx, c)
 	if err != nil {
-		return domain.Comment{}, err
+		return domain.Comment{}, domain.Post{}, err
 	}
 	c.ID = id
-	return c, nil
+	return c, post, nil
 }
 
 func (s *CommentService) Approve(ctx context.Context, id int64) error {

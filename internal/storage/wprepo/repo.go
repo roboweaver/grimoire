@@ -17,32 +17,34 @@ import (
 // postColumns are the posts columns selected into a postRow, in WP order.
 var postColumns = []string{
 	"ID", "post_author", "post_date", "post_content",
-	"post_title", "post_excerpt", "post_status", "post_name", "post_type",
+	"post_title", "post_excerpt", "post_status", "post_name", "post_type", "comment_status",
 }
 
 type postRow struct {
-	ID      int64     `bun:"ID"`
-	Author  int64     `bun:"post_author"`
-	Date    time.Time `bun:"post_date"`
-	Content string    `bun:"post_content"`
-	Title   string    `bun:"post_title"`
-	Excerpt string    `bun:"post_excerpt"`
-	Status  string    `bun:"post_status"`
-	Slug    string    `bun:"post_name"`
-	Type    string    `bun:"post_type"`
+	ID            int64     `bun:"ID"`
+	Author        int64     `bun:"post_author"`
+	Date          time.Time `bun:"post_date"`
+	Content       string    `bun:"post_content"`
+	Title         string    `bun:"post_title"`
+	Excerpt       string    `bun:"post_excerpt"`
+	Status        string    `bun:"post_status"`
+	Slug          string    `bun:"post_name"`
+	Type          string    `bun:"post_type"`
+	CommentStatus string    `bun:"comment_status"`
 }
 
 func (r postRow) toDomain() domain.Post {
 	return domain.Post{
-		ID:      r.ID,
-		Author:  r.Author,
-		Date:    r.Date,
-		Content: r.Content,
-		Title:   r.Title,
-		Excerpt: r.Excerpt,
-		Status:  r.Status,
-		Slug:    r.Slug,
-		Type:    r.Type,
+		ID:            r.ID,
+		Author:        r.Author,
+		Date:          r.Date,
+		Content:       r.Content,
+		Title:         r.Title,
+		Excerpt:       r.Excerpt,
+		Status:        r.Status,
+		Slug:          r.Slug,
+		Type:          r.Type,
+		CommentStatus: r.CommentStatus,
 	}
 }
 
@@ -112,7 +114,7 @@ func (r *PostRepo) ByTermSlug(ctx context.Context, taxonomy, termSlug string, li
 	err := r.db.NewSelect().
 		TableExpr("? AS p", bun.Ident(r.prefix+"posts")).
 		ColumnExpr("p.?", bun.Ident("ID")).
-		ColumnExpr("p.post_author, p.post_date, p.post_content, p.post_title, p.post_excerpt, p.post_status, p.post_name, p.post_type").
+		ColumnExpr("p.post_author, p.post_date, p.post_content, p.post_title, p.post_excerpt, p.post_status, p.post_name, p.post_type, p.comment_status").
 		Join("JOIN ? AS tr ON tr.object_id = p.?", bun.Ident(r.prefix+"term_relationships"), bun.Ident("ID")).
 		Join("JOIN ? AS tt ON tt.term_taxonomy_id = tr.term_taxonomy_id", bun.Ident(r.prefix+"term_taxonomy")).
 		Join("JOIN ? AS t ON t.term_id = tt.term_id", bun.Ident(r.prefix+"terms")).

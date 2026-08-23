@@ -18,6 +18,10 @@ type MediaConfig struct {
 	UploadsDir   string
 	BaseURL      string
 	AllowedMIMEs []string
+	// MaxUploadSize caps the accepted upload body size in bytes. Callers that
+	// leave it unset (e.g. existing tests) get the same 10 MiB default the
+	// admin API applies in production (Req 5).
+	MaxUploadSize int64
 }
 
 type MediaUpload struct {
@@ -37,6 +41,9 @@ type MediaService struct {
 func NewMediaService(repo domain.MediaRepository, writer domain.MediaWriter, cfg MediaConfig) *MediaService {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = "/wp-content/uploads"
+	}
+	if cfg.MaxUploadSize <= 0 {
+		cfg.MaxUploadSize = 10 << 20 // 10 MiB
 	}
 	return &MediaService{repo: repo, writer: writer, cfg: cfg, now: time.Now}
 }

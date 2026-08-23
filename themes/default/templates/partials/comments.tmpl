@@ -15,7 +15,7 @@
     <p>No comments yet</p>
   {{end}}
   <form method="post" action="/comment">
-    <input type="hidden" name="post_id" value="{{.Post.Slug}}">
+    <input type="hidden" name="post_id" value="{{.Post.ID}}">
     <input type="hidden" name="comment_csrf_token" value="{{.CommentToken}}">
     <p><label>Name <input name="author"></label></p>
     <p><label>Email <input name="email"></label></p>

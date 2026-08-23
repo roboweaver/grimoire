@@ -254,6 +254,12 @@ func buildMenuTree(flat []domain.NavMenuItem) []domain.NavMenuItem {
 	for _, item := range flat {
 		children[item.ParentID] = append(children[item.ParentID], item)
 	}
+	// visited guards against corrupt data (a self-parenting or cyclic
+	// _menu_item_menu_item_parent chain) causing unbounded recursion: an id
+	// already on the current descent path is cut off rather than re-entered.
+	// It is un-marked on the way back up so unrelated sibling subtrees are
+	// never falsely blocked.
+	visited := map[int64]bool{}
 	var attach func(parent int64) []domain.NavMenuItem
 	attach = func(parent int64) []domain.NavMenuItem {
 		items := children[parent]
@@ -264,7 +270,14 @@ func buildMenuTree(flat []domain.NavMenuItem) []domain.NavMenuItem {
 			return items[i].Order < items[j].Order
 		})
 		for i := range items {
-			items[i].Children = attach(items[i].ID)
+			id := items[i].ID
+			if visited[id] {
+				items[i].Children = nil
+				continue
+			}
+			visited[id] = true
+			items[i].Children = attach(id)
+			delete(visited, id)
 		}
 		return items
 	}

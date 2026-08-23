@@ -40,6 +40,9 @@ func NewBasicCommentSpamFilter(cfg BasicCommentSpamFilterConfig) *BasicCommentSp
 }
 
 func (f *BasicCommentSpamFilter) Evaluate(_ context.Context, c domain.Comment, _ domain.Post) (string, error) {
+	if strings.TrimSpace(c.Honeypot) != "" {
+		return spamVerdictSpam, nil
+	}
 	content := strings.ToLower(c.Content)
 	for _, word := range f.cfg.BannedWords {
 		if strings.Contains(content, strings.ToLower(word)) {
@@ -52,7 +55,9 @@ func (f *BasicCommentSpamFilter) Evaluate(_ context.Context, c domain.Comment, _
 	if c.AuthorIP != "" && f.overLimit(c.AuthorIP) {
 		return spamVerdictHold, nil
 	}
-	return spamVerdictApprove, nil
+	// Design: "every anonymous comment defaults to the moderation queue"
+	// (Req 2.2) — a clean, non-spam submission is held, not auto-published.
+	return spamVerdictHold, nil
 }
 
 func (f *BasicCommentSpamFilter) overLimit(ip string) bool {

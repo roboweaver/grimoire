@@ -85,10 +85,37 @@ func (s *Server) denyUnauthenticated(w http.ResponseWriter, r *http.Request) {
 // requireSessionCSRF enforces the per-session synchronizer token on an
 // authenticated unsafe request: the submitted csrf_token field must equal the
 // session's stored CSRF token. Returns true when the request may proceed.
+// Failures render the plain-text error body used by the non-JSON login/logout
+// flow (authhandlers.go); JSON API routes use requireSessionCSRFJSON instead.
 func (s *Server) requireSessionCSRF(w http.ResponseWriter, r *http.Request) bool {
+	return s.checkSessionCSRF(r, func(status int) {
+		http.Error(w, http.StatusText(status), status)
+	})
+}
+
+// requireSessionCSRFJSON is the JSON-API counterpart of requireSessionCSRF: it
+// applies the same CSRF check but renders failures as the standard
+// {error:{code,message}} envelope instead of a plain-text body (Req 14).
+func (s *Server) requireSessionCSRFJSON(w http.ResponseWriter, r *http.Request) bool {
+	return s.checkSessionCSRF(r, func(status int) {
+		switch status {
+		case http.StatusBadRequest:
+			writeJSONError(w, status, "bad_request", "malformed request")
+		default:
+			writeJSONError(w, status, "forbidden", "CSRF validation failed")
+		}
+	})
+}
+
+// checkSessionCSRF is the shared validation core for requireSessionCSRF and
+// requireSessionCSRFJSON: it looks up the session, accepts either the
+// X-CSRF-Token header or a csrf_token form field, and invokes fail with the
+// appropriate status on any failure. Returns true when the request may
+// proceed.
+func (s *Server) checkSessionCSRF(r *http.Request, fail func(status int)) bool {
 	sess, ok := sessionFrom(r.Context())
 	if !ok {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		fail(http.StatusForbidden)
 		return false
 	}
 	if token := r.Header.Get("X-CSRF-Token"); token != "" {
@@ -97,11 +124,11 @@ func (s *Server) requireSessionCSRF(w http.ResponseWriter, r *http.Request) bool
 		}
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		fail(http.StatusBadRequest)
 		return false
 	}
 	if sess.CSRFToken == "" || !constantTimeEqual(r.PostFormValue(csrfFieldName), sess.CSRFToken) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		fail(http.StatusForbidden)
 		return false
 	}
 	return true

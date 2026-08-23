@@ -88,6 +88,21 @@ func runCommentsContract(t *testing.T, newRepos NewReposFunc) {
 		if updated.Status != "1" {
 			t.Fatalf("updated status = %q, want 1", updated.Status)
 		}
+		// A no-op update (setting the status to the value it already holds)
+		// must still succeed rather than report ErrNotFound: some vendor
+		// drivers (MySQL, without CLIENT_FOUND_ROWS) report RowsAffected as
+		// "rows changed", not "rows matched", so a naive RowsAffected==0
+		// check would misread this as a missing row (Req 12 parity).
+		if err := repos.CommentWriter.UpdateStatus(ctx, id, "1"); err != nil {
+			t.Fatalf("UpdateStatus no-op: %v", err)
+		}
+		noop, err := repos.Comments.ByID(ctx, id)
+		if err != nil {
+			t.Fatalf("ByID after no-op update: %v", err)
+		}
+		if noop.Status != "1" {
+			t.Fatalf("status after no-op update = %q, want 1", noop.Status)
+		}
 		if err := repos.CommentWriter.UpdateStatus(ctx, 9999, "spam"); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("UpdateStatus missing err = %v, want ErrNotFound", err)
 		}

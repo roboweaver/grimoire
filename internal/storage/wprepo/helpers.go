@@ -68,6 +68,34 @@ func errNotFoundIfZero(res sql.Result) error {
 	return nil
 }
 
+// errNotFoundIfMissing disambiguates "0 rows affected" from an UPDATE that
+// genuinely found no matching row versus one that matched a row but made no
+// actual change to it. SQLite and PostgreSQL's default drivers report
+// RowsAffected as "rows matched by WHERE", so a true no-op UPDATE (setting a
+// column to the value it already holds) still reports 1. MySQL's default
+// driver instead reports "rows whose values actually changed", so the same
+// no-op UPDATE reports 0 there even though the row exists — which would
+// otherwise be misread as domain.ErrNotFound. When RowsAffected is 0, exists
+// is consulted to tell the two cases apart; only a genuinely absent row is an
+// error.
+func errNotFoundIfMissing(ctx context.Context, res sql.Result, exists func(ctx context.Context) (bool, error)) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	ok, err := exists(ctx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 // vendorOf maps a Bun dialect to the vendor string understood by rebind.
 func vendorOf(db *bun.DB) string {
 	switch db.Dialect().Name() {

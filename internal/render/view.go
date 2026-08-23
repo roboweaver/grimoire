@@ -11,6 +11,7 @@ import (
 // auto-derived summary (see internal/content.Excerpt); the template.HTML cast is
 // applied at the web trust boundary (internal/web/view.go).
 type PostView struct {
+	ID      int64
 	Slug    string
 	Title   string
 	Excerpt template.HTML

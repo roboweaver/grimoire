@@ -79,6 +79,19 @@ func runMediaContract(t *testing.T, newRepos NewReposFunc) {
 		if updated.ParentID != 5 {
 			t.Fatalf("parent = %d, want 5", updated.ParentID)
 		}
+		// A no-op SetParent (same parent id it already has) must still
+		// succeed rather than report ErrNotFound (Req 12 MySQL parity — see
+		// the matching comment in comments_contract.go).
+		if err := repos.MediaWriter.SetParent(ctx, id, 5); err != nil {
+			t.Fatalf("SetParent no-op: %v", err)
+		}
+		noop, err := repos.Media.ByID(ctx, id)
+		if err != nil {
+			t.Fatalf("ByID after no-op SetParent: %v", err)
+		}
+		if noop.ParentID != 5 {
+			t.Fatalf("parent after no-op SetParent = %d, want 5", noop.ParentID)
+		}
 		if err := repos.MediaWriter.SetParent(ctx, 9999, 1); !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("SetParent missing err = %v, want ErrNotFound", err)
 		}

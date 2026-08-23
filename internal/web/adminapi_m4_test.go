@@ -137,6 +137,39 @@ func TestAdminMediaUploadOversizeReturns413Envelope(t *testing.T) {
 	}
 }
 
+// TestAdminMediaUploadDisallowedMIMEReturns415Envelope proves the
+// content-sniffed MIME allowlist rejects a disallowed upload with 415
+// Unsupported Media Type (adminMediaUpload's mimeAllowed check), not merely
+// as an internal detail but as an observable HTTP-level contract.
+func TestAdminMediaUploadDisallowedMIMEReturns415Envelope(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil)
+	srv.auth = fakeSessions{p: auth.NewPrincipal(1, "author", []string{auth.RoleAuthor, auth.RoleAdministrator}), s: domain.Session{CSRFToken: "token"}}
+	srv.media = content.NewMediaService(stubMediaRepo{}, stubMediaWriter{}, content.MediaConfig{UploadsDir: t.TempDir(), BaseURL: "/wp-content/uploads", AllowedMIMEs: []string{"image/png"}})
+
+	r := srv.SessionMiddleware(srv.adminAPIRouter())
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", "notes.txt")
+	fw.Write([]byte("plain text content, not an allowed image type"))
+	mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/media", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("X-CSRF-Token", "token")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "x"})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("body not JSON envelope: %v (%s)", err, rec.Body.String())
+	}
+	if payload["error"]["code"] != "unsupported_media_type" {
+		t.Fatalf("error.code = %q, want unsupported_media_type: %s", payload["error"]["code"], rec.Body.String())
+	}
+}
+
 func TestJSONErrorEnvelopeHelper(t *testing.T) {
 	rec := httptest.NewRecorder()
 	writeJSONError(rec, http.StatusBadRequest, "bad_request", "oops")

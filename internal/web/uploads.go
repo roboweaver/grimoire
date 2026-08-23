@@ -21,6 +21,10 @@ func (s *Server) uploads(w http.ResponseWriter, r *http.Request) error {
 	}
 	cleanRoot, err = filepath.EvalSymlinks(cleanRoot)
 	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return nil
+		}
 		return err
 	}
 	cleanFull, err := filepath.Abs(full)

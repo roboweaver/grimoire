@@ -43,11 +43,41 @@ type commentItemResponse struct {
 	PostTitle   string `json:"postTitle"`
 	Author      string `json:"author"`
 	AuthorEmail string `json:"authorEmail"`
-	AuthorURL   string `json:"authorUrl"`
+	AuthorURL   string `json:"authorURL"`
 	Content     string `json:"content"`
 	Excerpt     string `json:"excerpt"`
 	Status      string `json:"status"`
 	Date        string `json:"date"`
+}
+
+// commentStatusParamToStorage maps the SPA/HTTP-boundary status vocabulary
+// (web/admin/src/views/Comments.tsx: "pending"/"approved"/"spam"/"trash") to
+// the raw values stored in the comment_approved column and used internally
+// by internal/content/comments.go ("0"/"1"/"spam"/"trash"). Unrecognized
+// values pass through unchanged so callers that already know the storage
+// vocabulary keep working.
+func commentStatusParamToStorage(status string) string {
+	switch status {
+	case "pending":
+		return "0"
+	case "approved":
+		return "1"
+	default:
+		return status
+	}
+}
+
+// commentStatusStorageToParam is the inverse of commentStatusParamToStorage,
+// applied to outbound DTOs so the SPA never sees raw "0"/"1" values.
+func commentStatusStorageToParam(status string) string {
+	switch status {
+	case "0":
+		return "pending"
+	case "1":
+		return "approved"
+	default:
+		return status
+	}
 }
 
 type commentsResponse struct {
@@ -65,7 +95,7 @@ func (s *Server) adminComments(w http.ResponseWriter, r *http.Request) error {
 	page, perPage, offset := clampPage(atoiDefault(q.Get("page"), 1), atoiDefault(q.Get("perPage"), 0))
 	filter := domain.CommentFilter{Limit: perPage, Offset: offset}
 	if status := q.Get("status"); status != "" {
-		filter.Statuses = []string{status}
+		filter.Statuses = []string{commentStatusParamToStorage(status)}
 	}
 	if postID := atoiDefault(q.Get("postId"), 0); postID > 0 {
 		filter.PostID = int64(postID)
@@ -97,7 +127,7 @@ func (s *Server) adminComments(w http.ResponseWriter, r *http.Request) error {
 			AuthorURL:   c.AuthorURL,
 			Content:     c.Content,
 			Excerpt:     commentExcerpt(c.Content),
-			Status:      c.Status,
+			Status:      commentStatusStorageToParam(c.Status),
 			Date:        c.Date.UTC().Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}

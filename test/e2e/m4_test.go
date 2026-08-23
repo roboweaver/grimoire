@@ -102,11 +102,7 @@ func newM4Env(t *testing.T) *m4Env {
 		nil,
 	).WithContentFeatures(comments, media, menus).
 		WithAuth(sm, web.AuthConfig{}).
-		WithAdmin(admin.Handler("/admin"), adminSvc).
-		WithAdmin(admin.Handler("/admin"), content.NewAdminService(
-			repos.AdminPosts, repos.PostWriter, repos.PostCounter,
-			repos.UserCounter, repos.TermCounter, repos.Users,
-		))
+		WithAdmin(admin.Handler("/admin"), adminSvc)
 
 	ts := httptest.NewServer(srv.Routes())
 	t.Cleanup(ts.Close)

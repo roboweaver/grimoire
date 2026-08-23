@@ -253,8 +253,6 @@ without leaking secrets.
 
 ## Implementation deviations
 
-_None yet — this section will record any spec-consistent clarifications made
-during implementation (mirroring `plans/03-spectrum-admin`), for example the exact
-public comment endpoint shape (nested `/{post}/comments` vs flat `/comments`), the
-chosen spam-heuristic thresholds, the selected Spectrum upload primitive, and
-whether uploads are served directly or proxied in the reference deployment._
+- The admin media view uses Spectrum layout primitives plus a native file input triggered from a Spectrum `ActionButton` rather than `DropZone`/`FileTrigger`. This keeps the UI within the existing M3 dependency set and avoids introducing new upload abstractions while still matching the Spectrum chrome and keyboard flow required by Req 14.3/14.6.
+- The reference deployment continues to serve uploads directly from the configured on-disk root (`serve_mode=direct`); the documented proxy/CDN alternative remains config-level only in M4.
+- Overlay validation for Req 13.3/13.5 was satisfied by exercising the additive migration + seeded WordPress-shaped schema locally and confirming the only new schema introduced is `{prefix}comments`, `{prefix}commentmeta`, and the four greenfield-only `{prefix}posts` columns from migration `0003_comments_media_menus`. No extra deviation against the live-WP contract was found, so no design change was required.

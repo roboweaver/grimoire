@@ -66,6 +66,69 @@ type TermCounter interface {
 	CountTerms(ctx context.Context, taxonomy string) (int, error)
 }
 
+// CommentFilter selects comments for the public list or admin queue. Empty
+// Statuses means all statuses; PostID 0 means across all posts.
+type CommentFilter struct {
+	PostID   int64
+	Statuses []string
+	Limit    int
+	Offset   int
+}
+
+// CommentRepository reads comments from {prefix}comments.
+type CommentRepository interface {
+	List(ctx context.Context, f CommentFilter) ([]Comment, error)
+	Count(ctx context.Context, f CommentFilter) (int, error)
+	ByID(ctx context.Context, id int64) (Comment, error)
+}
+
+// CommentWriter inserts and moderates comments.
+type CommentWriter interface {
+	Create(ctx context.Context, c Comment) (int64, error)
+	UpdateStatus(ctx context.Context, id int64, status string) error
+}
+
+// CommentMetaRepository reads and writes {prefix}commentmeta.
+type CommentMetaRepository interface {
+	Get(ctx context.Context, commentID int64, key string) (string, error)
+	Set(ctx context.Context, commentID int64, key, value string) error
+	ByComment(ctx context.Context, commentID int64) (map[string]string, error)
+	Delete(ctx context.Context, commentID int64, key string) error
+}
+
+// MediaFilter selects attachments for the media library. ParentID 0 means any.
+type MediaFilter struct {
+	ParentID int64
+	Limit    int
+	Offset   int
+}
+
+// MediaRepository lists and reads attachments.
+type MediaRepository interface {
+	List(ctx context.Context, f MediaFilter) ([]Media, error)
+	Count(ctx context.Context, f MediaFilter) (int, error)
+	ByID(ctx context.Context, id int64) (Media, error)
+}
+
+// MediaWriter creates attachments and updates attachment parents.
+type MediaWriter interface {
+	Create(ctx context.Context, m Media) (int64, error)
+	SetParent(ctx context.Context, id, parentID int64) error
+}
+
+// NavMenuRepository reads menus and their items.
+type NavMenuRepository interface {
+	Menus(ctx context.Context) ([]NavMenu, error)
+	MenuBySlug(ctx context.Context, slug string) (NavMenu, error)
+	MenuByID(ctx context.Context, id int64) (NavMenu, error)
+	MenuByLocation(ctx context.Context, theme, location string) (NavMenu, error)
+}
+
+// CommentSpamFilter classifies anonymous comment submissions before persistence.
+type CommentSpamFilter interface {
+	Evaluate(ctx context.Context, c Comment, post Post) (string, error)
+}
+
 // OptionRepository reads site options.
 type OptionRepository interface {
 	// Get returns an option value by name, or ErrNotFound.

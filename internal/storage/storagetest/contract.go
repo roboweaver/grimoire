@@ -32,23 +32,99 @@ func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error 
 	}{
 		{`INSERT INTO ` + prefix + `users (ID, user_login, user_nicename, display_name) VALUES (?, ?, ?, ?)`,
 			[]any{1, "admin", "admin", "Admin"}},
-		{postInsert(prefix), postArgs(1, "hello-1", "Hello One", "post", "publish", "2024-01-01 00:00:00")},
-		{postInsert(prefix), postArgs(2, "hello-2", "Hello Two", "post", "publish", "2024-01-02 00:00:00")},
-		{postInsert(prefix), postArgs(3, "hello-3", "Hello Three", "post", "publish", "2024-01-03 00:00:00")},
-		{postInsert(prefix), postArgs(4, "secret", "Secret Draft", "post", "draft", "2024-01-04 00:00:00")},
-		{postInsert(prefix), postArgs(5, "about", "About", "page", "publish", "2024-01-05 00:00:00")},
+		{postInsert(prefix), postArgs(1, "hello-1", "Hello One", "post", "publish", "2024-01-01 00:00:00", "open", 0, "", 0)},
+		{postInsert(prefix), postArgs(2, "hello-2", "Hello Two", "post", "publish", "2024-01-02 00:00:00", "open", 0, "", 0)},
+		{postInsert(prefix), postArgs(3, "hello-3", "Hello Three", "post", "publish", "2024-01-03 00:00:00", "open", 0, "", 0)},
+		{postInsert(prefix), postArgs(4, "secret", "Secret Draft", "post", "draft", "2024-01-04 00:00:00", "closed", 0, "", 0)},
+		{postInsert(prefix), postArgs(5, "about", "About", "page", "publish", "2024-01-05 00:00:00", "open", 0, "", 0)},
+		{postInsert(prefix), postArgs(201, "photo", "Photo", "attachment", "inherit", "2024-01-06 00:00:00", "closed", 1, "image/jpeg", 0)},
+		{postInsert(prefix), postArgs(202, "asset", "Asset", "attachment", "inherit", "2024-01-07 00:00:00", "closed", 0, "image/png", 0)},
+		{postInsert(prefix), postArgs(301, "menu-home", "Home", "nav_menu_item", "publish", "2024-01-08 00:00:00", "closed", 0, "", 1)},
+		{postInsert(prefix), postArgs(302, "", "", "nav_menu_item", "publish", "2024-01-08 00:01:00", "closed", 0, "", 2)},
+		{postInsert(prefix), postArgs(303, "old-news", "", "nav_menu_item", "publish", "2024-01-08 00:02:00", "closed", 0, "", 3)},
+		{postInsert(prefix), postArgs(304, "sub-home", "Sub Home", "nav_menu_item", "publish", "2024-01-08 00:03:00", "closed", 0, "", 4)},
 		{`INSERT INTO ` + prefix + `terms (term_id, name, slug) VALUES (?, ?, ?)`,
 			[]any{10, "News", "news"}},
+		{`INSERT INTO ` + prefix + `terms (term_id, name, slug) VALUES (?, ?, ?)`,
+			[]any{30, "Primary", "primary"}},
 		{`INSERT INTO ` + prefix + `term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)`,
 			[]any{20, 10, "category", "", 0, 2}},
+		{`INSERT INTO ` + prefix + `term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)`,
+			[]any{40, 30, "nav_menu", "", 0, 4}},
 		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
 			[]any{3, 20, 0}},
 		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
 			[]any{2, 20, 0}},
+		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
+			[]any{301, 40, 0}},
+		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
+			[]any{302, 40, 0}},
+		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
+			[]any{303, 40, 0}},
+		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
+			[]any{304, 40, 0}},
 		{`INSERT INTO ` + prefix + `options (option_name, option_value, autoload) VALUES (?, ?, ?)`,
 			[]any{"blogname", "grimoire test", "yes"}},
 		{`INSERT INTO ` + prefix + `options (option_name, option_value, autoload) VALUES (?, ?, ?)`,
 			[]any{"blogdescription", "tagline", "yes"}},
+		{`INSERT INTO ` + prefix + `options (option_name, option_value, autoload) VALUES (?, ?, ?)`,
+			[]any{"stylesheet", "twentytwentyfive", "yes"}},
+		{`INSERT INTO ` + prefix + `options (option_name, option_value, autoload) VALUES (?, ?, ?)`,
+			[]any{"theme_mods_twentytwentyfive", `a:1:{s:18:"nav_menu_locations";a:1:{s:7:"primary";i:30;}}`, "yes"}},
+		{`INSERT INTO ` + prefix + `comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_parent, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[]any{101, 1, "Alice", "alice@example.com", "https://alice.example.com", "198.51.100.1", "2024-01-01 10:00:00", "2024-01-01 10:00:00", "approved comment", "1", "Browser A", 0, 0}},
+		{`INSERT INTO ` + prefix + `comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_parent, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[]any{102, 1, "Bob", "bob@example.com", "", "198.51.100.2", "2024-01-02 10:00:00", "2024-01-02 10:00:00", "held comment", "0", "Browser B", 0, 0}},
+		{`INSERT INTO ` + prefix + `comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_parent, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[]any{103, 2, "Spammer", "spam@example.com", "", "198.51.100.3", "2024-01-03 10:00:00", "2024-01-03 10:00:00", "spam comment", "spam", "SpamBot", 0, 0}},
+		{`INSERT INTO ` + prefix + `comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_parent, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[]any{104, 2, "Trashed", "trash@example.com", "", "198.51.100.4", "2024-01-04 10:00:00", "2024-01-04 10:00:00", "trash comment", "trash", "Browser C", 0, 0}},
+		{`INSERT INTO ` + prefix + `commentmeta (comment_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{101, "_seed", "comment-101"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{201, "_wp_attached_file", "2024/01/photo.jpg"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{202, "_wp_attached_file", "2024/01/asset.png"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{301, "_menu_item_type", "custom"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{301, "_menu_item_object", "custom"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{301, "_menu_item_object_id", "0"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{301, "_menu_item_menu_item_parent", "0"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{301, "_menu_item_url", "/home-custom"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{302, "_menu_item_type", "post_type"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{302, "_menu_item_object", "page"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{302, "_menu_item_object_id", "5"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{302, "_menu_item_menu_item_parent", "0"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{302, "_menu_item_url", "/stale-about"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{303, "_menu_item_type", "taxonomy"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{303, "_menu_item_object", "category"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{303, "_menu_item_object_id", "10"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{303, "_menu_item_menu_item_parent", "0"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{303, "_menu_item_url", "/stale-news"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{304, "_menu_item_type", "custom"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{304, "_menu_item_object", "custom"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{304, "_menu_item_object_id", "0"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{304, "_menu_item_menu_item_parent", "301"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{304, "_menu_item_url", "/home-custom/sub"}},
 	}
 	for _, s := range stmts {
 		if _, err := db.ExecContext(ctx, rebind.Rebind(vendor, s.q), s.args...); err != nil {
@@ -60,12 +136,12 @@ func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error 
 
 func postInsert(prefix string) string {
 	return `INSERT INTO ` + prefix + `posts ` +
-		`(ID, post_author, post_date, post_content, post_title, post_excerpt, post_status, post_name, post_type) ` +
-		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		`(ID, post_author, post_date, post_content, post_title, post_excerpt, post_status, post_name, post_type, comment_status, post_parent, post_mime_type, menu_order) ` +
+		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 }
 
-func postArgs(id int64, slug, title, ptype, status, date string) []any {
-	return []any{id, 1, date, "<p>body</p>", title, "excerpt", status, slug, ptype}
+func postArgs(id int64, slug, title, ptype, status, date, commentStatus string, parentID int64, mimeType string, menuOrder int) []any {
+	return []any{id, 1, date, "<p>body</p>", title, "excerpt", status, slug, ptype, commentStatus, parentID, mimeType, menuOrder}
 }
 
 // RunContract executes the full read contract against a freshly built backend.
@@ -184,6 +260,9 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 	runSessionContract(t, newRepos)
 	runWriterContract(t, newRepos)
 	runAdminContract(t, newRepos)
+	runCommentsContract(t, newRepos)
+	runMediaContract(t, newRepos)
+	runMenusContract(t, newRepos)
 }
 
 // runUserContract covers UserRepository + UserMetaRepository, including the

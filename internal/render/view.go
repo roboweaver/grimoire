@@ -5,12 +5,15 @@ import (
 	"time"
 )
 
-// PostView is the template-facing shape of a post or page. Content is rendered
-// as trusted HTML because M1 is read-only against a trusted WordPress database.
+// PostView is the template-facing shape of a post or page. Content and Excerpt
+// are rendered as trusted HTML because M1/M2 are read-only against a trusted
+// WordPress database. Excerpt carries either a manual post_excerpt or an
+// auto-derived summary (see internal/content.Excerpt); the template.HTML cast is
+// applied at the web trust boundary (internal/web/view.go).
 type PostView struct {
 	Slug    string
 	Title   string
-	Excerpt string
+	Excerpt template.HTML
 	Content template.HTML
 	Date    time.Time
 	Author  int64

@@ -1,0 +1,7 @@
+# Dependencies — installed by `make admin` / `npm ci`, never committed.
+node_modules/
+
+# Vite writes the build into the embedded Go package (internal/admin/dist),
+# which IS committed there; nothing to ignore locally.
+*.local
+.vite/

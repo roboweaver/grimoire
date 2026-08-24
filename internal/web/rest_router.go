@@ -85,6 +85,7 @@ func (s *Server) registerREST(r chi.Router) {
 			s.registerRESTPosts(nr)
 			s.registerRESTMedia(nr)
 			s.registerRESTUsers(nr)
+			s.registerRESTAppPasswords(nr)
 			s.registerRESTComments(nr)
 		})
 	})

@@ -12,7 +12,12 @@ import (
 )
 
 // registerRESTPosts registers the GET .../posts, .../pages endpoints (Req
-// 2.1, 2.4) and 501 stubs for every write method (Req 2.5).
+// 2.1, 2.4) and 501 stubs for every write method (Req 2.5). Every write
+// verb is registered on both the collection and single-item route so an
+// unplanned-but-plausible write (e.g. POST on {id}, or PUT/PATCH/DELETE on
+// the bare collection) 501s instead of falling through to chi's
+// MethodNotAllowed 405 (Req 7.5: never silently 404/405 a write planned for
+// a later milestone).
 func (s *Server) registerRESTPosts(r chi.Router) {
 	for _, typ := range []string{"post", "page"} {
 		path, single := restPostBase(typ)
@@ -20,6 +25,9 @@ func (s *Server) registerRESTPosts(r chi.Router) {
 		r.Method(http.MethodGet, single, s.handleRESTPostSingle(typ))
 		r.Method(http.MethodPost, path, restNotImplemented("rest_cannot_create", "Creating a "+typ))
 		for _, m := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
+			r.Method(m, path, restNotImplemented("rest_cannot_edit", "Updating or deleting a "+typ))
+		}
+		for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 			r.Method(m, single, restNotImplemented("rest_cannot_edit", "Updating or deleting a "+typ))
 		}
 	}

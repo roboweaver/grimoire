@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,6 +52,25 @@ type ApplicationPasswords struct {
 	Prefix string
 	// Now returns the current time; defaults to time.Now if nil.
 	Now func() time.Time
+
+	// userLocks serializes the load-modify-store cycle over a single
+	// user's "_application_passwords" usermeta blob (Create/Revoke/Verify
+	// all read the full list, mutate it, and write the whole thing back —
+	// there is no row-level or CAS write in UserMetaRepository). Without
+	// this, a Verify in flight for credential X racing a concurrent
+	// Revoke(X) can lose the revoke: Verify's later store re-writes its
+	// stale pre-revoke snapshot (now carrying an updated LastUsed),
+	// silently resurrecting a credential that was just revoked. Keyed by
+	// userID via sync.Map since ApplicationPasswords instances are shared
+	// across requests/goroutines.
+	userLocks sync.Map // map[int64]*sync.Mutex
+}
+
+// userLock returns (creating if necessary) the mutex guarding userID's
+// "_application_passwords" load-modify-store cycle.
+func (a *ApplicationPasswords) userLock(userID int64) *sync.Mutex {
+	v, _ := a.userLocks.LoadOrStore(userID, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 func (a *ApplicationPasswords) now() time.Time {
@@ -81,6 +101,10 @@ func (a *ApplicationPasswords) Create(ctx context.Context, userID int64, name st
 		Created: a.now(),
 	}
 
+	lock := a.userLock(userID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	existing, err := a.loadRaw(ctx, userID)
 	if err != nil {
 		return ApplicationPassword{}, "", err
@@ -102,6 +126,10 @@ func (a *ApplicationPasswords) List(ctx context.Context, userID int64) ([]Applic
 // user's stored list. It is a no-op (not an error) if the UUID is not found,
 // matching WordPress's idempotent revoke behavior.
 func (a *ApplicationPasswords) Revoke(ctx context.Context, userID int64, id string) error {
+	lock := a.userLock(userID)
+	lock.Lock()
+	defer lock.Unlock()
+
 	existing, err := a.loadRaw(ctx, userID)
 	if err != nil {
 		return err
@@ -135,6 +163,10 @@ func (a *ApplicationPasswords) Verify(ctx context.Context, login, secret, ip str
 	if err != nil {
 		return Principal{}, err
 	}
+
+	lock := a.userLock(u.ID)
+	lock.Lock()
+	defer lock.Unlock()
 
 	records, err := a.loadRaw(ctx, u.ID)
 	if err != nil {

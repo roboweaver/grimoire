@@ -95,7 +95,7 @@ func (s *Server) handleRESTAppPasswordsList() http.HandlerFunc {
 		for _, rec := range records {
 			out = append(out, mapRESTAppPassword(rec))
 		}
-		_ = writeRESTJSON(w, http.StatusOK, out)
+		_ = writeRESTResponse(w, r, http.StatusOK, out)
 	}
 }
 
@@ -133,7 +133,7 @@ func (s *Server) handleRESTAppPasswordsCreate() http.HandlerFunc {
 			return
 		}
 		out := restAppPasswordCreated{restAppPassword: mapRESTAppPassword(rec), Password: secret}
-		_ = writeRESTJSON(w, http.StatusCreated, out)
+		_ = writeRESTResponse(w, r, http.StatusCreated, out)
 	}
 }
 
@@ -174,6 +174,6 @@ func (s *Server) handleRESTAppPasswordsRevoke() http.HandlerFunc {
 			writeRESTError(w, http.StatusInternalServerError, "rest_application_password_revoke_failed", "Could not revoke the Application Password.")
 			return
 		}
-		_ = writeRESTJSON(w, http.StatusOK, map[string]any{"deleted": true})
+		_ = writeRESTResponse(w, r, http.StatusOK, map[string]any{"deleted": true})
 	}
 }

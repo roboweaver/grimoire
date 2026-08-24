@@ -82,8 +82,9 @@ func (s *Server) ApplicationPasswordAuth(next http.Handler) http.Handler {
 // TLS-terminated directly (r.TLS != nil), TLS-terminated by a trusted
 // reverse proxy (trustedProxyHeader set and reporting "https", an
 // operator-declared trust boundary matching AuthConfig.Secure's own
-// posture), or addressed to a loopback host. When requireTLS is false the
-// gate is disabled entirely (operator override).
+// posture), or connected from a loopback peer (r.RemoteAddr — the actual TCP
+// connection, never the client-suppliable r.Host). When requireTLS is false
+// the gate is disabled entirely (operator override).
 func requestSatisfiesAppPasswordTransport(r *http.Request, requireTLS bool, trustedProxyHeader string) bool {
 	if !requireTLS {
 		return true
@@ -94,19 +95,36 @@ func requestSatisfiesAppPasswordTransport(r *http.Request, requireTLS bool, trus
 	if trustedProxyHeader != "" && strings.EqualFold(r.Header.Get(trustedProxyHeader), "https") {
 		return true
 	}
-	return isLoopbackHost(r.Host)
+	return isLoopbackPeer(r.RemoteAddr)
 }
 
-// isLoopbackHost reports whether host (an http.Request.Host, optionally
-// "host:port") names a loopback address, matching WordPress's own allowance
-// for Application Passwords on a local development install without TLS.
-func isLoopbackHost(host string) bool {
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+// isLoopbackPeer reports whether remoteAddr (an http.Request.RemoteAddr,
+// "host:port" as set by the net/http server from the actual TCP peer) is a
+// loopback address, matching WordPress's own allowance for Application
+// Passwords on a local development install without TLS.
+//
+// This MUST be based on the actual connection peer (r.RemoteAddr), never on
+// r.Host: Host is taken verbatim from the client-supplied Host header (or
+// request line) on a plain HTTP request and is entirely attacker-controlled,
+// so a remote attacker could otherwise satisfy the loopback exception simply
+// by sending "Host: localhost" over plaintext HTTP and bypass the
+// TLS-required gate entirely (Req 8.9 is a transport-security control, not a
+// header-matching one).
+func isLoopbackPeer(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		// No port present (e.g. a bare IP, or a test harness value that
+		// isn't "host:port"): fall back to treating the whole value as the
+		// host, matching net/http server behavior where RemoteAddr is
+		// always "IP:port" in practice.
+		host = remoteAddr
 	}
-	switch host {
-	case "localhost", "127.0.0.1", "::1":
-		return true
+	ip := net.ParseIP(host)
+	if ip != nil {
+		return ip.IsLoopback()
 	}
-	return false
+	// Not a parseable IP literal (e.g. "localhost" in a hand-built test
+	// request): match by name too, since real net/http servers always
+	// populate RemoteAddr with a literal IP and this only matters for tests.
+	return host == "localhost"
 }

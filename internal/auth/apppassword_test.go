@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -319,5 +320,106 @@ func TestApplicationPasswordsVerifyUnknownLoginFailsCleanly(t *testing.T) {
 	_, err := mgr.Verify(context.Background(), "nobody", "any-secret", "1.2.3.4")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("Verify(unknown login) error = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+// delayOnceMeta wraps a fakeMeta and, exactly once, blocks its Get call on
+// unblock until it is closed. This lets a test force a Verify's internal
+// loadRaw to stall mid-flight so a concurrent Revoke has a window to run —
+// reproducing the read-modify-write race the userLocks mutex must close.
+type delayOnceMeta struct {
+	*fakeMeta
+	once     sync.Once
+	entered  chan struct{} // closed once Get has been entered
+	unblock  chan struct{} // closed by the test to let the blocked Get proceed
+	blockKey string
+}
+
+func (d *delayOnceMeta) Get(ctx context.Context, userID int64, key string) (string, error) {
+	if key == d.blockKey {
+		d.once.Do(func() {
+			close(d.entered)
+			<-d.unblock
+		})
+	}
+	return d.fakeMeta.Get(ctx, userID, key)
+}
+
+// TestApplicationPasswordsVerifyRevokeRaceDoesNotResurrectCredential is a
+// regression test for a read-modify-write race: Verify loads the full
+// _application_passwords list, mutates LastUsed/LastIP on the matched
+// record, then stores the whole list back; Revoke loads, filters out one
+// record, and stores the whole (shorter) list back. Without a lock
+// serializing both operations' load-modify-store cycles per user, a Verify
+// that is slow to load (e.g. blocked on I/O) can finish storing its
+// stale pre-revoke snapshot *after* a concurrent Revoke has already removed
+// the credential — silently resurrecting a credential that was just
+// revoked. Run with -race to also confirm no data race on the shared state.
+func TestApplicationPasswordsVerifyRevokeRaceDoesNotResurrectCredential(t *testing.T) {
+	users := newFakeUsers()
+	base := newFakeMeta()
+	u := domain.User{ID: 99, Login: "ivy"}
+	users.add(u)
+
+	mgr := newAppPasswordsManager(users, base, time.Now())
+	ap, secret, err := mgr.Create(context.Background(), u.ID, "App")
+	if err != nil {
+		t.Fatalf("Create error: %v", err)
+	}
+
+	delayed := &delayOnceMeta{
+		fakeMeta: base,
+		entered:  make(chan struct{}),
+		unblock:  make(chan struct{}),
+		blockKey: appPasswordsMetaKey,
+	}
+	mgr.Meta = delayed
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// This Verify's loadRaw will block inside delayed.Get until the
+		// test signals it to proceed, below.
+		if _, err := mgr.Verify(context.Background(), "ivy", secret, "203.0.113.5"); err != nil {
+			t.Errorf("Verify (racing goroutine) error: %v", err)
+		}
+	}()
+
+	// Wait until the Verify goroutine's loadRaw call is blocked inside
+	// Get, then attempt to Revoke concurrently. With the userLocks mutex
+	// in place, Revoke must block on the same per-user lock until Verify
+	// releases it (i.e. Revoke cannot even begin its own load until
+	// Verify's full load-modify-store cycle, including the artificial
+	// delay, has completed) — so this Revoke call itself blocks until we
+	// unblock the delayed Get below.
+	<-delayed.entered
+
+	revokeDone := make(chan error, 1)
+	go func() {
+		revokeDone <- mgr.Revoke(context.Background(), u.ID, ap.UUID)
+	}()
+
+	// Give the Revoke goroutine a moment to attempt (and, pre-fix, would
+	// succeed racing ahead of) the lock; then let the stalled Verify
+	// proceed.
+	time.Sleep(20 * time.Millisecond)
+	close(delayed.unblock)
+
+	wg.Wait()
+	if err := <-revokeDone; err != nil {
+		t.Fatalf("Revoke error: %v", err)
+	}
+
+	list, err := mgr.List(context.Background(), u.ID)
+	if err != nil {
+		t.Fatalf("List error: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("List after concurrent Verify/Revoke = %#v, want empty (credential must not be resurrected)", list)
+	}
+
+	if _, err := mgr.Verify(context.Background(), "ivy", secret, "203.0.113.5"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("Verify after concurrent Revoke error = %v, want ErrInvalidCredentials (credential resurrected)", err)
 	}
 }

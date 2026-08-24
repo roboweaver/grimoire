@@ -140,7 +140,7 @@ comment-submit. See
 [`plans/05-extensions-rest-api`](./plans/05-extensions-rest-api) for the
 full specification.
 
-
+## Milestones
 
 - **M1 (current spec):** content core + switchable DB + WP-compatible schema + public read rendering + default theme.
 - **M2:** users / auth / roles + internal content API.

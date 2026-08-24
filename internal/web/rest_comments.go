@@ -42,12 +42,17 @@ func restCommentStatuses(status string) (statuses []string, any bool, ok bool) {
 
 // registerRESTComments registers GET .../comments[/{id}] (Req 3.1, 3.3),
 // POST .../comments (Req 7.1-7.4), and 501 stubs for every other write
-// method (Req 7.5).
+// method (Req 7.5), including on route/method combinations not otherwise
+// planned (e.g. POST on {id}, PUT/PATCH/DELETE on the bare collection) so
+// they don't fall through to chi's MethodNotAllowed 405.
 func (s *Server) registerRESTComments(r chi.Router) {
 	r.Method(http.MethodGet, "/comments", s.handleRESTCommentsCollection())
 	r.Method(http.MethodGet, "/comments/{id}", s.handleRESTCommentSingle())
 	r.Method(http.MethodPost, "/comments", s.handleRESTCommentCreate())
 	for _, m := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		r.Method(m, "/comments", restNotImplemented("rest_cannot_edit", "Updating or deleting a comment"))
+	}
+	for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		r.Method(m, "/comments/{id}", restNotImplemented("rest_cannot_edit", "Updating or deleting a comment"))
 	}
 }

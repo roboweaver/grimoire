@@ -140,6 +140,65 @@ func TestApplicationPasswordAuthValidBasicSkipsCSRF(t *testing.T) {
 	}
 }
 
+// TestApplicationPasswordAuthNotOverriddenBySessionCookie is a regression
+// test for a bug where SessionMiddleware (mounted after
+// ApplicationPasswordAuth on /wp-json routes) unconditionally overwrote the
+// request's principal whenever a valid session cookie was ALSO present,
+// without clearing the Application-Password-authenticated flag. Net effect:
+// a request presenting both a valid Application Password and a valid
+// session cookie ran as the session's principal (identity/capabilities)
+// while still being treated as CSRF-exempt (because isAppPasswordAuth(ctx)
+// remained true) — defeating the CSRF contract for session auth. The fix
+// makes SessionMiddleware a no-op once Application Password auth has
+// already resolved a principal for the request (Req 7.4/8.7: the two
+// mechanisms are mutually exclusive per request).
+//
+// Here the Application Password belongs to user 1 ("admin"); the session
+// cookie resolves to a DIFFERENT principal (user 42, "victim"). The request
+// carries both, plus no CSRF token (which would be required if the
+// session's principal legitimately won). Success (201) with the comment
+// recorded against user 1 — not user 42 — proves the Application Password
+// principal, not the session's, is the one actually in effect.
+func TestApplicationPasswordAuthNotOverriddenBySessionCookie(t *testing.T) {
+	fake := &fakeSessions{
+		authPrincipal: auth.Principal{UserID: 42, Login: "victim"},
+		authSession:   domain.Session{ID: "s1", CSRFToken: "victim-token"},
+	}
+	h, repos, ap := newAppPasswordRESTRouter(t, fake, false, "")
+	secret := mintAppPassword(t, context.Background(), ap)
+
+	body := `{"post":1,"author_name":"App Client 2","author_email":"app2@example.com","content":"Hi via app password + session"}`
+	req := httptest.NewRequest(http.MethodPost, "/wp-json/wp/v2/comments", strings.NewReader(body))
+	req.SetBasicAuth("admin", secret)
+	req.RemoteAddr = "203.0.113.9:4242"
+	req.AddCookie(&http.Cookie{Name: "grimoire_session", Value: "anything"})
+	// Deliberately NO X-CSRF-Token: if the session principal (which the bug
+	// would substitute) were actually in effect, requireSessionCSRFREST
+	// would reject this with 403.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+
+	items, err := repos.Comments.List(context.Background(), domain.CommentFilter{PostID: 1})
+	if err != nil {
+		t.Fatalf("List comments: %v", err)
+	}
+	found := false
+	for _, c := range items {
+		if c.AuthorEmail == "app2@example.com" {
+			found = true
+			if c.UserID != 1 {
+				t.Errorf("comment.UserID = %d, want 1 (Application Password's principal); session-cookie principal (42) must not win", c.UserID)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("created comment not found via repos.Comments.List")
+	}
+}
+
 func TestApplicationPasswordAuthInvalidBasicRejectsEveryEndpointEvenWithValidSession(t *testing.T) {
 	fake := &fakeSessions{
 		authPrincipal: auth.Principal{UserID: 1, Login: "admin", Caps: map[string]bool{"moderate_comments": true}},
@@ -154,6 +213,12 @@ func TestApplicationPasswordAuthInvalidBasicRejectsEveryEndpointEvenWithValidSes
 	}{
 		{"posts collection", http.MethodGet, "/wp-json/wp/v2/posts"},
 		{"comments collection", http.MethodGet, "/wp-json/wp/v2/comments"},
+		// Regression for review finding 6: the bare namespace-less index
+		// was mounted outside the /wp/v2 subrouter and so wasn't covered
+		// by ApplicationPasswordAuth at all — an invalid Basic credential
+		// got 200 here instead of 401 (Req 8.6: "every endpoint, public
+		// or not").
+		{"bare index", http.MethodGet, "/wp-json/"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -219,15 +284,40 @@ func TestApplicationPasswordAuthRequiresTLSOrLoopbackBeforeVerification(t *testi
 		t.Errorf("error code = %q, want rest_invalid_credentials", code)
 	}
 
-	// Loopback host: the same valid credentials succeed even without TLS
-	// (Req 8.9's loopback exception).
+	// Loopback peer (RemoteAddr, the actual TCP connection): the same valid
+	// credentials succeed even without TLS (Req 8.9's loopback exception).
 	req2 := httptest.NewRequest(http.MethodGet, "/wp-json/wp/v2/posts", nil)
-	req2.Host = "localhost"
+	req2.RemoteAddr = "127.0.0.1:54321"
 	req2.SetBasicAuth("admin", secret)
 	rec2 := httptest.NewRecorder()
 	h.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("loopback status = %d, want 200; body=%s", rec2.Code, rec2.Body.String())
+	}
+}
+
+// TestApplicationPasswordAuthLoopbackExceptionIgnoresSpoofedHostHeader
+// verifies the fix for a Host-header-spoofing bypass: r.Host is entirely
+// client-controlled on a plain HTTP request (it's copied from the Host
+// header / request line), so the loopback exception in Req 8.9 MUST be
+// evaluated against the real TCP peer (r.RemoteAddr), never r.Host. A remote
+// attacker sending "Host: localhost" (or "127.0.0.1") from a real, non-loopback
+// peer must still be rejected before verification even proceeds.
+func TestApplicationPasswordAuthLoopbackExceptionIgnoresSpoofedHostHeader(t *testing.T) {
+	h, _, ap := newAppPasswordRESTRouter(t, &fakeSessions{}, true, "")
+	secret := mintAppPassword(t, context.Background(), ap)
+
+	req := httptest.NewRequest(http.MethodGet, "/wp-json/wp/v2/posts", nil)
+	req.Host = "localhost"              // attacker-controlled, must NOT grant the loopback exception
+	req.RemoteAddr = "203.0.113.9:4242" // real peer: a public, non-loopback address
+	req.SetBasicAuth("admin", secret)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("spoofed Host from non-loopback peer status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+	}
+	if code := decodeRESTErrCode(t, rec); code != "rest_invalid_credentials" {
+		t.Errorf("error code = %q, want rest_invalid_credentials", code)
 	}
 }
 

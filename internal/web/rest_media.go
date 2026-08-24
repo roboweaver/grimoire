@@ -12,12 +12,17 @@ import (
 )
 
 // registerRESTMedia registers GET .../media[/{id}] (Req 4.1, 4.4) and 501
-// stubs for every write method (Req 4.5).
+// stubs for every write method (Req 4.5), on both the collection and
+// single-item route so no plausible write verb/route combination falls
+// through to chi's MethodNotAllowed 405 (Req 7.5).
 func (s *Server) registerRESTMedia(r chi.Router) {
 	r.Method(http.MethodGet, "/media", s.handleRESTMediaCollection())
 	r.Method(http.MethodGet, "/media/{id}", s.handleRESTMediaSingle())
 	r.Method(http.MethodPost, "/media", restNotImplemented("rest_cannot_create", "Uploading media"))
 	for _, m := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		r.Method(m, "/media", restNotImplemented("rest_cannot_edit", "Updating or deleting media"))
+	}
+	for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		r.Method(m, "/media/{id}", restNotImplemented("rest_cannot_edit", "Updating or deleting media"))
 	}
 }

@@ -497,9 +497,51 @@ func TestRESTUnknownRoute404(t *testing.T) {
 func TestRESTMethodNotAllowed(t *testing.T) {
 	h := newRESTRouter(t, &fakeSessions{})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/wp-json/wp/v2/posts", nil))
+	// TRACE is not registered for any wp/v2 route (unlike DELETE, which
+	// this milestone now registers everywhere as a 501 deferred-write
+	// stub per Req 7.5), so it's a genuinely unplanned method and must
+	// still hit chi's MethodNotAllowed -> 405.
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodTrace, "/wp-json/wp/v2/posts", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("DELETE /wp-json/wp/v2/posts = %d, want 405", rec.Code)
+		t.Fatalf("TRACE /wp-json/wp/v2/posts = %d, want 405", rec.Code)
+	}
+}
+
+// TestRESTDeferredWritesReturn501NotMethodNotAllowed covers write
+// method/route combinations that were previously unregistered and so fell
+// through to chi's generic 405 MethodNotAllowed, contradicting Req 7.5's
+// "SHALL NOT silently 404 or 405 a write it plans to support later." Every
+// one of these must now hit the explicit 501 deferred-write stub instead.
+func TestRESTDeferredWritesReturn501NotMethodNotAllowed(t *testing.T) {
+	h := newRESTRouter(t, &fakeSessions{})
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/wp-json/wp/v2/posts/1"},
+		{http.MethodPut, "/wp-json/wp/v2/posts"},
+		{http.MethodPatch, "/wp-json/wp/v2/posts"},
+		{http.MethodDelete, "/wp-json/wp/v2/posts"},
+		{http.MethodPost, "/wp-json/wp/v2/pages/1"},
+		{http.MethodDelete, "/wp-json/wp/v2/pages"},
+		{http.MethodPost, "/wp-json/wp/v2/media/1"},
+		{http.MethodPut, "/wp-json/wp/v2/media"},
+		{http.MethodDelete, "/wp-json/wp/v2/media"},
+		{http.MethodPost, "/wp-json/wp/v2/users/1"},
+		{http.MethodPut, "/wp-json/wp/v2/users"},
+		{http.MethodDelete, "/wp-json/wp/v2/users"},
+		{http.MethodPost, "/wp-json/wp/v2/comments/1"},
+		{http.MethodPut, "/wp-json/wp/v2/comments"},
+		{http.MethodDelete, "/wp-json/wp/v2/comments"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+			if rec.Code != http.StatusNotImplemented {
+				t.Fatalf("%s %s = %d, want 501", tc.method, tc.path, rec.Code)
+			}
+		})
 	}
 }
 

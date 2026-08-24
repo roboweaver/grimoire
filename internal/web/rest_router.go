@@ -65,6 +65,17 @@ func (s *Server) registerREST(r chi.Router) {
 		return
 	}
 	r.Route("/wp-json", func(wr chi.Router) {
+		// Mount Application Password (and, when configured, session)
+		// auth ahead of every /wp-json route, including the bare
+		// namespace-less index below — an invalid Basic credential must
+		// be rejected with 401 on every endpoint, public or not (Req 8.6),
+		// not just inside /wp/v2.
+		if s.appPasswords != nil {
+			wr.Use(s.ApplicationPasswordAuth)
+		}
+		if s.auth != nil {
+			wr.Use(s.SessionMiddleware)
+		}
 		wr.Get("/", s.handleRESTIndex)
 		wr.Route("/wp/v2", func(nr chi.Router) {
 			nr.NotFound(func(w http.ResponseWriter, _ *http.Request) {
@@ -73,12 +84,6 @@ func (s *Server) registerREST(r chi.Router) {
 			nr.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 				writeRESTError(w, http.StatusMethodNotAllowed, "rest_no_route", "Method not allowed for this route.")
 			})
-			if s.appPasswords != nil {
-				nr.Use(s.ApplicationPasswordAuth)
-			}
-			if s.auth != nil {
-				nr.Use(s.SessionMiddleware)
-			}
 			nr.Use(s.restPreDispatch)
 			nr.Get("/", s.handleRESTNamespaceIndex)
 
@@ -164,7 +169,7 @@ func restRoutes() map[string]restRouteEntry {
 // handleRESTIndex serves GET /wp-json/: the top-level API index (Req 1.1).
 func (s *Server) handleRESTIndex(w http.ResponseWriter, r *http.Request) {
 	name, description := s.options.SiteInfo(r.Context())
-	_ = writeRESTJSON(w, http.StatusOK, map[string]any{
+	_ = writeRESTResponse(w, r, http.StatusOK, map[string]any{
 		"name":        name,
 		"description": description,
 		"url":         requestBaseURL(r) + "/",
@@ -176,7 +181,7 @@ func (s *Server) handleRESTIndex(w http.ResponseWriter, r *http.Request) {
 // handleRESTNamespaceIndex serves GET /wp-json/wp/v2/: the namespace index
 // (Req 1.2).
 func (s *Server) handleRESTNamespaceIndex(w http.ResponseWriter, r *http.Request) {
-	_ = writeRESTJSON(w, http.StatusOK, map[string]any{
+	_ = writeRESTResponse(w, r, http.StatusOK, map[string]any{
 		"namespace": "wp/v2",
 		"routes":    restRoutes(),
 	})

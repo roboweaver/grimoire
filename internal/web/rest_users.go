@@ -24,6 +24,9 @@ func (s *Server) registerRESTUsers(r chi.Router) {
 	r.Method(http.MethodGet, "/users/{id}", s.handleRESTUserSingle())
 	r.Method(http.MethodPost, "/users", restNotImplemented("rest_cannot_create", "Creating a user"))
 	for _, m := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		r.Method(m, "/users", restNotImplemented("rest_cannot_edit", "Updating or deleting a user"))
+	}
+	for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		r.Method(m, "/users/{id}", restNotImplemented("rest_cannot_edit", "Updating or deleting a user"))
 	}
 }

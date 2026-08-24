@@ -13,7 +13,7 @@ trailer `Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com
 
 Requirement acceptance-criteria counts in `requirements.md` (for citation
 accuracy below): Req 1 has 8, Req 2 has 6, Req 3 has 5, Req 4 has 2, Req 5
-has 4, Req 6 has 7, Req 7 has 5, Req 8 has 4, Req 9 has 5.
+has 4, Req 6 has 8, Req 7 has 5, Req 8 has 4, Req 9 has 5.
 
 ## Phase 0 — Spec
 - [x] 0.1 Write `requirements.md`, `design.md`, `tasks.md` and update the `plans/README.md` milestone index (row 06 → finalized scope, status "🚧 In progress").
@@ -65,12 +65,12 @@ has 4, Req 6 has 7, Req 7 has 5, Req 8 has 4, Req 9 has 5.
 - [ ] 3.4 Write a failing regression test asserting every **other** `wp/v2` write verb (media, users, categories, tags, and any comment verb beyond M5's existing create) still returns M5's exact `501` body, unchanged (Req 6.6).
 - [ ] 3.5 Implement the `posts`/`pages` write handlers in `rest_posts.go`, mapping WP-shaped request bodies to `domain.Post` (via `PostWriteService.Create`/`Update`/`Delete` only — **no** term-ID assignment; REST-created/updated posts have no category/tag relationships in M6, per Req 6.1/6.8, since term writes stay admin-API-only) and parsing `If-Unmodified-Since` as an HTTP-date into `PostWriteService.Update`'s `expectedModified` (zero value when absent), reusing the existing single-item response mapping `handleRESTPostSingle` already has for `GET`.
 - [ ] 3.6 Enforce the existing M5 TLS/loopback-only Application Password posture on the new write routes (no relaxation) — extend the existing enforcement test to cover a write verb, not just `GET`.
-  - _Acceptance:_ 3.1–3.6's HTTP suite passes; the full `internal/web` REST test suite (M5's existing read tests + M6's new write tests) is green together. _(Req 6.1–6.7)_
+  - _Acceptance:_ 3.1–3.6's HTTP suite passes; the full `internal/web` REST test suite (M5's existing read tests + M6's new write tests) is green together. _(Req 6.1–6.8)_
 
 ## Phase 4 — Rich-text editor and Spectrum views (`web/admin`)
 - [ ] 4.1 Add `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-link`, `@tiptap/extension-image` to `web/admin/package.json`.
 - [ ] 4.2 Write failing component tests for `RichTextEditor.tsx`: renders initial HTML content; `onChange` fires with updated HTML after a simulated toolbar action (e.g. toggling bold on selected text); toolbar buttons reflect `editor.isActive('bold')`/`isActive('italic')`/etc. state; loading a new `content` prop calls `setContent` and replaces the surface's content (round-trip fidelity for a fixture HTML string, Req 7.1).
-- [ ] 4.3 Implement `components/RichTextEditor.tsx`: `useEditor()` wrapper, Spectrum `ActionButton`/`ToggleButton`/`Picker` toolbar per `design.md`'s component tree, image-insert action opening the new `MediaPicker` dialog (see 4.4a/4.4b below) in a `DialogTrigger` and calling `setImage({src})` on selection (Req 7.1, 7.2, 7.3).
+- [ ] 4.3 Implement `components/RichTextEditor.tsx`: `useEditor()` wrapper, Spectrum `ActionButton`/`ToggleButton`/`Picker` toolbar per `design.md`'s component tree, image-insert action opening the new `MediaPicker` dialog (see 4.3a/4.3b below) in a `DialogTrigger` and calling `setImage({src})` on selection (Req 7.1, 7.2, 7.3).
   - _Acceptance:_ 4.2's component suite passes. _(Req 7.1–7.4)_
 - [ ] 4.3a Write failing component tests for `MediaPicker.tsx`: fetches and lists existing media from `GET /admin/api/media` (the existing M4 endpoint); selecting an item invokes the provided `onSelect(mediaUrl)` callback and closes the dialog; empty-library and loading states render without error (Req 7.1).
 - [ ] 4.3b Implement `components/MediaPicker.tsx` as a new Spectrum `Dialog` — there is no existing reusable picker to extend (M4's `Media.tsx` is a standalone full-page list view with no selection callback), so this is net-new UI backed entirely by the existing M4 media-list API, not new backend work.

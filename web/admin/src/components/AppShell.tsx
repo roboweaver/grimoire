@@ -12,6 +12,9 @@ import type { SessionInfo } from "../api/types";
 const NAV = [
   { label: "Dashboard", path: "/" },
   { label: "Content", path: "/posts" },
+  { label: "Comments", path: "/comments" },
+  { label: "Media", path: "/media" },
+  { label: "Menus", path: "/menus" },
 ];
 
 // AppShell is the persistent chrome: a Spectrum header, a simple nav rail, and

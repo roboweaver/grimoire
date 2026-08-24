@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // baseTemplate and indexTemplate are required in every theme.
@@ -16,7 +17,7 @@ const (
 
 // contentTemplates are the content-level templates that may exist in a theme.
 // Each is parsed together with base.tmpl when present.
-var contentTemplates = []string{"index", "single", "page", "category", "archive", "login"}
+var contentTemplates = []string{"index", "single", "page", "category", "archive", "login", "partials/comments", "partials/nav-menu"}
 
 // hierarchy maps a requested render kind to the ordered list of content
 // templates to try; the first one loaded in the theme wins (a WordPress-style
@@ -51,12 +52,19 @@ func Load(themesDir, theme string) (*Engine, error) {
 	}
 
 	e := &Engine{templates: make(map[string]*template.Template)}
+	partials := []string{}
+	for _, partial := range []string{"partials/comments.tmpl", "partials/nav-menu.tmpl"} {
+		if fileExists(filepath.Join(dir, partial)) {
+			partials = append(partials, filepath.Join(dir, partial))
+		}
+	}
 	for _, name := range contentTemplates {
 		contentPath := filepath.Join(dir, name+".tmpl")
-		if !fileExists(contentPath) {
+		if !fileExists(contentPath) || strings.HasPrefix(name, "partials/") {
 			continue
 		}
-		tmpl, err := template.New(baseTemplate).ParseFiles(basePath, contentPath)
+		files := append([]string{basePath, contentPath}, partials...)
+		tmpl, err := template.New(baseTemplate).ParseFiles(files...)
 		if err != nil {
 			return nil, fmt.Errorf("render: parse %s: %w", name, err)
 		}

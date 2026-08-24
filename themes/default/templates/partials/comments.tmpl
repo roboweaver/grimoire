@@ -1,0 +1,28 @@
+{{define "comments"}}
+<section id="comments">
+  <h2>{{.CommentCount}} Comments</h2>
+  {{if .PendingComment}}<p>Your comment is awaiting moderation: {{.PendingComment.Content}}</p>{{end}}
+  {{if .Comments}}
+    <ol>
+      {{range .Comments}}
+        <li>
+          <p><strong>{{.Author}}</strong> <time>{{.Date.Format "2006-01-02"}}</time></p>
+          <div>{{.Content}}</div>
+        </li>
+      {{end}}
+    </ol>
+  {{else}}
+    <p>No comments yet</p>
+  {{end}}
+  <form method="post" action="/comment">
+    <input type="hidden" name="post_id" value="{{.Post.ID}}">
+    <input type="hidden" name="comment_csrf_token" value="{{.CommentToken}}">
+    <p><label>Name <input name="author"></label></p>
+    <p><label>Email <input name="email"></label></p>
+    <p><label>URL <input name="url"></label></p>
+    <p style="display:none"><label>Website <input name="website"></label></p>
+    <p><label>Comment <textarea name="content"></textarea></label></p>
+    <button type="submit">Submit comment</button>
+  </form>
+</section>
+{{end}}

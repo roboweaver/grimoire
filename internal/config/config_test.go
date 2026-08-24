@@ -194,3 +194,21 @@ session:
 		t.Errorf("ttl_hours = %d, want 48", cfg.Session.TTLHours)
 	}
 }
+
+func TestLoadMediaDefaults(t *testing.T) {
+	path := writeTempConfig(t, `
+database:
+  vendor: sqlite
+  dsn: "file:grimoire.db"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Media.UploadsDir != "wp-content/uploads" {
+		t.Fatalf("uploads_dir=%q", cfg.Media.UploadsDir)
+	}
+	if cfg.Media.MaxUploadSize != 10<<20 {
+		t.Fatalf("max_upload_size=%d", cfg.Media.MaxUploadSize)
+	}
+}

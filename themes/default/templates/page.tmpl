@@ -1,5 +1,6 @@
 {{define "title"}}{{.Post.Title}} · {{.SiteTitle}}{{end}}
 {{define "content"}}
+{{template "nav-menu" .Menu}}
 <article class="page">
   <h1>{{.Post.Title}}</h1>
   <div>{{.Post.Content}}</div>

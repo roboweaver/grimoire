@@ -112,7 +112,7 @@ func runAdminContract(t *testing.T, newRepos NewReposFunc) {
 			{"post", "publish", 3},
 			{"post", "draft", 1},
 			{"page", "", 1}, // page of any status
-			{"", "publish", 4},
+			{"", "publish", 8},
 		}
 		for _, c := range cases {
 			got, err := repos.PostCounter.CountByStatus(ctx, c.typ, c.status)

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/roboweaver/grimoire/internal/content"
+	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
+	"html"
 )
 
 // pageParam parses a ?page= query value, defaulting to 1 for missing/invalid.
@@ -43,7 +46,39 @@ func (s *Server) single(w http.ResponseWriter, r *http.Request) error {
 		kind = "page"
 	}
 	title, tagline := s.options.SiteInfo(ctx)
-	data := render.SingleData{SiteTitle: title, Tagline: tagline, Post: postView(post)}
+	comments := []render.CommentView{}
+	commentCount := 0
+	var pending *render.CommentView
+	commentToken := ""
+	menu := render.NavMenuView{}
+	if s.comments != nil {
+		items, total, err := s.comments.List(ctx, domain.CommentFilter{PostID: post.ID, Statuses: []string{"1"}})
+		if err != nil {
+			return err
+		}
+		for _, c := range items {
+			comments = append(comments, commentView(c))
+		}
+		commentCount = total
+		if r.URL.Query().Get("comment") == "pending" {
+			p := render.CommentView{Author: r.URL.Query().Get("author"), Content: r.URL.Query().Get("content"), Date: time.Now(), PendingEcho: true}
+			p.Content = html.EscapeString(p.Content)
+			pending = &p
+		}
+		tok, err := randToken()
+		if err == nil {
+			s.setCommentCSRFCookie(w, tok)
+			commentToken = tok
+		}
+	}
+	if s.menus != nil {
+		m, err := s.menus.ByLocation(ctx, "primary")
+		if err != nil {
+			return err
+		}
+		menu = navMenuView(m)
+	}
+	data := render.SingleData{SiteTitle: title, Tagline: tagline, Post: postView(post), Comments: comments, CommentCount: commentCount, PendingComment: pending, CommentToken: commentToken, Menu: menu}
 	return s.renderHTML(w, kind, data)
 }
 

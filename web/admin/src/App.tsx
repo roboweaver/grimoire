@@ -6,6 +6,9 @@ import { ErrorState, Loading } from "./components/States";
 import { Dashboard } from "./views/Dashboard";
 import { PostsList } from "./views/PostsList";
 import { PostDetail } from "./views/PostDetail";
+import { Comments } from "./views/Comments";
+import { Media } from "./views/Media";
+import { Menus } from "./views/Menus";
 
 // App loads the current session first. A 401 redirects to /login inside the API
 // client, so here we only handle loading and hard errors before mounting the
@@ -31,6 +34,9 @@ export function App() {
         <Route index element={<Dashboard />} />
         <Route path="posts" element={<PostsList />} />
         <Route path="posts/:id" element={<PostDetail />} />
+        <Route path="comments" element={<Comments />} />
+        <Route path="media" element={<Media />} />
+        <Route path="menus" element={<Menus />} />
         <Route path="*" element={<Dashboard />} />
       </Route>
     </Routes>

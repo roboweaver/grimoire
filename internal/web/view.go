@@ -21,6 +21,7 @@ import (
 // See docs/compatibility.md.
 func postView(p domain.Post) render.PostView {
 	return render.PostView{
+		ID:      p.ID,
 		Slug:    p.Slug,
 		Title:   p.Title,
 		Excerpt: template.HTML(content.Excerpt(p)), // trusted excerpt HTML — see trust boundary note above

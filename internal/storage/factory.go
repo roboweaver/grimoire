@@ -35,6 +35,13 @@ type Set struct {
 	TermWriter   domain.TermWriter
 	OptionWriter domain.OptionWriter
 
+	Comments      domain.CommentRepository
+	CommentWriter domain.CommentWriter
+	CommentMeta   domain.CommentMetaRepository
+	Media         domain.MediaRepository
+	MediaWriter   domain.MediaWriter
+	NavMenus      domain.NavMenuRepository
+
 	// M3 additive read/count ports backing the read-only admin.
 	AdminPosts  domain.AdminPostRepository
 	PostCounter domain.PostCounter
@@ -119,6 +126,10 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 	terms := wprepo.NewTermRepo(bunDB, prefix)
 	options := wprepo.NewOptionRepo(bunDB, prefix)
 	users := wprepo.NewUserRepo(bunDB, prefix)
+	comments := wprepo.NewCommentRepo(bunDB, prefix)
+	commentMeta := wprepo.NewCommentMetaRepo(bunDB, prefix)
+	media := wprepo.NewMediaRepo(bunDB, prefix)
+	menus := wprepo.NewNavMenuRepo(bunDB, prefix)
 	return &Repositories{
 		Set: Set{
 			Posts:   posts,
@@ -132,6 +143,13 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			PostWriter:   posts,
 			TermWriter:   terms,
 			OptionWriter: options,
+
+			Comments:      comments,
+			CommentWriter: comments,
+			CommentMeta:   commentMeta,
+			Media:         media,
+			MediaWriter:   media,
+			NavMenus:      menus,
 
 			AdminPosts:  posts,
 			PostCounter: posts,

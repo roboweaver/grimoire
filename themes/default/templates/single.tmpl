@@ -1,7 +1,9 @@
 {{define "title"}}{{.Post.Title}} · {{.SiteTitle}}{{end}}
 {{define "content"}}
+{{template "nav-menu" .Menu}}
 <article>
   <h1>{{.Post.Title}}</h1>
   <div>{{.Post.Content}}</div>
 </article>
+{{template "comments" .}}
 {{end}}

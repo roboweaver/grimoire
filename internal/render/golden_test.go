@@ -70,7 +70,7 @@ func TestGoldenSingle(t *testing.T) {
 	e := defaultEngine(t)
 	data := SingleData{
 		SiteTitle: "grimoire",
-		Post:      PostView{Slug: "hello-world", Title: "Hello World", Content: "<p>Body <em>html</em>.</p>", Date: fixedDate},
+		Post:      PostView{ID: 1, Slug: "hello-world", Title: "Hello World", Content: "<p>Body <em>html</em>.</p>", Date: fixedDate},
 	}
 	var buf bytes.Buffer
 	if err := e.Render(&buf, "single", data); err != nil {

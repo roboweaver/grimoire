@@ -11,6 +11,7 @@ import (
 // auto-derived summary (see internal/content.Excerpt); the template.HTML cast is
 // applied at the web trust boundary (internal/web/view.go).
 type PostView struct {
+	ID      int64
 	Slug    string
 	Title   string
 	Excerpt template.HTML
@@ -35,9 +36,14 @@ type IndexData struct {
 
 // SingleData backs the single/page templates.
 type SingleData struct {
-	SiteTitle string
-	Tagline   string
-	Post      PostView
+	SiteTitle      string
+	Tagline        string
+	Post           PostView
+	Comments       []CommentView
+	CommentCount   int
+	PendingComment *CommentView
+	CommentToken   string
+	Menu           NavMenuView
 }
 
 // CategoryData backs the category/archive templates.

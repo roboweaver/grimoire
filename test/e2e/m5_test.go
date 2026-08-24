@@ -515,3 +515,96 @@ func TestM5RESTCommentCreateWPShapedResponse(t *testing.T) {
 		t.Errorf("PUT /posts/1 = %d, want 501", putResp.StatusCode)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Overlay-safety spot check (tasks.md 10.2): REST reads and comment
+// creation must keep working correctly once the 0004 columns carry
+// realistic, non-default values -- as they would in a real, previously
+// populated WordPress export, not just the migration's bare defaults.
+//
+// Application Password verification against both hash formats is already
+// exercised at the unit level in internal/auth/apppassword_test.go
+// (TestApplicationPasswordsVerifyGenericFixture and
+// TestApplicationPasswordsVerifyPreWP68Fixture), and the $generic$ path is
+// exercised end-to-end over real HTTP by
+// TestM5ApplicationPasswordFullLifecycleE2E above, so it is not repeated
+// here.
+// ---------------------------------------------------------------------------
+
+func TestM5OverlaySafetySpotCheck(t *testing.T) {
+	env := newM5Env(t)
+
+	const (
+		dateGMT     = "2024-01-01 09:00:00"
+		modified    = "2024-06-15 12:30:00"
+		modifiedGMT = "2024-06-15 12:30:00"
+		guid        = "http://example.test/?p=1"
+		password    = "s3cr3t"
+	)
+	// Directly overwrite the 0004 columns on an already-seeded post with
+	// realistic, non-default values -- simulating a database carried over
+	// from a real WordPress install rather than one that just ran the 0004
+	// migration and got its bare column defaults.
+	if _, err := env.repos.DB().ExecContext(env.ctx,
+		"UPDATE "+env.dbcfg.TablePrefix+"posts SET post_date_gmt = ?, post_modified = ?, post_modified_gmt = ?, ping_status = ?, post_password = ?, guid = ? WHERE ID = 1",
+		dateGMT, modified, modifiedGMT, "closed", password, guid,
+	); err != nil {
+		t.Fatalf("seed overlay-realistic post columns: %v", err)
+	}
+
+	resp, err := env.client.Get(env.ts.URL + "/wp-json/wp/v2/posts/1")
+	if err != nil {
+		t.Fatalf("GET /posts/1: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /posts/1 = %d, want 200 (body %q)", resp.StatusCode, string(body))
+	}
+
+	var post struct {
+		DateGMT     string `json:"date_gmt"`
+		Modified    string `json:"modified"`
+		ModifiedGMT string `json:"modified_gmt"`
+		PingStatus  string `json:"ping_status"`
+		GUID        struct {
+			Rendered string `json:"rendered"`
+		} `json:"guid"`
+		Content struct {
+			Protected bool `json:"protected"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(body, &post); err != nil {
+		t.Fatalf("decode post: %v", err)
+	}
+	if !strings.Contains(post.DateGMT, "2024-01-01") {
+		t.Errorf("date_gmt = %q, want to reflect seeded post_date_gmt", post.DateGMT)
+	}
+	if !strings.Contains(post.Modified, "2024-06-15") {
+		t.Errorf("modified = %q, want to reflect seeded post_modified", post.Modified)
+	}
+	if !strings.Contains(post.ModifiedGMT, "2024-06-15") {
+		t.Errorf("modified_gmt = %q, want to reflect seeded post_modified_gmt", post.ModifiedGMT)
+	}
+	if post.PingStatus != "closed" {
+		t.Errorf("ping_status = %q, want %q", post.PingStatus, "closed")
+	}
+	if post.GUID.Rendered != guid {
+		t.Errorf("guid.rendered = %q, want %q", post.GUID.Rendered, guid)
+	}
+	if !post.Content.Protected {
+		t.Error("content.protected = false, want true for a post with a non-empty post_password")
+	}
+
+	// The one real REST write (POST /comments) must still work correctly
+	// against this now-populated schema.
+	commentBody, _ := json.Marshal(map[string]any{
+		"post": 1, "author_name": "Overlay Check", "author_email": "overlay@example.test", "content": "still works",
+	})
+	commentResp := env.restJSON(http.MethodPost, "/wp-json/wp/v2/comments", bytes.NewReader(commentBody))
+	commentRespBody, _ := io.ReadAll(commentResp.Body)
+	commentResp.Body.Close()
+	if commentResp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /comments = %d, want 201 (body %q)", commentResp.StatusCode, string(commentRespBody))
+	}
+}

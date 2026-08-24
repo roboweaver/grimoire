@@ -34,13 +34,17 @@ continue to use the M2 session cookie; the one REST write endpoint still
 enforces the M4 `X-CSRF-Token` double-submit contract when authenticated by
 session cookie, mirroring WordPress's own model where Application Password
 requests are exempt from cookie-nonce/CSRF checks (there is no browser
-session to forge).
+session to forge). Because an Application Password is a long-lived bearer
+credential sent on **every** request over HTTP Basic auth (not a short-lived
+signed cookie), M5 requires TLS for it by default, mirroring real
+WordPress's own behavior of refusing Application Passwords over a
+non-`https` request unless the host resolves to `localhost` (Req 8.9).
 
 **Extension system.** WordPress's plugin architecture is PHP hooks (`add_action`/
 `add_filter`) woven through every code path, backed by a runtime that can load
 arbitrary `.php` files dropped into `wp-content/plugins/`. That does not
 translate to a single static Go binary, and grimoire does not attempt it. M5
-instead adds `internal/extensions`: a compile-time Go hook registry with
+instead adds `pkg/extensions`: a compile-time Go hook registry with
 **actions** (fire-and-forget notifications) and **filters** (value-transforming
 pipelines), modeled on WordPress's actions/filters vocabulary but Go-native —
 typed callbacks registered via `init()`-time calls, compiled directly into the
@@ -50,25 +54,39 @@ action. This spec is deliberately explicit about what this **is not**: it is
 **not** compatible with real wordpress.org plugins (no PHP, ever; no dynamic
 loading; no plugin marketplace; no plugin activation/deactivation UI). What it
 **is**: a native, statically-linked Go extension mechanism at a small number of
-well-defined points, sufficient for first-party or vendored extensions built
-and compiled alongside grimoire.
+well-defined points, published at the importable `pkg/extensions` path so
+that first-party, vendored, or external Go modules can all register hooks the
+same way (a blank-import package compiled into the grimoire binary at build
+time — still no dynamic loading at runtime).
 
-WordPress compatibility remains a **schema/behavior contract**. REST reads are
-additive `SELECT`s over data M1–M4 already model; comment creation via REST
-reuses M4's write path verbatim. Application Passwords reuse WordPress's own
+WordPress compatibility remains a **schema/behavior contract**. Almost all
+REST reads are additive `SELECT`s over data M1–M4 already model; comment
+creation via REST reuses M4's write path verbatim. The one exception is
+`date_gmt`/`modified`/`modified_gmt`/`ping_status`/`guid.rendered`/
+`content.protected` on posts/pages (Req 2.2): a greenfield grimoire database
+never populated `post_date_gmt`/`post_modified`/`post_modified_gmt`/
+`ping_status`/`post_password`/`guid`, because nothing before M5 read them, so
+M5 adds **one** small additive, greenfield-only migration (following the
+exact M4 `0003` column-migration contract) to add those six columns — an
+overlaid, populated WordPress database already has them and is read as-is,
+unaffected by the migration. Application Passwords reuse WordPress's own
 `{prefix}usermeta` mechanism (meta_key `_application_passwords`, a
 PHP-serialized array of password records — the same structure and location
-real WordPress uses), so **no new table** is required and an application
-password already present in an overlaid, populated WordPress database is
-read and verified exactly like M2.1 verifies an existing `$wp$`/phpass login
-password: new application passwords issued by grimoire are hashed with
-**bcrypt** (M2's precedent for new secrets), while any pre-existing
-WordPress-authored application password hash is verified in place through the
-same layered `internal/auth/password` verifier used for login. The only
-schema grimoire adds is a single additive read port for a post's category/tag
-term IDs (needed for the REST `categories`/`tags` fields), which is a pure
-`SELECT` over the existing `{prefix}term_relationships` table M1 already
-creates — no migration, no new table.
+real WordPress uses), so **no new table** is required for them. WordPress
+6.8+ hashes Application Passwords with `wp_fast_hash()` (a keyed BLAKE2b hash,
+prefixed `$generic$`, **not** the phpass/`$wp$`/bcrypt formats
+`internal/auth/password` handles, and — critically — keyed by a fixed literal
+string baked into WordPress core, not a per-site secret, so it needs no
+site-specific configuration to reproduce) — grimoire issues and verifies
+Application Passwords the same way, with a phpass/`$wp$` fallback path (via
+the existing `internal/auth/password.Verify`) for Application Passwords
+created by WordPress installs older than 6.8. The only new **read** port
+grimoire adds beyond this is a small, honestly-scoped set of additive reads
+needed for REST fields M4's ports don't already expose: a post's category/tag
+term IDs (over the existing `{prefix}term_relationships` table), user
+listing/counting, post search/ordering, and the `featured_media`/
+`media_details` postmeta fields (Req 14.2 enumerates all of them) — every one
+of these is a pure additive `SELECT`, none require a new table.
 
 Out of scope for M5: REST create/update/delete for posts, pages, and media
 (milestone 06); a rich-text/editor REST surface; WordPress meta-box/custom-field
@@ -119,10 +137,13 @@ display grimoire content unmodified.
    numeric ID.
 2. THE per-item JSON SHALL include, at minimum, the WordPress field names and
    shapes: `id`, `date`, `date_gmt`, `modified`, `modified_gmt`, `slug`,
-   `status`, `type`, `link`, `title.rendered`, `content.rendered`,
-   `excerpt.rendered`, `author` (user ID), `comment_status`, `categories`
-   (array of term IDs; posts only), and `tags` (array of term IDs; posts
-   only).
+   `status`, `type`, `link`, `guid.rendered`, `title.rendered`,
+   `content.rendered`, `content.protected` (boolean, true when the post has a
+   non-empty password), `excerpt.rendered`, `author` (user ID),
+   `comment_status`, `ping_status`, `categories` (array of term IDs; posts
+   only), `tags` (array of term IDs; posts only), and `featured_media` (the
+   attached image's attachment ID from the `_thumbnail_id` postmeta key, or
+   `0`).
 3. THE collection endpoints SHALL support the standard WordPress query
    parameters `page`, `per_page` (default 10, capped at a configurable
    maximum), `search`, `slug`, and `orderby=date|id` with `order=asc|desc`.
@@ -136,10 +157,15 @@ display grimoire content unmodified.
    trusted, already-rendered HTML the public HTML views render (no
    re-sanitization, no additional escaping), consistent with M1/M2.2's
    trusted-content contract.
-6. THE post/page read ports SHALL be additive `SELECT`s introducing no schema
-   change, and SHALL return identical results whether grimoire is running
-   against a greenfield database or an overlaid, populated WordPress
-   database.
+6. THE post/page read ports SHALL reuse the existing `AdminPostRepository`
+   (extended with `Search`/`OrderBy`/`Order` filter fields, Req 14.2) plus one
+   new additive read port for post metadata (`featured_media` from the
+   `_thumbnail_id` postmeta key, and `media_details` assembled from the
+   attached media's stored metadata — see Req 14.2), and SHALL return
+   identical results whether grimoire is running against a greenfield
+   database (using the new 0004 migration's columns, Req 2.2) or an
+   overlaid, populated WordPress database (which already has those columns
+   populated from real WordPress use).
 
 ### Requirement 3 — Comments: list and single read
 
@@ -156,11 +182,12 @@ discussion the same way the built-in theme does.
    of M4).
 2. THE per-item JSON SHALL include the WordPress field names: `id`, `post`,
    `parent`, `author_name`, `author_url`, `date`, `date_gmt`,
-   `content.rendered`, and `status` (`approved`/`unapproved`/`spam`, mapped
-   from the raw `comment_approved` enum for REST-shape parity), with
-   `content.rendered` HTML-escaped exactly as M4's public comment rendering
-   already treats it (untrusted input).
-3. WHEN the requester holds the `moderate_comments` capability (Req 9), THEN
+   `content.rendered`, and `status` (`hold`/`approved`/`spam`/`trash`, mapped
+   from the raw `comment_approved` enum for REST-shape parity, matching real
+   WordPress's status vocabulary), with `content.rendered` HTML-escaped
+   exactly as M4's public comment rendering already treats it (untrusted
+   input).
+3. WHEN the requester holds the `moderate_comments` capability (Req 8), THEN
    the collection and single-item endpoints SHALL also accept a
    `status=hold|spam|trash|any` filter, matching WordPress's moderator-only
    status query.
@@ -177,13 +204,18 @@ REST API, so that a client can resolve and display attachment URLs.
 1. THE system SHALL expose `GET /wp-json/wp/v2/media` and
    `GET /wp-json/wp/v2/media/{id}`, returning WordPress-shaped attachment
    JSON: `id`, `date`, `slug`, `type: "attachment"`, `link`, `title.rendered`,
-   `author`, `mime_type`, `source_url` (the public upload URL), and
-   `post` (the attached parent post ID, or `0`).
-2. THE media read ports SHALL reuse the M4 `MediaRepository` with no new
-   query surface beyond REST-shape mapping, and SHALL introduce no schema
-   change.
+   `author`, `mime_type`, `source_url` (the public upload URL), `post` (the
+   attached parent post ID, or `0`), and `media_details` (an object
+   including at minimum `width`/`height` for image attachments, sourced from
+   the attachment's stored `_wp_attachment_metadata` postmeta, matching
+   WordPress's own shape; an empty object `{}` for non-image attachments or
+   attachments with no stored metadata).
+2. THE media read ports SHALL reuse the M4 `MediaRepository` plus one new
+   additive read port for postmeta (`_wp_attachment_metadata`, Req 14.2),
+   introducing no schema change.
 3. `source_url` SHALL resolve identically to the M4 admin media listing's
-   `url` field (uploads base URL + the stored relative path).
+   `url` field (uploads base URL + the stored relative path); `link` and
+   `source_url` SHALL both follow the URL-absoluteness policy in Req 6.6.
 
 ### Requirement 5 — Users: list and single read
 
@@ -205,7 +237,13 @@ separate lookup mechanism.
    record, session token, or CSRF secret in any user REST response, in any
    context.
 4. THE user read ports SHALL be additive `SELECT`s over the existing
-   `{prefix}users`/`{prefix}usermeta` tables, introducing no schema change.
+   `{prefix}users`/`{prefix}usermeta` tables, extended with a new
+   `List`/`Count` capability on `UserRepository` (Req 14.2) to back the
+   collection endpoint's pagination, introducing no schema change.
+5. THE system SHALL expose `GET /wp-json/wp/v2/users/me` for any
+   Application-Password- or session-cookie-authenticated request, returning
+   that user's own **edit**-context record (Req 5.2) — the endpoint a real
+   WP REST client typically calls first to validate a presented credential.
 
 ### Requirement 6 — Response-shape parity: pagination, links, embedding
 
@@ -235,6 +273,16 @@ pagination and relationship-following logic works without modification.
    `_embedded`), not a bespoke grimoire shape.
 5. Requests WITHOUT `?_embed` SHALL NOT compute or return `_embedded`, so the
    unembedded path stays as cheap as a plain read.
+6. THE `link` field, every `_links[*][].href` URL, and `source_url` SHALL be
+   **absolute** URLs (scheme + host + path), constructed from the incoming
+   request's scheme and `Host` header at request time (grimoire has no
+   site-wide base-URL configuration, per M1–M4 precedent, so there is no
+   stored value to build from instead) — matching real WordPress REST
+   clients' expectation that these URLs are directly followable without a
+   client-supplied base. A deployment behind an untrusted reverse proxy that
+   does not set `Host` correctly at the edge SHALL be responsible for
+   correcting it before the request reaches grimoire, the same operational
+   assumption as any other Host-header-dependent behavior in the system.
 
 ### Requirement 7 — Comment creation via the REST API
 
@@ -256,7 +304,10 @@ server-rendered form path.
 3. THE endpoint SHALL enforce every M4 rule unchanged: default to the
    moderation queue (`comment_approved='0'`), reject a missing/unpublished/
    closed-comments target post (`404`/`403`), reject malformed input
-   (`400`), and run the spam filter before persisting (Req 3 of M4).
+   (`400`), populate `domain.Comment.AuthorIP` from the request the same way
+   the server-rendered form path's `commentClientIP(r)` helper does (so the
+   per-IP rate limit in M4's spam filter is not silently bypassed for REST
+   submissions), and run the spam filter before persisting (Req 3 of M4).
 4. THE endpoint SHALL require **either** a valid Application Password (Req 8;
    no CSRF token needed, matching WordPress's own exemption for
    Basic-auth/Application-Password requests) **or**, for a request
@@ -268,12 +319,16 @@ server-rendered form path.
    to the same spam filter, per-IP rate limit, and moderation-queue default
    as the safety net (Req 3/12 of M4), consistent with real WordPress, which
    also accepts anonymous REST comment submissions on an open-comments post.
-5. ALL OTHER `wp/v2` write methods (`POST`/`PUT`/`PATCH`/`DELETE` on `posts`,
-   `pages`, `media`, `users`) SHALL return `501 Not Implemented` with a REST
-   error body explicitly stating the operation is deferred to a later
+5. ALL OTHER `wp/v2` write methods — `POST`/`PUT`/`PATCH`/`DELETE` on `posts`,
+   `pages`, `media`, `users`, and `PUT`/`PATCH`/`DELETE` on `comments/{id}`
+   (comment moderation via REST) — SHALL return `501 Not Implemented` with a
+   REST error body explicitly stating the operation is deferred to a later
    milestone — grimoire SHALL NOT silently 404 or 405 a write it plans to
    support later, so a client can distinguish "not supported yet" from "does
-   not exist".
+   not exist". This blanket rule explicitly EXCLUDES the
+   `/wp-json/wp/v2/users/me/application-passwords*` routes (Req 9), which are
+   implemented in this milestone and SHALL NOT be shadowed by the `users`
+   501 catch-all.
 
 ### Requirement 8 — Application Passwords: storage and verification
 
@@ -289,34 +344,61 @@ third-party tool my login password.
    login password.
 2. APPLICATION PASSWORDS SHALL be stored as a single `{prefix}usermeta` row
    per user under the WordPress meta key `_application_passwords`, whose
-   value is a PHP-serialized array of records (`uuid`, `name`, hashed
-   `password`, `created`, `last_used`, `last_ip`), matching WordPress's own
-   storage location and structure — introducing **no new table**.
+   value is a PHP-serialized array of records (`uuid`, `app_id`, `name`,
+   hashed `password`, `created`, `last_used`, `last_ip`), matching
+   WordPress's own storage location and structure — introducing **no new
+   table**.
 3. WHEN grimoire creates a new Application Password, THEN its secret SHALL be
    a cryptographically random token, displayed to the user **exactly once**
-   at creation time, and stored only as a **bcrypt** hash (M2's precedent for
-   newly issued secrets) — never in plaintext or reversible form.
+   at creation time, and stored only as a `$generic$`-prefixed `wp_fast_hash()`
+   hash (WordPress 6.8+'s own Application Password hashing: a keyed BLAKE2b
+   hash of the secret, keyed by the fixed literal `wp_fast_hash_6.8+` — not a
+   per-site secret, so grimoire reproduces it with no additional
+   configuration) — never in plaintext or reversible form.
 4. WHEN grimoire verifies an Application Password presented via HTTP Basic
-   auth, THEN it SHALL check the presented secret against the stored hash
-   using the same layered verifier (`internal/auth/password.Verify`) M2/M2.1
-   use for login passwords, so an Application Password hash already present
-   in an **overlaid, populated WordPress database** (created by real
-   WordPress, hashed with WordPress's own password hashing) verifies
-   correctly without any migration.
+   auth, THEN it SHALL: (a) if the stored hash is `$generic$`-prefixed,
+   recompute `wp_fast_hash()` over the presented secret and compare in
+   constant time, matching WordPress 6.8+'s `wp_verify_fast_hash()`; (b)
+   otherwise, fall back to the same layered verifier
+   (`internal/auth/password.Verify`) M2/M2.1 use for login passwords
+   (phpass/`$wp$`/bcrypt), covering Application Passwords created by
+   WordPress installs older than 6.8 (which hashed them the same way as
+   login passwords) — so an Application Password hash already present in an
+   **overlaid, populated WordPress database** verifies correctly regardless
+   of which WordPress version created it, without any migration.
 5. WHEN an Application Password verifies successfully, THEN the system SHALL
    update its `last_used` timestamp and the requester's IP, and SHALL
    authenticate the request as that user's `Principal` with the user's normal
    roles/capabilities (no separate "API-only" capability set).
-6. IF the presented username/Application-Password pair does not verify, THEN
-   the request SHALL be treated as unauthenticated (not an error) for public
-   endpoints, and SHALL receive `401` with the standard REST error body for
-   an endpoint that requires authentication.
+6. IF a request presents an `Authorization: Basic` credential pair and it does
+   **not** verify (unknown username, or a password that fails Req 8.4's
+   verification), THEN the system SHALL reject the request with `401` and
+   the standard REST error body (`rest_invalid_credentials`) **immediately**
+   — for every endpoint, public or not, and regardless of whether a separate,
+   valid session cookie is also present on the same request. Presenting a
+   credential is an assertion of identity; a request with a valid session
+   cookie SHALL simply omit the `Authorization` header rather than send a
+   Basic credential it expects to be ignored. This SHALL be the **only**
+   invalid-Basic-auth behavior specified by this milestone (superseding any
+   other reading); a request with **no** `Authorization` header at all is
+   unauthenticated (not invalid) and is evaluated purely on session-cookie
+   auth, per Req 7.4.
 7. AN APPLICATION PASSWORD REQUEST SHALL NOT require a `X-CSRF-Token` or any
    session cookie — Application Password auth is inherently not
    browser/cookie-based, matching WordPress's own exemption.
 8. THE system SHALL NEVER echo an Application Password secret (only its
    name/uuid/timestamps) in any REST response, log line, or error message
    after the one-time creation response.
+9. IF an `Authorization: Basic` credential is presented over a connection
+   that is neither TLS-terminated (directly, or via a configured trusted
+   reverse-proxy header) nor addressed to a loopback host (`localhost`,
+   `127.0.0.1`, `::1`), THEN the system SHALL reject the request with `401`
+   before attempting verification, matching real WordPress's own refusal to
+   accept Application Passwords over a non-`https`, non-local request. This
+   check SHALL be configurable (default: enabled) following the same
+   operator-declared-trust model as the existing `CookieSecure` session-cookie
+   setting, since grimoire cannot itself detect TLS terminated by a reverse
+   proxy in front of it.
 
 ### Requirement 9 — Application Password self-service management
 
@@ -356,14 +438,18 @@ core code paths.
 
 #### Acceptance Criteria
 
-1. THE system SHALL provide an `internal/extensions` package defining two
-   registration mechanisms: **actions** — a named point where zero or more
-   registered callbacks are invoked for their side effects, in registration
-   order, with no return value observed by the caller — and **filters** — a
-   named point where zero or more registered callbacks each receive and
-   return a value of the same type, chained so each filter's output becomes
-   the next filter's input (WordPress's `do_action`/`apply_filters`
-   vocabulary, Go-typed).
+1. THE system SHALL provide a `pkg/extensions` package (importable by both
+   grimoire-internal code and external Go modules — a plain `internal/`
+   package cannot be imported outside `github.com/roboweaver/grimoire`,
+   Go's own import-visibility rule, so the public hook-registration API
+   lives at this importable path; this is grimoire's first `pkg/`
+   directory) defining two registration mechanisms: **actions** — a named
+   point where zero or more registered callbacks are invoked for their side
+   effects, in registration order, with no return value observed by the
+   caller — and **filters** — a named point where zero or more registered
+   callbacks each receive and return a value of the same type, chained so
+   each filter's output becomes the next filter's input (WordPress's
+   `do_action`/`apply_filters` vocabulary, Go-typed).
 2. THE system SHALL expose `extensions.RegisterAction(hook string, fn ActionFunc)`
    and `extensions.RegisterFilter(hook string, fn FilterFunc)` (or an
    equivalent typed, generics-based API) for extensions to register
@@ -376,10 +462,12 @@ core code paths.
    chain and SHALL propagate the error to the caller (e.g. aborting an HTTP
    response with a `500`), rather than silently continuing with a
    partially-applied value.
-5. AN ACTION CALLBACK THAT PANICS SHALL be recovered by the registry so one
-   misbehaving extension cannot crash the request or the process; the
-   recovered panic SHALL be logged via the existing structured logger
-   (`slog`) with the hook name.
+5. BOTH AN ACTION CALLBACK AND A FILTER CALLBACK THAT PANIC SHALL be recovered
+   by the registry so one misbehaving extension cannot crash the request or
+   the process; the recovered panic SHALL be logged via the existing
+   structured logger (`slog`) with the hook name, and (for a filter) the
+   chain SHALL short-circuit and return the input value unchanged alongside
+   an error, following the same short-circuit contract as Req 10.4.
 6. THE hook registry SHALL be safe for concurrent use (registration is
    expected only at `init()` time; invocation happens on every request from
    many goroutines).
@@ -405,13 +493,18 @@ extension mechanism is proven rather than theoretical.
    inject a script tag, rewrite a link) without touching the render engine
    or handler code.
 2. THE system SHALL define a **REST request filter/action pair** (e.g. an
-   action `"rest.pre_dispatch"` fired after auth/CSRF resolution but before
+   action `"rest.pre_dispatch"` fired after authentication resolution (Basic
+   Application-Password verification or session lookup, Req 8) but before
    the route handler runs, and a filter `"rest.response"` applied to the
    assembled JSON-serializable response value before it is marshaled and
    written) for every `wp/v2` route, so an extension can inspect an
    incoming REST request or transform an outgoing REST response body (e.g.
    add a custom field, redact a field) without modifying the route
-   handlers.
+   handlers. Consistent with M4's established pattern, CSRF verification
+   (where required, Req 7.4/9.4) SHALL remain a check **inside** the
+   specific write handler that needs it, not a centralized pre-dispatch
+   gate — `"rest.pre_dispatch"` fires before that per-handler CSRF check,
+   not after it.
 3. THE system SHALL define a **comment-submit action** (e.g.
    `"comment.submitted"`) fired by `CommentService.Create` **after** a
    comment is successfully persisted (any status, including `spam`),
@@ -446,9 +539,9 @@ WordPress plugins will work.
    grimoire instance without a rebuild.
 3. THE design documentation SHALL explicitly state what compatibility
    **is** provided: a small, defined set of Go hook points (Req 11) that a
-   first-party or vendored Go package can register against using the
-   `internal/extensions` API (Req 10), sufficient to observe or transform
-   behavior at those points without modifying grimoire core.
+   first-party, vendored, or external Go package can register against using
+   the importable `pkg/extensions` API (Req 10), sufficient to observe or
+   transform behavior at those points without modifying grimoire core.
 
 ### Requirement 13 — REST error handling and observability
 
@@ -483,15 +576,35 @@ vendor and against a live WordPress database.
 
 #### Acceptance Criteria
 
-1. ALL M5 read paths (posts, pages, comments, media, users, and the new
-   post→term-IDs lookup backing `categories`/`tags`) SHALL be additive
-   `SELECT` ports introducing **no** schema change against a live WordPress
-   database.
-2. THE only new **storage surface** M5 introduces is (a) the additive
-   post→term-IDs read port over the existing `{prefix}term_relationships`
-   table, and (b) reading/writing the `_application_passwords` usermeta key
-   via the existing `UserMetaRepository` — **no new migration file and no
-   new table** are required for M5.
+1. ALL M5 read paths (posts, pages, comments, media, users) SHALL be additive
+   `SELECT` ports introducing **no** schema change when grimoire is running
+   against an existing, overlaid WordPress database (which already has every
+   column M5 reads, including the six REST-only post columns in Req 2.2 —
+   real WordPress has always written them). Against a **greenfield**
+   grimoire-provisioned database, M5 adds exactly **one** new additive
+   migration (`0004_rest_post_fields`, following the exact M4 `0003`
+   column-migration contract) to backfill those same six post columns
+   (`post_date_gmt`, `post_modified`, `post_modified_gmt`, `ping_status`,
+   `post_password`, `guid`) with WordPress-matching defaults — this is the
+   **only** schema change introduced by this milestone, and it SHALL be a
+   no-op (already-present columns, left untouched) when applied to an
+   overlaid WordPress database.
+2. THE full set of new **storage surfaces** M5 introduces, beyond the one
+   migration in Req 14.1, is: (a) an additive post→term-IDs read port over
+   the existing `{prefix}term_relationships` table, ordered by term name
+   ascending (matching WordPress's default term ordering) for cross-vendor
+   determinism; (b) reading/writing the `_application_passwords` usermeta
+   key via the existing `UserMetaRepository`; (c) `List`/`Count` methods
+   added to `UserRepository` to back the `users` collection endpoint's
+   pagination (Req 5.4); (d) `Search`, `OrderBy`, and `Order` fields added to
+   `AdminPostFilter` to back the `posts`/`pages` collection endpoints'
+   `search`/`orderby`/`order` query parameters (Req 2.3); and (e) a new
+   additive postmeta read port covering the `_thumbnail_id` (backing
+   `featured_media`, Req 2.2) and `_wp_attachment_metadata` (backing
+   `media_details`, Req 4.1) meta keys. None of (a)–(e) requires a new table
+   or column — every one is a `SELECT` (or, for Application Passwords, a
+   read/write of an existing generic-usermeta port) over structures M1–M4
+   already created.
 3. THE new ports SHALL return identical shapes and behavior across MySQL,
    PostgreSQL, and SQLite, verified by the shared vendor-parameterized
    contract suite.

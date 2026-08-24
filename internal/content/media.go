@@ -93,6 +93,7 @@ func (s *MediaService) Store(ctx context.Context, r io.Reader, upload MediaUploa
 	if title == "" {
 		title = titleFromFilename(upload.Filename)
 	}
+	slug := strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath))
 	media := domain.Media{
 		Title:    title,
 		Filename: filepath.ToSlash(relPath),
@@ -100,6 +101,7 @@ func (s *MediaService) Store(ctx context.Context, r io.Reader, upload MediaUploa
 		MimeType: detectedMime(upload.MimeType, upload.Filename),
 		Date:     now,
 		ParentID: upload.ParentID,
+		Slug:     slug,
 	}
 	id, err := s.writer.Create(ctx, media)
 	if err != nil {

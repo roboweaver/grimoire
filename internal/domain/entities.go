@@ -105,6 +105,15 @@ type Media struct {
 	MimeType string
 	Date     time.Time
 	ParentID int64
+
+	// Slug and AuthorID back the REST API's slug/author fields (post_name and
+	// post_author on the attachment's {prefix}posts row). M4's own upload path
+	// (MediaService.Store) always writes a real Slug; AuthorID is 0 for
+	// attachments created through that path (M4 never threaded an uploading
+	// principal through), but is read correctly for attachments already
+	// present in an overlaid, pre-existing WordPress database.
+	Slug     string
+	AuthorID int64
 }
 
 // NavMenu is a nav_menu taxonomy term plus its item tree.

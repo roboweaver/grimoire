@@ -23,6 +23,13 @@ func TestSerialize(t *testing.T) {
 			map[string]any{"administrator": true},
 			`a:1:{s:13:"administrator";b:1;}`,
 		},
+		{"null", nil, "N;"},
+		{"typed nil pointer", (*string)(nil), "N;"},
+		{
+			"null nested in array (last_used/last_ip before first use)",
+			map[string]any{"last_used": nil, "last_ip": nil},
+			`a:2:{s:7:"last_ip";N;s:9:"last_used";N;}`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -60,6 +67,12 @@ func TestUnserialize(t *testing.T) {
 			`a:1:{s:6:"editor";b:1;}`,
 			map[string]any{"editor": true},
 		},
+		{"null", "N;", nil},
+		{
+			"null nested in array (last_used/last_ip before first use)",
+			`a:2:{s:7:"last_ip";N;s:9:"last_used";N;}`,
+			map[string]any{"last_ip": nil, "last_used": nil},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -85,6 +98,8 @@ func TestUnserializeErrors(t *testing.T) {
 		`s:13:"admin";`,     // too short
 		"a:1:{s:3:\"foo\";", // truncated array
 		"b:1",               // missing terminator
+		"N",                 // missing terminator for null
+		"X;",                // invalid null-ish marker
 		// A huge declared array count with a short/empty body must fail parsing
 		// quickly. The map size hint is clamped so this cannot force a giant
 		// preallocation from an attacker-controlled number (LOW 3).
@@ -108,6 +123,8 @@ func TestRoundTrip(t *testing.T) {
 		"hello world",
 		map[string]any{"administrator": true},
 		map[string]any{"editor": true, "custom_cap": true},
+		nil,
+		map[string]any{"last_used": nil, "last_ip": nil, "created": 12345},
 	}
 	for _, v := range values {
 		s, err := Serialize(v)

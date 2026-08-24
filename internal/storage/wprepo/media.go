@@ -17,6 +17,7 @@ var (
 
 var mediaColumns = []string{
 	`p.ID`, `p.post_title`, `pm.meta_value AS filename`, `p.post_mime_type`, `p.post_date`, `p.post_parent`,
+	`p.post_name`, `p.post_author`,
 }
 
 type mediaRow struct {
@@ -26,6 +27,8 @@ type mediaRow struct {
 	MimeType string `bun:"post_mime_type"`
 	Date     string `bun:"post_date"`
 	ParentID int64  `bun:"post_parent"`
+	Slug     string `bun:"post_name"`
+	AuthorID int64  `bun:"post_author"`
 }
 
 func (r mediaRow) toDomain() domain.Media {
@@ -37,6 +40,8 @@ func (r mediaRow) toDomain() domain.Media {
 		MimeType: r.MimeType,
 		Date:     parseTS(r.Date),
 		ParentID: r.ParentID,
+		Slug:     r.Slug,
+		AuthorID: r.AuthorID,
 	}
 }
 
@@ -51,7 +56,7 @@ func (r *MediaRepo) listQuery(ctx context.Context, f domain.MediaFilter) *bun.Se
 	q := r.db.NewSelect().
 		TableExpr("? AS p", bun.Ident(r.prefix+"posts")).
 		ColumnExpr("p.?", bun.Ident("ID")).
-		ColumnExpr("p.post_title, pm.meta_value AS filename, p.post_mime_type, p.post_date, p.post_parent").
+		ColumnExpr("p.post_title, pm.meta_value AS filename, p.post_mime_type, p.post_date, p.post_parent, p.post_name, p.post_author").
 		Join("JOIN ? AS pm ON pm.post_id = p.? AND pm.meta_key = ?", bun.Ident(r.prefix+"postmeta"), bun.Ident("ID"), "_wp_attached_file").
 		Where("p.post_type = ?", "attachment").
 		OrderExpr("p.post_date DESC, p.? DESC", bun.Ident("ID"))
@@ -96,7 +101,7 @@ func (r *MediaRepo) ByID(ctx context.Context, id int64) (domain.Media, error) {
 	err := r.db.NewSelect().
 		TableExpr("? AS p", bun.Ident(r.prefix+"posts")).
 		ColumnExpr("p.?", bun.Ident("ID")).
-		ColumnExpr("p.post_title, pm.meta_value AS filename, p.post_mime_type, p.post_date, p.post_parent").
+		ColumnExpr("p.post_title, pm.meta_value AS filename, p.post_mime_type, p.post_date, p.post_parent, p.post_name, p.post_author").
 		Join("JOIN ? AS pm ON pm.post_id = p.? AND pm.meta_key = ?", bun.Ident(r.prefix+"postmeta"), bun.Ident("ID"), "_wp_attached_file").
 		Where("p.post_type = ?", "attachment").
 		Where("p.? = ?", bun.Ident("ID"), id).
@@ -118,7 +123,7 @@ func (r *MediaRepo) Create(ctx context.Context, m domain.Media) (int64, error) {
 		created, err := insertReturningID(ctx, tx, vendor, r.prefix+"posts",
 			[]string{"post_author", "post_date", "post_content", "post_title", "post_excerpt", "post_status", "post_name", "post_type", "comment_status", "post_parent", "post_mime_type", "menu_order"},
 			`"ID"`,
-			0, formatTS(m.Date), "", m.Title, "", "inherit", "", "attachment", "closed", m.ParentID, m.MimeType, 0,
+			m.AuthorID, formatTS(m.Date), "", m.Title, "", "inherit", m.Slug, "attachment", "closed", m.ParentID, m.MimeType, 0,
 		)
 		if err != nil {
 			return err

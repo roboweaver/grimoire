@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +45,12 @@ func (f *fakeUsers) Create(_ context.Context, u domain.User) (int64, error) {
 	f.add(u)
 	return u.ID, nil
 }
+func (f *fakeUsers) List(_ context.Context, limit, offset int) ([]domain.User, error) {
+	return nil, nil
+}
+func (f *fakeUsers) Count(_ context.Context) (int64, error) {
+	return int64(len(f.byID)), nil
+}
 func (f *fakeUsers) UpdatePass(_ context.Context, id int64, hash string) error {
 	if _, ok := f.byID[id]; !ok {
 		return domain.ErrNotFound
@@ -55,16 +62,27 @@ func (f *fakeUsers) UpdatePass(_ context.Context, id int64, hash string) error {
 	return nil
 }
 
-type fakeMeta struct{ m map[int64]map[string]string }
+// fakeMeta is a goroutine-safe in-memory UserMetaRepository fake. The mutex
+// exists purely so tests exercising concurrent ApplicationPasswords calls
+// (Verify vs. Revoke) don't trip -race on the *fake's* own map access —
+// it says nothing about the thread-safety of the real repository.
+type fakeMeta struct {
+	mu sync.Mutex
+	m  map[int64]map[string]string
+}
 
 func newFakeMeta() *fakeMeta { return &fakeMeta{m: map[int64]map[string]string{}} }
 func (f *fakeMeta) Get(_ context.Context, userID int64, key string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if v, ok := f.m[userID][key]; ok {
 		return v, nil
 	}
 	return "", domain.ErrNotFound
 }
 func (f *fakeMeta) Set(_ context.Context, userID int64, key, value string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.m[userID] == nil {
 		f.m[userID] = map[string]string{}
 	}
@@ -72,6 +90,8 @@ func (f *fakeMeta) Set(_ context.Context, userID int64, key, value string) error
 	return nil
 }
 func (f *fakeMeta) ByUser(_ context.Context, userID int64) (map[string]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	out := map[string]string{}
 	for k, v := range f.m[userID] {
 		out[k] = v

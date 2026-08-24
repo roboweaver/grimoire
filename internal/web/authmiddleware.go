@@ -16,6 +16,22 @@ import (
 // server-side rolling expiry.
 func (s *Server) SessionMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Application Password auth (ApplicationPasswordAuth, mounted ahead
+		// of this middleware on /wp-json routes) already resolved a
+		// principal for this request. Do NOT let a session cookie also
+		// present on the request overwrite it: rest_comments.go's CSRF
+		// branch trusts isAppPasswordAuth(ctx) to mean "the effective
+		// principal is Application-Password-authenticated, exempt from
+		// CSRF" (Req 8.7) — if this middleware clobbered principalKey with
+		// the session's principal while leaving appPasswordAuthKey set, a
+		// request presenting both a valid Application Password AND an
+		// ambient session cookie would run as the *session* principal (its
+		// identity/capabilities) yet still skip CSRF, defeating the CSRF
+		// contract for session auth.
+		if isAppPasswordAuth(r.Context()) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		c, err := r.Cookie(s.authCfg.cookieName())
 		if err != nil || c.Value == "" {
 			next.ServeHTTP(w, r)

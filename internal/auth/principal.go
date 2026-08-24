@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sort"
 
+	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/php"
 )
 
@@ -105,4 +108,26 @@ func SerializeCapabilities(roles ...string) (string, error) {
 		m[r] = true
 	}
 	return php.Serialize(m)
+}
+
+// PrincipalForUser builds the Principal for a user from their
+// {prefix}capabilities usermeta value. A missing or malformed capabilities
+// value yields a role-less principal (rather than an error), matching how
+// SessionManager.Login/Authenticate have always tolerated an absent
+// capabilities row. Shared by SessionManager and ApplicationPasswords so
+// both authentication paths grant identical roles/capabilities for the same
+// user (Req 8.5: no separate "API-only" capability set).
+func PrincipalForUser(ctx context.Context, meta domain.UserMetaRepository, prefix string, u domain.User) (Principal, error) {
+	raw, err := meta.Get(ctx, u.ID, prefix+"capabilities")
+	if errors.Is(err, domain.ErrNotFound) {
+		return NewPrincipal(u.ID, u.Login, nil), nil
+	}
+	if err != nil {
+		return Principal{}, err
+	}
+	keys, perr := ParseCapabilities(raw)
+	if perr != nil {
+		return NewPrincipal(u.ID, u.Login, nil), nil
+	}
+	return NewPrincipal(u.ID, u.Login, keys), nil
 }

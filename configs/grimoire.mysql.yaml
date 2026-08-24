@@ -11,3 +11,18 @@ session:
   cookie_secure: false
   # Rolling session lifetime in hours (default 336 = 14 days).
   ttl_hours: 336
+rest:
+  # Application Passwords (HTTP Basic auth on /wp-json) are refused over a
+  # plain, non-TLS connection by default, matching real WordPress; disable
+  # only for local development or behind a proxy that already terminates
+  # TLS and is covered by trusted_proxy_header below.
+  require_tls_for_application_passwords: true
+  # If set, name of a request header (e.g. "X-Forwarded-Proto") that a
+  # TLS-terminating reverse proxy in front of this server is configured to
+  # set reliably; treated as an additional "arrived over TLS" signal. Only
+  # enable this behind a proxy that strips the header from untrusted
+  # clients.
+  trusted_proxy_header: ""
+  # Caps the REST API's "per_page" query parameter (default 100, matching
+  # WordPress core's own ceiling).
+  per_page_max: 100

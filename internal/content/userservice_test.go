@@ -49,6 +49,12 @@ func (f *fakeUserRepo) UpdatePass(_ context.Context, id int64, passHash string) 
 	f.byID[id] = u
 	return nil
 }
+func (f *fakeUserRepo) List(_ context.Context, limit, offset int) ([]domain.User, error) {
+	return nil, nil
+}
+func (f *fakeUserRepo) Count(_ context.Context) (int64, error) {
+	return int64(len(f.byID)), nil
+}
 
 type fakeMetaRepo struct {
 	m map[int64]map[string]string

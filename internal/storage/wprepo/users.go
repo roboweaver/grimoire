@@ -112,6 +112,37 @@ func (r *UserRepo) UpdatePass(ctx context.Context, id int64, passHash string) er
 	return errNotFoundIfZero(res)
 }
 
+// List returns users ordered by ID ascending, for REST /users pagination.
+func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]domain.User, error) {
+	var rows []userRow
+	err := r.db.NewSelect().
+		TableExpr("?", bun.Ident(r.prefix+"users")).
+		Column(userColumns...).
+		OrderExpr("? ASC", bun.Ident("ID")).
+		Limit(limit).
+		Offset(offset).
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	users := make([]domain.User, len(rows))
+	for i, row := range rows {
+		users[i] = row.toDomain()
+	}
+	return users, nil
+}
+
+// Count returns the total number of users, ignoring limit/offset.
+func (r *UserRepo) Count(ctx context.Context) (int64, error) {
+	n, err := r.db.NewSelect().
+		TableExpr("?", bun.Ident(r.prefix+"users")).
+		Count(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return int64(n), nil
+}
+
 // UserMetaRepo reads and writes single-valued user metadata.
 type UserMetaRepo struct {
 	db     *bun.DB

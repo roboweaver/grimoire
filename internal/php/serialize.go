@@ -2,6 +2,7 @@ package php
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -9,10 +10,13 @@ import (
 
 // Serialize encodes a Go value into PHP's serialize() text format.
 //
-// Supported types: bool, int, string, and map[string]any / map[string]bool
-// (encoded as a PHP associative array with string keys). String lengths are
-// counted in bytes, matching PHP semantics. Map keys are emitted in sorted
-// order so that output is deterministic for identical inputs.
+// Supported types: nil (and any nil pointer), bool, int, string, and
+// map[string]any / map[string]bool (encoded as a PHP associative array with
+// string keys). Nil encodes as PHP's null (N;), matching how WordPress
+// stores an Application Password's last_used/last_ip before first use.
+// String lengths are counted in bytes, matching PHP semantics. Map keys are
+// emitted in sorted order so that output is deterministic for identical
+// inputs.
 func Serialize(v any) (string, error) {
 	var b strings.Builder
 	if err := serializeValue(&b, v); err != nil {
@@ -22,6 +26,10 @@ func Serialize(v any) (string, error) {
 }
 
 func serializeValue(b *strings.Builder, v any) error {
+	if v == nil || isNilPointer(v) {
+		b.WriteString("N;")
+		return nil
+	}
 	switch val := v.(type) {
 	case bool:
 		if val {
@@ -75,4 +83,12 @@ func serializeMap(b *strings.Builder, m map[string]any) error {
 	}
 	b.WriteByte('}')
 	return nil
+}
+
+// isNilPointer reports whether v holds a nil pointer of any type (e.g.
+// (*string)(nil)), which a plain `v == nil` comparison misses because v is a
+// non-nil interface wrapping a nil pointer.
+func isNilPointer(v any) bool {
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Ptr && rv.IsNil()
 }

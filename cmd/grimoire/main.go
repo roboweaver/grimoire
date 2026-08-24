@@ -21,6 +21,14 @@ import (
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/web"
+	// Extension packages register grimoire hooks (see pkg/extensions:
+	// RegisterAction/RegisterFilter) from their init() function. To compile
+	// a real extension into this binary, blank-import it here, e.g.:
+	//
+	//	_ "your/extension/package"
+	//
+	// No extensions are registered by default: grimoire boots and serves
+	// wp-json with zero hooks firing until one is linked in.
 )
 
 func main() {
@@ -68,6 +76,13 @@ func main() {
 	menus := content.NewNavMenuService(repos.NavMenus, cfg.Theme)
 	media := content.NewMediaService(repos.Media, repos.MediaWriter, content.MediaConfig{UploadsDir: cfg.Media.UploadsDir, BaseURL: "/wp-content/uploads", AllowedMIMEs: cfg.Media.AllowedMIMEs, MaxUploadSize: cfg.Media.MaxUploadSize})
 
+	restMapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, cfg.Database.TablePrefix)
+	appPasswords := &auth.ApplicationPasswords{
+		Users:  repos.Users,
+		Meta:   repos.UserMeta,
+		Prefix: cfg.Database.TablePrefix,
+	}
+
 	handler := web.NewServer(
 		content.NewPostService(repos.Posts),
 		content.NewTermService(repos.Terms, repos.Posts),
@@ -81,7 +96,12 @@ func main() {
 	}).WithAdmin(admin.Handler("/admin"), content.NewAdminService(
 		repos.AdminPosts, repos.PostWriter, repos.PostCounter,
 		repos.UserCounter, repos.TermCounter, repos.Users,
-	)).Routes()
+	)).WithREST(
+		restMapper, repos.AdminPosts, repos.PostWriter, repos.Posts, repos.Media, repos.Users,
+		cfg.REST.PerPageMax,
+	).WithApplicationPasswords(
+		appPasswords, cfg.REST.RequireTLSForApplicationPasswords, cfg.REST.TrustedProxyHeader,
+	).Routes()
 
 	srv := &http.Server{Addr: cfg.Server.Addr, Handler: handler}
 

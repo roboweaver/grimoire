@@ -47,6 +47,10 @@ type Set struct {
 	PostCounter domain.PostCounter
 	UserCounter domain.UserCounter
 	TermCounter domain.TermCounter
+
+	// M5 additive read ports backing REST responses.
+	PostTerms domain.PostTermsRepository
+	PostMeta  domain.PostMetaRepository
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -155,6 +159,9 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			PostCounter: posts,
 			UserCounter: users,
 			TermCounter: terms,
+
+			PostTerms: wprepo.NewPostTermsRepo(bunDB, prefix),
+			PostMeta:  wprepo.NewPostMetaRepo(bunDB, prefix),
 		},
 		db:    db,
 		bunDB: bunDB,

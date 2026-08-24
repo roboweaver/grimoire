@@ -122,6 +122,24 @@ GRIMOIRE_TEST_POSTGRES_DSN='postgres://user:pass@127.0.0.1:5432/grimoire_test?ss
   go test ./internal/storage/storagetest/... -v
 ```
 
+## REST API & extensions (M5)
+
+grimoire also exposes a WordPress-compatible REST API at `/wp-json/wp/v2/*`
+(read parity for posts/pages/comments/media/users, real WP response shape:
+`_links`, `?_embed`, `X-WP-Total*` pagination headers) plus one write
+endpoint, `POST /wp-json/wp/v2/comments`; all other post/page/media/user
+writes return `501` (deferred to a later milestone). Authentication for
+non-anonymous REST requests is via WordPress **Application Passwords**
+(HTTP Basic, `wp_fast_hash`/`$generic$`, phpass/`$wp$`/bcrypt fallback);
+self-service management lives at `/wp-json/wp/v2/users/me/application-passwords`.
+
+A small, first-class Go package, [`pkg/extensions`](./pkg/extensions),
+provides a compiled action/filter hook registry (no PHP, no dynamic
+loading) wired at three points: post-render, REST request/response, and
+comment-submit. See
+[`plans/05-extensions-rest-api`](./plans/05-extensions-rest-api) for the
+full specification.
+
 ## Milestones
 
 - **M1 (current spec):** content core + switchable DB + WP-compatible schema + public read rendering + default theme.

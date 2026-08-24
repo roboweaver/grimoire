@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/roboweaver/grimoire/internal/content"
+	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
 )
 
@@ -28,6 +29,16 @@ type Server struct {
 	admin adminReader
 	// spa serves the embedded React Spectrum admin under /admin; nil until WithAdmin.
 	spa http.Handler
+
+	// REST API dependencies; restMapper nil until WithREST, in which case the
+	// /wp-json/* routes are not registered at all.
+	restMapper     *content.RESTMapper
+	restPosts      domain.AdminPostRepository
+	restPostByID   restPostByID
+	restBySlug     domain.PostRepository
+	restMedia      domain.MediaRepository
+	restUsers      domain.UserRepository
+	restPerPageMax int
 }
 
 // NewServer builds a Server. log may be nil, in which case slog.Default is used.
@@ -79,6 +90,8 @@ func (s *Server) Routes() http.Handler {
 	// Admin group must be registered before the public catch-all so /admin is
 	// never shadowed by content resolution (Req 1.2).
 	s.registerAdmin(r)
+	// REST group likewise, so /wp-json/* is never shadowed (Req 1.3).
+	s.registerREST(r)
 	r.Method(http.MethodGet, "/{slug}", s.handler(s.single))
 	return r
 }

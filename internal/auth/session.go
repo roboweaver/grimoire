@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/auth/password"
@@ -72,6 +73,13 @@ func (m *SessionManager) capsKey() string { return m.Prefix + "capabilities" }
 // whether the username exists. A successful login against a legacy phpass hash
 // transparently rehashes the password to bcrypt.
 func (m *SessionManager) Login(ctx context.Context, username, pw string) (string, Principal, error) {
+	// WordPress's wp_authenticate() does `$password = trim($password)` before
+	// running the authenticate filter chain (and thus before
+	// wp_check_password). Replicate that here so a password with incidental
+	// surrounding whitespace (e.g. from a credential manager) verifies the
+	// same way it would against real WordPress.
+	pw = strings.TrimSpace(pw)
+
 	u, err := m.Users.ByLogin(ctx, username)
 	if errors.Is(err, domain.ErrNotFound) {
 		// Constant-time guard: compare against a throwaway hash so a missing

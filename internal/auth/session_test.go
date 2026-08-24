@@ -196,6 +196,30 @@ func TestSessionManager_LoginSuccess(t *testing.T) {
 	}
 }
 
+// TestSessionManager_LoginTrimsSurroundingWhitespace ensures Login matches
+// WordPress's wp_authenticate(), which does `$password = trim($password)`
+// before delegating to the authenticate filter (and therefore before
+// wp_check_password). A real-world credential manager entry with trailing
+// whitespace logs into WordPress successfully because of this trim; grimoire
+// must replicate it or such logins fail with ErrInvalidCredentials even
+// though the password is correct.
+func TestSessionManager_LoginTrimsSurroundingWhitespace(t *testing.T) {
+	now := time.Now().UTC()
+	m, users, _, sess := newTestManager(now)
+	users.add(bcryptUser(t, 1, "admin", "s3cret!"))
+
+	token, _, err := m.Login(context.Background(), "admin", "  s3cret!  \n")
+	if err != nil {
+		t.Fatalf("Login with whitespace-padded password: %v", err)
+	}
+	if token == "" {
+		t.Fatal("expected non-empty session token")
+	}
+	if len(sess.m) != 1 {
+		t.Errorf("expected 1 session created, got %d", len(sess.m))
+	}
+}
+
 func TestSessionManager_LoginWrongPassword(t *testing.T) {
 	now := time.Now().UTC()
 	m, users, _, sess := newTestManager(now)

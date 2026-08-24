@@ -11,8 +11,14 @@ import (
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/pkg/extensions"
 	"html"
 )
+
+// hookRenderPostHTML is the "render.post_html" filter hook (Req 11.1):
+// fired with the fully-rendered HTML buffer for a public single/page view,
+// immediately before it is written to the response.
+const hookRenderPostHTML = "render.post_html"
 
 // pageParam parses a ?page= query value, defaulting to 1 for missing/invalid.
 func pageParam(r *http.Request) int {
@@ -31,7 +37,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	data := render.IndexData{SiteTitle: title, Tagline: tagline, Posts: postViews(posts)}
-	return s.renderHTML(w, "index", data)
+	return s.renderHTML(w, r, "index", data)
 }
 
 func (s *Server) single(w http.ResponseWriter, r *http.Request) error {
@@ -79,7 +85,7 @@ func (s *Server) single(w http.ResponseWriter, r *http.Request) error {
 		menu = navMenuView(m)
 	}
 	data := render.SingleData{SiteTitle: title, Tagline: tagline, Post: postView(post), Comments: comments, CommentCount: commentCount, PendingComment: pending, CommentToken: commentToken, Menu: menu}
-	return s.renderHTML(w, kind, data)
+	return s.renderHTML(w, r, kind, data)
 }
 
 func (s *Server) category(w http.ResponseWriter, r *http.Request) error {
@@ -91,19 +97,35 @@ func (s *Server) category(w http.ResponseWriter, r *http.Request) error {
 	}
 	title, tagline := s.options.SiteInfo(ctx)
 	data := render.CategoryData{SiteTitle: title, Tagline: tagline, Term: termView(term), Posts: postViews(posts)}
-	return s.renderHTML(w, "category", data)
+	return s.renderHTML(w, r, "category", data)
 }
 
 // renderHTML renders kind with data into a buffer first, so a template
 // execution error surfaces before any bytes reach the client. This lets the
 // error middleware map failures to a clean 404/500 instead of appending an
 // error to a partially written 200 response.
-func (s *Server) renderHTML(w http.ResponseWriter, kind string, data any) error {
+//
+// For the public single/page views specifically (Req 11.1), the fully
+// rendered HTML buffer is passed through the "render.post_html" filter
+// immediately before it is written to the response, letting a registered
+// extension transform the final markup without touching the render engine
+// or this handler. r may be nil (as in tests exercising only the
+// render-error path); the filter is applied only when r is non-nil, since
+// extensions.ApplyFilters needs a context to run under.
+func (s *Server) renderHTML(w http.ResponseWriter, r *http.Request, kind string, data any) error {
 	var buf bytes.Buffer
 	if err := s.render.Render(&buf, kind, data); err != nil {
 		return err
 	}
+	out := buf.Bytes()
+	if r != nil && (kind == "single" || kind == "page") {
+		filtered, err := extensions.ApplyFilters(r.Context(), hookRenderPostHTML, out)
+		if err != nil {
+			return err
+		}
+		out = filtered
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, err := w.Write(buf.Bytes())
+	_, err := w.Write(out)
 	return err
 }

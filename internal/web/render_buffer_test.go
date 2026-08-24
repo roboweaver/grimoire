@@ -38,7 +38,7 @@ func TestRenderHTMLNoPartialWriteOnError(t *testing.T) {
 	s := &Server{render: eng}
 
 	rec := httptest.NewRecorder()
-	if err := s.renderHTML(rec, "index", struct{}{}); err == nil {
+	if err := s.renderHTML(rec, nil, "index", struct{}{}); err == nil {
 		t.Fatal("expected render error, got nil")
 	}
 	if rec.Body.Len() != 0 {

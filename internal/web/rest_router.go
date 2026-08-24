@@ -73,6 +73,9 @@ func (s *Server) registerREST(r chi.Router) {
 			nr.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) {
 				writeRESTError(w, http.StatusMethodNotAllowed, "rest_no_route", "Method not allowed for this route.")
 			})
+			if s.appPasswords != nil {
+				nr.Use(s.ApplicationPasswordAuth)
+			}
 			if s.auth != nil {
 				nr.Use(s.SessionMiddleware)
 			}
@@ -123,14 +126,6 @@ func writeRESTResponse(w http.ResponseWriter, r *http.Request, status int, v any
 func restNotImplemented(code, resource string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		writeRESTError(w, http.StatusNotImplemented, code, resource+" is not yet implemented via the REST API; it is deferred to a later milestone.")
-	}
-}
-
-// registerRESTComments registers only the write-method 501 stub for
-// comments/{id}; GET/POST on comments are implemented in Phase 6.
-func (s *Server) registerRESTComments(r chi.Router) {
-	for _, m := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
-		r.Method(m, "/comments/{id}", restNotImplemented("rest_cannot_edit", "Updating or deleting a comment"))
 	}
 }
 

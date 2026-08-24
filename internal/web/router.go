@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
@@ -39,6 +40,13 @@ type Server struct {
 	restMedia      domain.MediaRepository
 	restUsers      domain.UserRepository
 	restPerPageMax int
+
+	// Application Password auth (Req 8); appPasswords nil until
+	// WithApplicationPasswords, in which case ApplicationPasswordAuth is
+	// not mounted and Basic-auth credentials on /wp-json are ignored.
+	appPasswords           *auth.ApplicationPasswords
+	restRequireTLS         bool
+	restTrustedProxyHeader string
 }
 
 // NewServer builds a Server. log may be nil, in which case slog.Default is used.
@@ -56,6 +64,25 @@ func NewServer(posts *content.PostService, terms *content.TermService, options *
 func (s *Server) WithAuth(sessions Sessions, cfg AuthConfig) *Server {
 	s.auth = sessions
 	s.authCfg = cfg
+	return s
+}
+
+// WithApplicationPasswords enables HTTP Basic Application Password auth on
+// the /wp-json REST surface (Req 8), wiring the shared
+// *auth.ApplicationPasswords verifier into the server. requireTLS gates the
+// transport-security check (Req 8.9; matches real WordPress's default
+// refusal to accept Application Passwords over a plain, non-local
+// connection); trustedProxyHeader, if non-empty, is honored as an
+// additional TLS signal for deployments behind a TLS-terminating reverse
+// proxy (same operator-declared-trust posture as AuthConfig.Secure). It
+// returns the same Server for chaining. When ap is nil,
+// ApplicationPasswordAuth is not mounted and Basic-auth credentials on
+// /wp-json are ignored (session-cookie/anonymous evaluation proceeds as
+// before).
+func (s *Server) WithApplicationPasswords(ap *auth.ApplicationPasswords, requireTLS bool, trustedProxyHeader string) *Server {
+	s.appPasswords = ap
+	s.restRequireTLS = requireTLS
+	s.restTrustedProxyHeader = trustedProxyHeader
 	return s
 }
 

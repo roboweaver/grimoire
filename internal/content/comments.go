@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/pkg/extensions"
 )
 
 const (
@@ -22,7 +23,20 @@ const (
 
 	wpTrashMetaStatus = "_wp_trash_meta_status"
 	wpTrashMetaTime   = "_wp_trash_meta_time"
+
+	// HookCommentSubmitted fires (as a DoAction) after CommentService.Create
+	// persists a new comment, regardless of the resulting moderation status
+	// (Req 11.2).
+	HookCommentSubmitted = "comment.submitted"
 )
+
+// CommentSubmittedPayload is the "comment.submitted" action payload: the
+// persisted comment (with its assigned ID and resolved Status) and the post
+// it was submitted against.
+type CommentSubmittedPayload struct {
+	Comment domain.Comment
+	Post    domain.Post
+}
 
 var ErrCommentsClosed = errors.New("content: comments closed")
 
@@ -53,6 +67,14 @@ func (s *CommentService) List(ctx context.Context, filter domain.CommentFilter) 
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+// ByID returns a single comment by primary key, regardless of status. It is
+// an additive read over the existing domain.CommentRepository.ByID port
+// (Req 3.4) exposed for the REST single-comment endpoint, which applies its
+// own capability-gated status-visibility check on the result.
+func (s *CommentService) ByID(ctx context.Context, id int64) (domain.Comment, error) {
+	return s.repo.ByID(ctx, id)
 }
 
 func (s *CommentService) Create(ctx context.Context, c domain.Comment) (domain.Comment, domain.Post, error) {
@@ -94,6 +116,11 @@ func (s *CommentService) Create(ctx context.Context, c domain.Comment) (domain.C
 		return domain.Comment{}, domain.Post{}, err
 	}
 	c.ID = id
+	// Req 11.2: fire "comment.submitted" after successful persistence,
+	// regardless of the resulting moderation status (including "spam") —
+	// extensions decide for themselves whether/how to react to each status,
+	// this hook only reports that persistence succeeded.
+	extensions.DoAction(ctx, HookCommentSubmitted, &CommentSubmittedPayload{Comment: c, Post: post})
 	return c, post, nil
 }
 

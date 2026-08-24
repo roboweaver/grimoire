@@ -22,6 +22,7 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	Session  SessionConfig  `yaml:"session"`
 	Media    MediaConfig    `yaml:"media"`
+	REST     RESTConfig     `yaml:"rest"`
 }
 
 type MediaConfig struct {
@@ -52,6 +53,32 @@ func (s SessionConfig) TTL() time.Duration {
 	return time.Duration(s.TTLHours) * time.Hour
 }
 
+// RESTConfig configures the /wp-json/wp/v2 REST API surface (Req 8, 10, 12).
+type RESTConfig struct {
+	// RequireTLSForApplicationPasswords gates HTTP Basic Application
+	// Password authentication behind a TLS (or loopback) transport check,
+	// matching real WordPress's default refusal to accept Application
+	// Passwords over a plain, non-local connection (Req 8.9). Defaults to
+	// true; set false only for local development or when TLS is verified
+	// to terminate elsewhere in a way this process cannot observe.
+	// Note: this defaults to true (see Load, which pre-populates this
+	// field before unmarshaling), unlike every other bool in this
+	// config which defaults to false.
+	RequireTLSForApplicationPasswords bool `yaml:"require_tls_for_application_passwords"`
+	// TrustedProxyHeader, if non-empty, names a request header (e.g.
+	// "X-Forwarded-Proto") that this operator has configured their
+	// TLS-terminating reverse proxy to set reliably; its presence with a
+	// value of "https" is treated as an additional "request arrived over
+	// TLS" signal for the Application Password transport check. This is
+	// an operator-declared-trust setting (same posture as
+	// SessionConfig.CookieSecure) and must only be enabled behind a proxy
+	// that strips/overwrites this header from untrusted clients.
+	TrustedProxyHeader string `yaml:"trusted_proxy_header"`
+	// PerPageMax caps the REST "per_page" query parameter (default 100,
+	// matching WordPress core's own ceiling).
+	PerPageMax int `yaml:"per_page_max"`
+}
+
 // DatabaseConfig selects and configures the storage backend.
 type DatabaseConfig struct {
 	Vendor      string `yaml:"vendor"`
@@ -63,6 +90,14 @@ type DatabaseConfig struct {
 // then validates the result.
 func Load(path string) (Config, error) {
 	var cfg Config
+	// RequireTLSForApplicationPasswords defaults to true, unlike every
+	// other bool in this config (which default to false). Since
+	// yaml.Unmarshal only overwrites fields actually present in the
+	// document, pre-setting it here means a config file that simply
+	// omits "rest.require_tls_for_application_passwords" keeps the
+	// secure default, while a document that explicitly sets it to
+	// false is still honored.
+	cfg.REST.RequireTLSForApplicationPasswords = true
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("config: read %s: %w", path, err)
@@ -107,6 +142,17 @@ func (c *Config) applyEnv() {
 			c.Session.TTLHours = n
 		}
 	}
+	if v, ok := os.LookupEnv("GRIMOIRE_REST_REQUIRE_TLS_FOR_APPLICATION_PASSWORDS"); ok {
+		c.REST.RequireTLSForApplicationPasswords = v == "1" || strings.EqualFold(v, "true")
+	}
+	if v, ok := os.LookupEnv("GRIMOIRE_REST_TRUSTED_PROXY_HEADER"); ok {
+		c.REST.TrustedProxyHeader = v
+	}
+	if v, ok := os.LookupEnv("GRIMOIRE_REST_PER_PAGE_MAX"); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.REST.PerPageMax = n
+		}
+	}
 }
 
 func (c *Config) applyDefaults() {
@@ -133,6 +179,9 @@ func (c *Config) applyDefaults() {
 	}
 	if len(c.Media.AllowedMIMEs) == 0 {
 		c.Media.AllowedMIMEs = []string{"image/png", "image/jpeg", "image/gif", "text/plain"}
+	}
+	if c.REST.PerPageMax <= 0 {
+		c.REST.PerPageMax = 100
 	}
 }
 

@@ -212,3 +212,78 @@ database:
 		t.Fatalf("max_upload_size=%d", cfg.Media.MaxUploadSize)
 	}
 }
+
+func TestLoadRESTDefaults(t *testing.T) {
+	path := writeTempConfig(t, `
+database:
+  vendor: sqlite
+  dsn: "file:grimoire.db"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.REST.RequireTLSForApplicationPasswords {
+		t.Error("rest.require_tls_for_application_passwords should default to true when omitted from the config file")
+	}
+	if cfg.REST.TrustedProxyHeader != "" {
+		t.Errorf("rest.trusted_proxy_header = %q, want empty default", cfg.REST.TrustedProxyHeader)
+	}
+	if cfg.REST.PerPageMax != 100 {
+		t.Errorf("rest.per_page_max = %d, want default 100", cfg.REST.PerPageMax)
+	}
+}
+
+func TestLoadRESTExplicitFalseIsHonored(t *testing.T) {
+	// Regression guard: RequireTLSForApplicationPasswords is pre-set to
+	// true before yaml.Unmarshal so an omitted key keeps the secure
+	// default (TestLoadRESTDefaults above); this test confirms an
+	// explicit "false" in the file is not clobbered by that pre-set.
+	path := writeTempConfig(t, `
+database:
+  vendor: sqlite
+  dsn: "file:grimoire.db"
+rest:
+  require_tls_for_application_passwords: false
+  trusted_proxy_header: "X-Forwarded-Proto"
+  per_page_max: 25
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.REST.RequireTLSForApplicationPasswords {
+		t.Error("explicit require_tls_for_application_passwords: false should be honored, not overridden by the pre-set default")
+	}
+	if cfg.REST.TrustedProxyHeader != "X-Forwarded-Proto" {
+		t.Errorf("trusted_proxy_header = %q, want X-Forwarded-Proto", cfg.REST.TrustedProxyHeader)
+	}
+	if cfg.REST.PerPageMax != 25 {
+		t.Errorf("per_page_max = %d, want 25", cfg.REST.PerPageMax)
+	}
+}
+
+func TestLoadRESTEnvOverrides(t *testing.T) {
+	path := writeTempConfig(t, `
+database:
+  vendor: sqlite
+  dsn: "file:grimoire.db"
+`)
+	t.Setenv("GRIMOIRE_REST_REQUIRE_TLS_FOR_APPLICATION_PASSWORDS", "false")
+	t.Setenv("GRIMOIRE_REST_TRUSTED_PROXY_HEADER", "X-Forwarded-Proto")
+	t.Setenv("GRIMOIRE_REST_PER_PAGE_MAX", "10")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.REST.RequireTLSForApplicationPasswords {
+		t.Error("env override should set require_tls_for_application_passwords to false")
+	}
+	if cfg.REST.TrustedProxyHeader != "X-Forwarded-Proto" {
+		t.Errorf("trusted_proxy_header = %q, want env override", cfg.REST.TrustedProxyHeader)
+	}
+	if cfg.REST.PerPageMax != 10 {
+		t.Errorf("per_page_max = %d, want env override 10", cfg.REST.PerPageMax)
+	}
+}

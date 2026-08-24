@@ -26,6 +26,13 @@ type Config struct {
 }
 
 type MediaConfig struct {
+	// UploadsDir is where uploaded media files are read from/written to,
+	// resolved relative to the process's working directory if not absolute.
+	// Defaults to "wp-content/uploads" (see applyDefaults). When pointing
+	// grimoire at an existing external WordPress database, this must be set
+	// explicitly to that site's real uploads directory on disk, or
+	// /wp-content/uploads/* requests will 404 even though the DB rows for
+	// those media items resolve fine.
 	UploadsDir    string   `yaml:"uploads_dir"`
 	MaxUploadSize int64    `yaml:"max_upload_size"`
 	AllowedMIMEs  []string `yaml:"allowed_mime_types"`

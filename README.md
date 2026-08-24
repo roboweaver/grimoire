@@ -101,6 +101,14 @@ go run ./cmd/grimoire            -config configs/grimoire.mysql.yaml
 To read an **existing** WordPress database, skip `migrate`/`seed`, point the DSN
 at it, and set `table_prefix` to match the site (default `wp_`).
 
+grimoire reads media rows from the database but never copies the underlying
+upload files, so you must also set `media.uploads_dir` to the site's real
+`wp-content/uploads` directory on disk. It defaults to the relative path
+`wp-content/uploads` (resolved against grimoire's own working directory),
+which will not exist for an external WordPress install — leaving it unset
+causes `/wp-content/uploads/*` requests (and Media admin thumbnails) to 404
+even though the database rows resolve fine.
+
 ### PostgreSQL
 
 Edit `configs/grimoire.postgres.yaml` (DSN form

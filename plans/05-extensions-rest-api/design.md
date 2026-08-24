@@ -571,12 +571,19 @@ matching `comment_status`'s pattern), `post_password` (default `''`), and
 `guid.rendered` fields (Req 2.2). A **greenfield** grimoire database never
 populated these columns because nothing before M5 read them; an **overlaid,
 populated WordPress database already has every one of these columns** (real
-WordPress has written them since its earliest schema), so the migration is
-a pure no-op there — Postgres's dialect uses `ADD COLUMN IF NOT EXISTS`
-(safe to re-run against a populated database); MySQL/SQLite use plain `ADD
-COLUMN` under the same "runs only against grimoire-provisioned schemas"
-contract M4's `0003` already documents in its own file header, since neither
-dialect supports `IF NOT EXISTS` on `ADD COLUMN`.
+WordPress has written them since its earliest schema), so `0004` is never
+actually needed there. Whether it is *safe* to run anyway differs by
+vendor, exactly as with M4's `0003`: Postgres's dialect uses `ADD COLUMN IF
+NOT EXISTS`, so re-running it or pointing it at an already-populated
+database is a true no-op. MySQL and SQLite have no `ADD COLUMN IF NOT
+EXISTS` and use plain `ADD COLUMN`, which **errors** ("duplicate column")
+if any target column already exists — so, under the same "runs only against
+grimoire-provisioned schemas" contract M4's `0003` already documents in its
+own file header, `0004` SHALL NOT be run against an already-overlaid MySQL
+or SQLite database. Operators of an overlaid MySQL/SQLite install simply
+never run `0004` at all (there is nothing for it to add); only a
+greenfield-provisioned MySQL/SQLite database runs it, exactly once, as part
+of the normal migration chain.
 
 Every other M5 storage need is satisfiable by tables M1–M4 already created:
 `{prefix}term_relationships`/`{prefix}term_taxonomy` (post→term IDs),
@@ -671,9 +678,14 @@ genuine gap exists, **zero** additional SQL everywhere else.
 - **Migration tests.** The new `0004_rest_post_fields` migration is exercised
   by the existing per-vendor migration test harness (SQLite unconditionally,
   MySQL/Postgres when their DSNs are set): applying it to a fresh
-  `0001`-`0003`'d schema adds the six columns with the documented defaults;
-  applying it a second time (Postgres) or to a schema that already has the
-  columns (simulating an overlaid WordPress database) is a no-op/error-free.
+  `0001`-`0003`'d schema adds the six columns with the documented defaults.
+  Separately, a **Postgres-only** test confirms re-applying `0004` (or
+  applying it to a schema that already has the six columns, simulating an
+  overlaid database) is a no-op/error-free, per `ADD COLUMN IF NOT EXISTS`.
+  A **MySQL/SQLite-only** test confirms the opposite and expected behavior:
+  applying `0004` to a schema that already has the six columns fails with a
+  duplicate-column error, documenting that `0004` must never be run against
+  an already-overlaid MySQL/SQLite database.
 - **`internal/php` codec tests.** `Serialize`/`Unserialize` round-trip a PHP
   `null` value (`N;`) both standalone and nested inside a serialized array
   (matching a real `_application_passwords` entry's `last_used`/`last_ip`

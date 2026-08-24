@@ -586,9 +586,17 @@ vendor and against a live WordPress database.
    column-migration contract) to backfill those same six post columns
    (`post_date_gmt`, `post_modified`, `post_modified_gmt`, `ping_status`,
    `post_password`, `guid`) with WordPress-matching defaults — this is the
-   **only** schema change introduced by this milestone, and it SHALL be a
-   no-op (already-present columns, left untouched) when applied to an
-   overlaid WordPress database.
+   **only** schema change introduced by this milestone. Following M4's
+   `0003` precedent, the "safe against an already-populated database"
+   guarantee holds only for the **Postgres** dialect, which uses `ADD
+   COLUMN IF NOT EXISTS` and so SHALL be a true no-op if re-applied or
+   applied to a database that already has these columns. The **MySQL** and
+   **SQLite** dialects use plain `ADD COLUMN` (neither supports `ADD COLUMN
+   IF NOT EXISTS`) and SHALL error if any targeted column already exists;
+   `0004` therefore SHALL NOT be run against an already-overlaid MySQL or
+   SQLite WordPress database — such a database already has every one of
+   these six columns (real WordPress has always written them) and has no
+   reason to apply this greenfield-only migration in the first place.
 2. THE full set of new **storage surfaces** M5 introduces, beyond the one
    migration in Req 14.1, is: (a) an additive post→term-IDs read port over
    the existing `{prefix}term_relationships` table, ordered by term name

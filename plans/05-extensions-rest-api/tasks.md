@@ -6,10 +6,15 @@ each builds on the last and references the requirements it satisfies. Keep
 green after every phase (SQLite unconditional; MySQL/Postgres contract runs
 gated on `GRIMOIRE_TEST_MYSQL_DSN` / `GRIMOIRE_TEST_POSTGRES_DSN`; any
 real-WP-DB check gated like M2.1). M5 adds **exactly one** new migration,
-`0004_rest_post_fields` (see `design.md`'s Migrations section) — it is a
-no-op against an already-overlaid WordPress database, but required against
-a greenfield grimoire database; do not skip Phase 2 assuming "no migration
-needed." Commit in logical increments with the trailer
+`0004_rest_post_fields` (see `design.md`'s Migrations section) — required
+against a greenfield grimoire database; do not skip Phase 2 assuming "no
+migration needed." An already-overlaid WordPress database already has all
+six columns `0004` would add and never runs it at all. Its Postgres dialect
+(`ADD COLUMN IF NOT EXISTS`) is safe to re-run/no-op if it ever were; its
+MySQL/SQLite dialects (plain `ADD COLUMN`) are **not** — they error if run
+against a schema that already has the columns, matching M4 `0003`'s own
+"runs only against grimoire-provisioned schemas" contract. Commit in
+logical increments with the trailer
 `Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>`.
 
 Requirement acceptance-criteria counts in `requirements.md` (for citation
@@ -31,7 +36,7 @@ has 5, Req 6 has 6, Req 7 has 5, Req 8 has 9, Req 9 has 5, Req 10 has 7, Req
 
 ## Phase 2 — Greenfield migration + domain/storage ports for REST reads (`internal/storage`, `internal/domain`)
 - [ ] 2.1 Add `internal/storage/migrations/{sqlite,mysql,postgres}/0004_rest_post_fields.up.sql`, following the exact M4 `0003` additive-`ALTER TABLE` pattern: add `post_date_gmt`, `post_modified`, `post_modified_gmt` (default `'1970-01-01 00:00:00'`, matching `post_date`), `ping_status` (default `'open'`), `post_password` (default `''`), and `guid` (default `''`) to `{prefix}posts`; Postgres uses `ADD COLUMN IF NOT EXISTS`, MySQL/SQLite plain `ADD COLUMN` (documented in the file header as running only against grimoire-provisioned schemas, same as `0003`).
-- [ ] 2.2 Write a failing migration test: applying `0001`-`0004` to a fresh database adds the six columns with the documented defaults; re-applying `0004` (Postgres) or applying it to a schema that already has the columns (simulating an overlay) does not error.
+- [ ] 2.2 Write a failing migration test: applying `0001`-`0004` to a fresh database adds the six columns with the documented defaults. Add a **Postgres-only** sub-test confirming re-applying `0004` (or applying it to a schema that already has the six columns, simulating an overlay) does not error, per `ADD COLUMN IF NOT EXISTS`. Add a **MySQL/SQLite-only** sub-test confirming the opposite: applying `0004` to a schema that already has the six columns fails with a duplicate-column error — this documents that `0004` must never be run against an already-overlaid MySQL/SQLite database.
 - [ ] 2.3 Add the six new fields (`DateGMT`, `Modified`, `ModifiedGMT`, `PingStatus`, `Password`, `GUID`) to `domain.Post` in `internal/domain/entities.go`.
   - _Acceptance:_ Migration test passes on SQLite unconditionally and MySQL/Postgres when DSNs are set; `domain.Post` compiles with the new fields; existing `wprepo/posts.go` read/write paths are updated to populate them. _(Req 2.2, 2.6, 14.1)_
 - [ ] 2.4 Write failing tests for `PostTermsRepository` semantics (empty result for a post with no terms of the given taxonomy; taxonomy filter isolates `category` from `post_tag`; nonexistent post ID returns an empty slice, not an error; terms come back in **name-ascending** order regardless of insertion order — seed fixtures with names chosen so alphabetical order differs from insertion order to make this assertion meaningful).

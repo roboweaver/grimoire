@@ -65,8 +65,6 @@ func (m *SessionManager) ttl() time.Duration {
 	return DefaultTTL
 }
 
-func (m *SessionManager) capsKey() string { return m.Prefix + "capabilities" }
-
 // Login verifies a username/password pair and, on success, creates a session
 // and returns the opaque session token (for the cookie) and the user's
 // Principal. On any failure it returns ErrInvalidCredentials without revealing
@@ -184,18 +182,7 @@ func (m *SessionManager) GC(ctx context.Context) (int64, error) {
 // principal builds the Principal for a user from their capabilities meta.
 // A missing or malformed capabilities value yields a role-less principal.
 func (m *SessionManager) principal(ctx context.Context, u domain.User) (Principal, error) {
-	raw, err := m.Meta.Get(ctx, u.ID, m.capsKey())
-	if errors.Is(err, domain.ErrNotFound) {
-		return NewPrincipal(u.ID, u.Login, nil), nil
-	}
-	if err != nil {
-		return Principal{}, err
-	}
-	keys, perr := ParseCapabilities(raw)
-	if perr != nil {
-		return NewPrincipal(u.ID, u.Login, nil), nil
-	}
-	return NewPrincipal(u.ID, u.Login, keys), nil
+	return PrincipalForUser(ctx, m.Meta, m.Prefix, u)
 }
 
 // randToken returns 32 bytes of cryptographically-random data as a 64-character

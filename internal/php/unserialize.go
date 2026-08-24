@@ -7,11 +7,11 @@ import (
 
 // Unserialize decodes a PHP serialize() string into a Go value.
 //
-// It returns bool, int, string, or map[string]any (for PHP associative
+// It returns nil, bool, int, string, or map[string]any (for PHP associative
 // arrays). Array keys are decoded as strings; integer PHP keys are rendered in
 // their decimal form. The entire input must be consumed, otherwise an error is
-// returned. Unsupported type markers (objects, floats, references, null) yield
-// an error rather than a partial decode.
+// returned. Unsupported type markers (objects, floats, references) yield an
+// error rather than a partial decode.
 func Unserialize(s string) (any, error) {
 	p := &parser{s: s}
 	v, err := p.value()
@@ -42,9 +42,18 @@ func (p *parser) value() (any, error) {
 		return p.string()
 	case 'a':
 		return p.array()
+	case 'N':
+		return p.null()
 	default:
 		return nil, fmt.Errorf("php: unknown type marker %q at offset %d", p.s[p.pos], p.pos)
 	}
+}
+
+func (p *parser) null() (any, error) {
+	if err := p.expect("N;"); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // expect consumes the exact literal at the current position or errors.

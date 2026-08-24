@@ -58,12 +58,13 @@ flowchart TB
   subgraph Domain["internal/domain"]
     PW["PostWriter<br/>(unchanged interface)"]
     TW["TermWriter<br/>+ Update (new)"]
+    TR["TermReader (new port)<br/>ListByTaxonomy · TermsByIDs"]
     PTW["PostTermsWriter (new port)"]
   end
 
   subgraph Storage["internal/storage/wprepo"]
     PostRepo["PostRepo<br/>Create/Update: now maintain<br/>post_modified/post_modified_gmt/comment_status"]
-    TermRepo["TermRepo<br/>+ Update (new)"]
+    TermRepo["TermRepo<br/>+ Update, ListByTaxonomy, TermsByIDs (new)"]
     PostTermsRepo["postterms.go<br/>+ SetPostTerms (new, additive)"]
   end
 
@@ -74,9 +75,9 @@ flowchart TB
   AdminAPI --> TWS
   AdminAPI --> PTWS
   RESTPosts --> PWS
-  RESTPosts --> PTWS
   PWS --> PW --> PostRepo
   TWS --> TW --> TermRepo
+  TWS --> TR --> TermRepo
   PTWS --> PTW --> PostTermsRepo
 ```
 
@@ -124,9 +125,9 @@ sequenceDiagram
   H->>PWS: Update(ctx, actor, post, expectedModified)
   PWS->>DB: ByID(42)
   DB-->>PWS: cur (Modified = 2026-08-24T10:05:00Z, i.e. changed since load)
-  PWS->>PWS: auth.CanEditPost(...) OK
+  PWS->>PWS: auth.CanEditPost(...) OK — authorize BEFORE comparing Modified
   PWS->>PWS: cur.Modified != expectedModified
-  PWS-->>H: ErrConflict{current: cur.Modified}
+  PWS-->>H: &ConflictError{CurrentModified: cur.Modified}
   H-->>SPA: 409 {error:{code:"conflict", message:"...", currentModified:"2026-08-24T10:05:00Z"}}
   SPA->>SPA: show reconcile dialog (Req 9.3): reload latest or keep editing
 ```
@@ -167,6 +168,21 @@ type TermWriter interface {
     Delete(ctx context.Context, id int64) error
 }
 
+// repository.go — new read port. Existing read ports (TermRepository.BySlug,
+// TermRepo.CountTerms) don't cover "list every term in a taxonomy" or "bulk-
+// resolve term IDs to display objects" — both needed by M6's UI (Req 2.4's
+// term picker; Req 4.1's `terms` detail field) and absent from M3/M5.
+type TermReader interface {
+    // ListByTaxonomy returns every term of the given taxonomy (e.g.
+    // "category", "post_tag"), ordered by name, for Req 2.4's term picker.
+    ListByTaxonomy(ctx context.Context, taxonomy string) ([]Term, error)
+    // TermsByIDs bulk-resolves term IDs (as returned by the existing
+    // PostTermsRepository.TermsForPost, which only returns bare []int64) to
+    // full {ID, Name, Slug} objects, for Req 4.1's `terms` detail field.
+    // Unknown IDs are silently omitted from the result, not an error.
+    TermsByIDs(ctx context.Context, ids []int64) ([]Term, error)
+}
+
 // repository.go — new port. No write path for term_relationships existed
 // before M6; PostTermsRepository (M5) is read-only (TermsForPost).
 type PostTermsWriter interface {
@@ -185,35 +201,54 @@ type PostTermsWriter interface {
 
 - `TermWriteService` gains `Update(ctx, actor, t domain.Term) error`,
   authorized by the existing `auth.CanManageTerms(actor)` — identical
-  capability check to `Create`/`Delete`, just a new method.
+  capability check to `Create`/`Delete`, just a new method. It also gains
+  read-only pass-through methods `ListByTaxonomy`/`TermsByIDs` (thin
+  wrappers over the new `TermReader` port, Req 2.4) — these require only
+  `edit_posts`, not `manage_categories`, since listing terms is a read.
 - A new, small `PostTermsWriteService` wraps `PostTermsWriter`, authorized by
   `auth.CanEditPost` against the **target post's** current stored
   record (loaded via the existing `PostWriter.ByID`) — assigning terms is
   part of editing the post, not a separate `manage_categories` action, so it
   uses the same capability the post edit itself already required.
 - `PostWriteService.Update` signature changes to accept an expected-modified
-  value and return a distinct `ErrConflict` sentinel (parallel to the
-  existing `ErrForbidden`) when the stored `Modified` doesn't match:
+  value and return a concrete `ConflictError` (parallel to the existing
+  `ErrForbidden` sentinel, but carrying data the sentinel form can't) when
+  the stored `Modified` doesn't match. **Authorization is checked before the
+  conflict comparison** — an unauthorized caller must never learn a post's
+  current `Modified` value via a `409`, only ever a `403`:
 
   ```go
-  var ErrConflict = errors.New("content: post modified since last read")
+  type ConflictError struct {
+      CurrentModified time.Time
+  }
+
+  func (e *ConflictError) Error() string {
+      return "content: post modified since last read"
+  }
 
   func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal,
       p domain.Post, expectedModified time.Time) error {
       cur, err := s.w.ByID(ctx, p.ID)
       // ... existing ErrNotFound -> ErrForbidden mapping, unchanged ...
-      if !expectedModified.IsZero() && !cur.Modified.Equal(expectedModified) {
-          return ErrConflict
+      if !auth.CanEditPost(actor, cur) {
+          return ErrForbidden // authorize FIRST — before the conflict check,
+                               // so an unauthorized caller never learns cur.Modified
       }
-      // ... existing authorize + field-merge logic, unchanged ...
+      if !expectedModified.IsZero() && !cur.Modified.Equal(expectedModified) {
+          return &ConflictError{CurrentModified: cur.Modified}
+      }
+      // ... existing field-merge logic, unchanged ...
       return s.w.Update(ctx, cur) // PostRepo.Update now bumps Modified itself
   }
   ```
 
-  `expectedModified.IsZero()` is the escape hatch REST callers use when they
-  omit `If-Unmodified-Since` (Req 6.5) — the admin API always supplies a
-  non-zero value (Req 3.1 makes `modified` a required field), so it always
-  gets the strict check.
+  The handler unwraps the error with `errors.As(err, &conflictErr)` to
+  populate the `409` body's `currentModified` field (Req 3.2/design's
+  sequence diagram above, which shows this same authorize-then-compare
+  order). `expectedModified.IsZero()` is the escape hatch REST callers use
+  when they omit `If-Unmodified-Since` (Req 6.5) — the admin API always
+  supplies a non-zero value (Req 3.1 makes `modified` a required field), so
+  it always gets the strict check.
 
 ### `internal/storage/wprepo` — write-adapter changes
 
@@ -231,6 +266,14 @@ type PostTermsWriter interface {
   framing in `requirements.md`.)
 - `TermRepo.Update` (new) updates `name`/`slug` by `term_id`, returning
   `ErrNotFound` via the existing `errNotFoundIfZero` helper.
+- `TermRepo.ListByTaxonomy` (new) is a plain `SELECT t.term_id, t.name,
+  t.slug FROM {prefix}terms t JOIN {prefix}term_taxonomy tt ON tt.term_id =
+  t.term_id WHERE tt.taxonomy = ? ORDER BY t.name`, and `TermRepo.TermsByIDs`
+  (new) is the same shape with `WHERE t.term_id IN (?)` (using `sqlx.In` +
+  `rebind.Rebind` for vendor-neutral placeholder expansion, the existing
+  pattern already used elsewhere for variable-length `IN` clauses) — both
+  read-only, both over the existing `terms`/`term_taxonomy` tables, no new
+  columns.
 - `wprepo/postterms.go` gains `SetPostTerms`, run in one transaction:
   1. `DELETE FROM {prefix}term_relationships WHERE object_id = ? AND
      term_taxonomy_id IN (SELECT term_taxonomy_id FROM {prefix}term_taxonomy
@@ -259,12 +302,29 @@ Routes added to `adminroutes.go`'s existing `edit_posts`-gated group (for
 posts) and a new `manage_categories`-gated group (for terms):
 
 ```go
+// csrfJSONMiddleware adapts the existing M4 requireSessionCSRFJSON helper
+// (signature (w, r) bool; already used by adminapi_comments.go/adminapi_
+// media.go as a per-handler inline call) into ordinary chi middleware, so
+// M6's write routes — the first place with two separate capability-gated
+// groups (posts, terms) each needing the same CSRF gate — can apply it
+// once per group instead of once per handler. The underlying check and its
+// failure response are entirely unchanged (Req 8.4); this is a thin
+// call-site wrapper only.
+func (s *Server) csrfJSONMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if !s.requireSessionCSRFJSON(w, r) { // existing M4 helper, unchanged
+            return // requireSessionCSRFJSON already wrote the 403 response
+        }
+        next.ServeHTTP(w, r)
+    })
+}
+
 r.Group(func(gr chi.Router) {
     gr.Use(s.requireCapabilityJSON("edit_posts"))
     gr.Method(http.MethodGet, "/posts", s.jsonHandler(s.adminPosts))       // M3, unchanged
     gr.Method(http.MethodGet, "/posts/{id}", s.jsonHandler(s.adminPost))  // M3, unchanged
     gr.Group(func(wgr chi.Router) {
-        wgr.Use(s.requireSessionCSRFJSON) // new: applies X-CSRF-Token check to writes only
+        wgr.Use(s.csrfJSONMiddleware) // adapter around the existing M4 helper
         wgr.Method(http.MethodPost, "/posts", s.jsonHandler(s.adminPostCreate))
         wgr.Method(http.MethodPut, "/posts/{id}", s.jsonHandler(s.adminPostUpdate))
         wgr.Method(http.MethodDelete, "/posts/{id}", s.jsonHandler(s.adminPostDelete))
@@ -276,31 +336,40 @@ r.Group(func(gr chi.Router) {
 })
 r.Group(func(gr chi.Router) {
     gr.Use(s.requireCapabilityJSON("manage_categories"))
-    gr.Use(s.requireSessionCSRFJSON)
+    gr.Use(s.csrfJSONMiddleware)
     gr.Method(http.MethodPost, "/terms", s.jsonHandler(s.adminTermCreate))
     gr.Method(http.MethodPut, "/terms/{id}", s.jsonHandler(s.adminTermUpdate))
     gr.Method(http.MethodDelete, "/terms/{id}", s.jsonHandler(s.adminTermDelete))
 })
 ```
 
-`requireSessionCSRFJSON` is the existing M4 `requireSessionCSRF` header check
-(unchanged logic), factored out as reusable middleware rather than an inline
-per-handler call, since M6 is the first milestone with two capability-gated
-groups (posts, terms) each needing the same CSRF gate layered on top —
-purely a code-organization change, not a contract change (Req 8.4).
+`requireSessionCSRFJSON` itself is **not new** — it has existed since M4
+(`internal/web/authmiddleware.go:115`) and is already called inline by
+`adminapi_comments.go`/`adminapi_media.go`'s write handlers (its signature
+is `func(w http.ResponseWriter, r *http.Request) bool`, not ordinary chi
+middleware, which is why the small `csrfJSONMiddleware` adapter above
+exists). M6 is simply the first milestone to apply it at the route-group
+level via `.Use()` rather than as a per-handler inline call — a pure
+code-organization change motivated by having two capability-gated groups
+(posts, terms) that each need it, not a new CSRF mechanism (Req 8.4). The
+underlying check, header name, and failure response are unchanged.
 
 ### `internal/web` — REST API
 
 `rest_posts.go`'s `registerRESTPosts` currently registers a `501` stub for
 every write verb (see M5). M6 replaces those stubs, for `post`/`page` only,
-with real handlers reusing `PostWriteService`/`PostTermsWriteService`, the
-same view-model mapping `handleRESTPostSingle` already uses for the response
-body (title/content wrapped as `{rendered: "..."}`, `_links`, etc.). The
-`If-Unmodified-Since` header (Req 6.4/6.5) is parsed as an HTTP-date; when
-present it becomes the REST write's `expectedModified` argument; when absent,
-the zero `time.Time` is passed, which `PostWriteService.Update` treats as
-"skip the check" (matching real WordPress's lack of native REST
-concurrency).
+with real handlers reusing `PostWriteService` — **not** `PostTermsWriteService`:
+per the admin-API-only term-write scope (requirements.md "Out of scope"),
+REST create/update bodies do not accept `categories`/`tags`, so REST
+handlers never call into term-writing at all; a REST-created post/page has
+no term assignments until an admin-API caller assigns them (Req 2). REST
+responses reuse the same view-model mapping `handleRESTPostSingle` already
+uses for `GET` (title/content wrapped as `{rendered: "..."}`, `_links`,
+etc.). The `If-Unmodified-Since` header (Req 6.4/6.5) is parsed as an
+HTTP-date; when present it becomes the REST write's `expectedModified`
+argument; when absent, the zero `time.Time` is passed, which
+`PostWriteService.Update` treats as "skip the check" (matching real
+WordPress's lack of native REST concurrency).
 
 ## Status codes
 
@@ -312,7 +381,8 @@ concurrency).
 | Validation error (Req 1.7, 5.1, 5.2) | `400` | `400` (`rest_invalid_param`) |
 | Missing/invalid CSRF (admin only) | `403` | n/a (Application Password requests carry no session) |
 | Missing capability | `403` | `403` (`rest_cannot_create`/`rest_cannot_edit`, reusing M5's existing codes) |
-| Target post/term not found | `404` | `404` (`rest_post_invalid_id`, existing M5 code) |
+| Target post not found (update/delete) | `403` (generic `ErrForbidden` — no existence leak, existing M2 behavior) | `404` (`rest_post_invalid_id`, existing M5 code — REST confirms existence before authorizing, matching WP) |
+| Target term not found (update) | `404` | n/a (no REST term endpoints in M6) |
 | Concurrency conflict (Req 3.2, 6.4) | `409` | `409` (`rest_conflict`) |
 | Unauthenticated | `401` | `401` |
 
@@ -335,6 +405,17 @@ single-editor-at-a-time admin UI with no autosave. If genuine multi-editor
 collision becomes a real problem, a compare-and-swap `Update` variant is a
 natural, backwards-compatible follow-up — not blocked by anything in M6's
 design.
+
+A second, separate limitation stems from timestamp granularity:
+`post_modified`/`post_modified_gmt` are stored via `tsLayout =
+"2006-01-02 15:04:05"` (second precision, existing since M5). Two updates to
+the same post completing within the same wall-clock second produce an
+identical `Modified` value, so a third client that loaded the post before
+either of those two updates will pass the conflict check even though its
+view is now stale. This is accepted as part of the same "lightweight guard,
+not a hard lock" tradeoff above, not a new gap introduced by M6 — closing it
+would require widening the stored precision (a schema change) purely to
+narrow an already-narrow, already-accepted race window.
 
 ## Rich-text editor (frontend)
 
@@ -373,10 +454,15 @@ flowchart LR
   `editor.isActive('bold')` etc. — this keeps the *chrome* Spectrum-native
   even though the editing surface itself (TipTap's `EditorContent`) is a
   plain `contentEditable` region TipTap manages directly.
-- Image insertion (Req 7.1) opens the **existing** M4 media-library picker
-  component (already built for the Media view) in a Spectrum `DialogTrigger`,
-  and on selection calls `editor.chain().focus().setImage({src:
-  mediaUrl}).run()` — no new upload flow.
+- Image insertion (Req 7.1) opens a **new** `MediaPicker` dialog component
+  in a Spectrum `DialogTrigger`, backed by the existing M4 media-list admin
+  API (`GET /admin/api/media`) — there is no existing reusable picker to
+  open: M4's `Media.tsx` is a standalone full-page list view with no
+  selection callback, so `MediaPicker` is new work introduced by this
+  requirement (its own Phase 4 task, see `tasks.md`), not a reuse of
+  existing UI. On selection it calls `editor.chain().focus().setImage({src:
+  mediaUrl}).run()` — no new upload flow; only selection among
+  already-uploaded media.
 
 New/changed frontend files:
 
@@ -389,6 +475,7 @@ web/admin/src/
   components/
     RichTextEditor.tsx     # new — TipTap wrapper + Spectrum toolbar (Req 7)
     TermPicker.tsx         # new — category/tag multi-select + inline create (Req 2)
+    MediaPicker.tsx         # new — image-selection dialog backed by GET /admin/api/media (Req 7.1)
     ConflictDialog.tsx     # new — 409 reconcile dialog (Req 9.3)
   api/
     client.ts              # + createPost/updatePost/deletePost/listTerms/createTerm/updateTerm/deleteTerm
@@ -401,7 +488,8 @@ web/admin/src/
 - a new Go interface method over an existing table
   (`TermWriter.Update`, `PostTermsWriter.SetPostTerms`), or
 - newly *writing* to columns that already exist
-  (`comment_status` — present since M1's base schema; `post_modified`/
+  (`comment_status` — added by M4's `0003_comments_media_menus.up.sql`,
+  only ever *read* before M6; `post_modified`/
   `post_modified_gmt` — added by M5's `0004_rest_post_fields`, only ever
   *read* before M6).
 
@@ -446,7 +534,8 @@ touched by this milestone.
 ## Testing strategy
 
 - **Unit (`internal/content`)**: `PostWriteService.Update` conflict-detection
-  (matching `Modified` → success; mismatched → `ErrConflict`; zero
+  (matching `Modified` → success; mismatched → `*ConflictError` with
+  `CurrentModified` set; zero
   `expectedModified` → check skipped); `TermWriteService.Update` capability
   gate; `PostTermsWriteService` capability gate (reuses `CanEditPost` against
   the target post, same as the pre-existing pattern for `Update`/`Delete`).
@@ -459,14 +548,18 @@ touched by this milestone.
   correctly across add/remove; identical behavior across all three vendors.
 - **HTTP (`internal/web`)**: admin API — 201/200/204 happy paths; 400 for
   each Req 1.7 validation case and Req 5.2 (future-in-the-past); 403 for
-  missing capability, missing/bad CSRF, and each `auth.Can*Post` denial
-  case (edit another's post without `edit_others_posts`, publish without
-  `publish_posts`); 404 for a nonexistent post/term on update; 409 for a
-  stale `modified` value. REST API — same matrix via Application Password
-  auth, plus: `If-Unmodified-Since` omitted → succeeds without a conflict
-  check even when stale (Req 6.5); every other `wp/v2` write verb (media,
-  users, categories, tags, comments-beyond-create) still `501`s, unchanged
-  from M5 (regression guard — Req 6.6).
+  missing capability, missing/bad CSRF, each `auth.Can*Post` denial case
+  (edit another's post without `edit_others_posts`, publish without
+  `publish_posts`), *and* a nonexistent post ID on update/delete (Req 1.6 —
+  generic `ErrForbidden`, no existence leak); 404 for a nonexistent term ID
+  on update (Req 2.5 — terms have no per-item ownership, so no leak concern);
+  409 for a stale `modified` value. REST API — same matrix via Application
+  Password auth (except a nonexistent post ID 404s per Req 6.8, matching
+  M5's existing `GET` behavior), plus: `If-Unmodified-Since` omitted →
+  succeeds without a conflict check even when stale (Req 6.5); every other
+  `wp/v2` write verb (media, users, categories, tags,
+  comments-beyond-create) still `501`s, unchanged from M5 (regression guard
+  — Req 6.6).
 - **Frontend**: `RichTextEditor` renders TipTap content, toolbar buttons
   reflect `editor.isActive(...)` state, `getHTML()`/`setContent()` round-trip
   a fixture HTML string unchanged; `PostEditor` save flow calls the create
@@ -483,7 +576,7 @@ touched by this milestone.
 | Requirement | Design section |
 | --- | --- |
 | Req 1 (post CRUD) | Admin API section, `adminapi_posts.go` |
-| Req 2 (terms) | `PostTermsWriter`, `TermWriteService.Update`, `adminapi_terms.go` |
+| Req 2 (terms) | `TermReader` (read), `PostTermsWriter`, `TermWriteService.Update`, `adminapi_terms.go` |
 | Req 3 (concurrency) | `PostWriteService.Update` conflict check, "Concurrency window" |
 | Req 4 (detail shape) | Admin API section, detail-shape table |
 | Req 5 (status lifecycle) | Status codes table, validation in `adminapi_posts.go` |

@@ -117,13 +117,16 @@ database console.
    `403 Forbidden` with a generic message that does not reveal which
    capability was missing, reusing `content.ErrForbidden` from the existing
    `PostWriteService`.
-6. WHEN `POST`/`PUT` targets a post/page ID that does not exist THEN the
-   system SHALL respond `404 Not Found` for `PUT`/`DELETE` (the existing
-   `ByID`-then-authorize pattern in `PostWriteService` already returns a
-   generic `ErrForbidden` for a missing record pre-authorization; the admin
-   handler SHALL distinguish "authorization failed" from "not found" only
-   where the existing service methods already do so safely, and SHALL NOT
-   introduce a new existence-leaking check).
+6. WHEN `PUT`/`DELETE` targets a post/page ID that does not exist THEN the
+   system SHALL respond `403 Forbidden` (not `404`) — reusing
+   `PostWriteService`'s existing `ByID`-then-authorize pattern, which already
+   maps a missing record to the generic `content.ErrForbidden` *before* any
+   capability check runs, so an unauthorized caller cannot distinguish
+   "doesn't exist" from "exists but you can't touch it." The admin handler
+   SHALL NOT introduce a new, more specific "not found" response for this
+   case; this is a deliberate existing-behavior preservation, not an
+   oversight (contrast with Req 6.1's REST 404s, which follow WordPress's
+   own REST convention of confirming existence before authorizing).
 7. WHEN the request body fails basic validation (empty `title` for a
    non-draft status, `type` not one of `"post"`/`"page"`, `status` not one of
    `draft`/`pending`/`publish`/`private`/`future`) THEN the system SHALL
@@ -145,6 +148,14 @@ leave the editor to manage taxonomy.
    that replaces a post's term relationships for the given taxonomy with
    exactly the supplied term IDs (an empty slice clears all terms of that
    taxonomy from the post) and maintains each affected `term_taxonomy.count`.
+   THE system SHALL also expose a new **read** port needed to resolve term
+   IDs to display objects — `ListByTaxonomy(ctx, taxonomy string)
+   ([]Term, error)` (for Req 2.4's term picker) and `TermsByIDs(ctx, ids
+   []int64) ([]Term, error)` (for resolving a post's assigned term IDs, from
+   the existing `PostTermsRepository.TermsForPost`, into the `{id,name,
+   slug}` objects Req 4.1's `terms` field requires) — neither of which any
+   existing port provides (`TermRepository.BySlug` resolves one term by
+   slug, not a taxonomy listing or a bulk ID lookup).
 2. THE `POST`/`PUT /admin/api/posts` handlers (Req 1) SHALL, when the request
    body includes a `termIds` map, call `SetPostTerms` once per taxonomy key
    present in the map, after the post write itself succeeds; a failure here
@@ -180,8 +191,11 @@ at least a warning.
    post).
 2. WHEN the stored post's current `Modified` value does not exactly equal
    the submitted `modified` value THEN the system SHALL respond `409
-   Conflict` with a body identifying the current stored `modified` timestamp
-   and SHALL make no change to the post.
+   Conflict` with a JSON body `{"error": "conflict", "currentModified":
+   "<ISO-8601>"}` carrying the current stored `Modified` value (sourced from
+   a concrete `content.ConflictError{CurrentModified time.Time}` type
+   returned by `PostWriteService.Update`, not a plain sentinel error — see
+   design.md) and SHALL make no change to the post.
 3. WHEN the update is authorized and the `modified` values match THEN the
    system SHALL apply the update and SHALL set the stored post's `Modified`/
    `ModifiedGMT` to the current time as part of the same write (`PostRepo.
@@ -228,7 +242,13 @@ that my workflow matches how WordPress already works.
    stored vocabulary; any other value SHALL `400`.
 2. WHEN `status: "future"` is submitted with a `date` in the past or equal
    to the current time THEN the system SHALL respond `400 Bad Request` (a
-   "scheduled" post must be scheduled for the future).
+   "scheduled" post must be scheduled for the future) — **except** when the
+   submitted `date` is unchanged from the post's current stored `date` (an
+   edit that does not touch the schedule, e.g. fixing a typo in the body of
+   an already-past-due `future` post that the absent scheduler never
+   flipped to `publish`, per 5.3 below). Such unchanged-date resubmits SHALL
+   be allowed through unmodified, so correcting an unrelated field never
+   forces the author to also resolve the stale schedule as a side effect.
 3. THE system SHALL store a `future`-status post exactly as WordPress does
    (`post_status = 'future'`, `post_date` set to the requested future time)
    with **no** automatic transition to `publish` when that time arrives —
@@ -253,10 +273,14 @@ special-casing for grimoire.
 
 1. `POST /wp-json/wp/v2/posts` and `/wp-json/wp/v2/pages` SHALL create a
    post/page from a WordPress-shaped request body (`title`, `content`,
-   `excerpt`, `slug`, `status`, `date`, `comment_status`, `categories`/`tags`
-   term-ID arrays for posts) and respond `201 Created` with the WordPress-
-   shaped single-item representation M5 already defined for `GET`, replacing
-   the `501` stub M5 registered for this route/verb.
+   `excerpt`, `slug`, `status`, `date`, `comment_status`) and respond `201
+   Created` with the WordPress-shaped single-item representation M5 already
+   defined for `GET`, replacing the `501` stub M5 registered for this
+   route/verb. Consistent with the "REST is admin-API-only for terms" scope
+   (see "Out of scope"), the REST create/update bodies SHALL NOT accept
+   `categories`/`tags` term-ID arrays in this milestone — a REST-created
+   post/page has no term assignments; assigning categories/tags to it
+   requires the admin API (Req 2).
 2. `PUT`/`PATCH /wp-json/wp/v2/posts/{id}` and `/pages/{id}` SHALL update the
    item and respond `200 OK` with the updated representation, replacing the
    `501` stub.
@@ -284,6 +308,14 @@ special-casing for grimoire.
 7. THE REST write handlers SHALL enforce the same TLS/loopback-only
    Application-Password posture M5 already established (Req covering M5's
    Req 8.9) — no relaxation for writes.
+8. WHEN `PUT`/`PATCH`/`DELETE` targets a post/page ID that does not exist
+   THEN the system SHALL respond `404 Not Found` using M5's existing
+   `rest_post_invalid_id` error code — unchanged REST convention (M5's `GET`
+   already 404s a missing ID the same way). This is a deliberate, pre-
+   existing REST/admin-API asymmetry, not new to M6: the REST surface
+   confirms existence before authorizing (matching real WordPress), while
+   the admin API does not (Req 1.6) to avoid existence leakage on a surface
+   with per-post ownership-dependent authorization.
 
 ### Requirement 7 — Rich-text post editor in the Spectrum admin
 
@@ -296,9 +328,14 @@ instead of a raw HTML textarea, so that authoring feels like a real CMS.
    (`@tiptap/react` + `@tiptap/starter-kit`) on the post/page editor view,
    bound to the post's `content` field, supporting at minimum: bold, italic,
    headings (H2–H4), bullet/numbered lists, blockquote, link, and image
-   (via an `<img>` tag referencing an already-uploaded M4 media URL — no new
-   upload UI is introduced by this requirement; image insertion reuses the
-   existing M4 media library picker).
+   (via an `<img>` tag referencing an already-uploaded M4 media URL). Image
+   insertion SHALL use a **new** `MediaPicker` dialog component backed by
+   the existing M4 media-list admin API (`GET /admin/api/media`) — no such
+   reusable picker exists yet (M4's `Media.tsx` is a standalone full-page
+   list view with no selection callback), so this dialog is new work
+   introduced by this requirement, not a reuse of existing UI. No new
+   *upload* UI is introduced: the picker only selects among already-uploaded
+   media.
 2. THE editor's toolbar SHALL be built from React Spectrum `ActionButton`/
    `ToggleButton`/`Picker` components reflecting the TipTap editor's active
    mark/node state (e.g. the bold button SHALL show a pressed/selected state

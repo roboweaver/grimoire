@@ -14,6 +14,19 @@ type Post struct {
 	Slug          string
 	Type          string
 	CommentStatus string
+
+	// DateGMT, Modified, and ModifiedGMT back the REST API's
+	// date/date_gmt/modified/modified_gmt fields (added by the 0004
+	// migration; default '1970-01-01 00:00:00' matching post_date).
+	DateGMT     time.Time
+	Modified    time.Time
+	ModifiedGMT time.Time
+
+	// PingStatus, Password, and GUID back post_ping_status/post_password/guid
+	// (added by the 0004 migration; defaults 'open', '', '' respectively).
+	PingStatus string
+	Password   string
+	GUID       string
 }
 
 // Term is a taxonomy term (e.g. a category or tag) resolved together with the

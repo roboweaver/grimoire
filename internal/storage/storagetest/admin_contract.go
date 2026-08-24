@@ -132,8 +132,8 @@ func runAdminContract(t *testing.T, newRepos NewReposFunc) {
 		if err != nil {
 			t.Fatalf("CountTerms: %v", err)
 		}
-		if cats != 1 {
-			t.Errorf("CountTerms(category) = %d, want 1", cats)
+		if cats != 3 {
+			t.Errorf("CountTerms(category) = %d, want 3", cats)
 		}
 		users, err := repos.UserCounter.CountUsers(ctx)
 		if err != nil {
@@ -141,6 +141,66 @@ func runAdminContract(t *testing.T, newRepos NewReposFunc) {
 		}
 		if users != 1 {
 			t.Errorf("CountUsers = %d, want 1", users)
+		}
+	})
+
+	t.Run("ListForAdmin Search matches title and content, case-insensitively", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		byTitle, err := repos.AdminPosts.ListForAdmin(ctx, domain.AdminPostFilter{Search: "hello two"})
+		if err != nil {
+			t.Fatalf("Search by title: %v", err)
+		}
+		if len(byTitle) != 1 || byTitle[0].Slug != "hello-2" {
+			t.Fatalf("Search(%q) = %+v, want [hello-2]", "hello two", byTitle)
+		}
+		byContent, err := repos.AdminPosts.ListForAdmin(ctx, domain.AdminPostFilter{Search: "BODY"})
+		if err != nil {
+			t.Fatalf("Search by content: %v", err)
+		}
+		if len(byContent) == 0 {
+			t.Fatalf("Search(%q) matched nothing, want all seeded posts sharing body content", "BODY")
+		}
+		none, err := repos.AdminPosts.ListForAdmin(ctx, domain.AdminPostFilter{Search: "no-such-term-anywhere"})
+		if err != nil {
+			t.Fatalf("Search no match: %v", err)
+		}
+		if len(none) != 0 {
+			t.Errorf("Search(no-such-term-anywhere) = %+v, want empty", none)
+		}
+	})
+
+	t.Run("CountForAdmin honors Search", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		n, err := repos.AdminPosts.CountForAdmin(ctx, domain.AdminPostFilter{Search: "hello two"})
+		if err != nil {
+			t.Fatalf("CountForAdmin search: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("CountForAdmin(Search=hello two) = %d, want 1", n)
+		}
+	})
+
+	t.Run("ListForAdmin OrderBy/Order override the post_date DESC default", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		byIDAsc, err := repos.AdminPosts.ListForAdmin(ctx, domain.AdminPostFilter{
+			Types:   []string{"post"},
+			OrderBy: "id",
+			Order:   "asc",
+		})
+		if err != nil {
+			t.Fatalf("OrderBy id asc: %v", err)
+		}
+		wantSlugs := []string{"hello-1", "hello-2", "hello-3", "secret"}
+		if len(byIDAsc) != len(wantSlugs) {
+			t.Fatalf("want %d posts, got %d", len(wantSlugs), len(byIDAsc))
+		}
+		for i, w := range wantSlugs {
+			if byIDAsc[i].Slug != w {
+				t.Errorf("post[%d] slug = %q, want %q", i, byIDAsc[i].Slug, w)
+			}
 		}
 	})
 }

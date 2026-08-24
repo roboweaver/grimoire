@@ -24,6 +24,19 @@ type TermRepository interface {
 	BySlug(ctx context.Context, taxonomy, slug string) (Term, error)
 }
 
+// PostTermsRepository resolves the taxonomy terms related to a post. It is
+// additive and read-only: no schema change beyond the {prefix}posts columns
+// added by the 0004 migration is required, since it reads the existing
+// {prefix}term_relationships/{prefix}term_taxonomy/{prefix}terms tables.
+type PostTermsRepository interface {
+	// TermsForPost returns the term IDs related to postID under taxonomy
+	// (e.g. "category" or "post_tag"), in name-ascending order (not insertion
+	// order), so REST responses are deterministic across vendors. A post with
+	// no matching terms, or a nonexistent post ID, returns an empty slice and
+	// a nil error.
+	TermsForPost(ctx context.Context, postID int64, taxonomy string) ([]int64, error)
+}
+
 // AdminPostFilter selects content for the read-only admin list. Unlike the
 // public read path it is not limited to published posts, so it can surface
 // drafts and pages. All fields are additive read filters; nothing here alters
@@ -33,6 +46,14 @@ type AdminPostFilter struct {
 	Statuses []string // e.g. {"publish","draft","pending","private"}; empty = all
 	Limit    int      // page size; <=0 means "no limit"
 	Offset   int      // rows to skip
+
+	// Search, when non-empty, restricts results to posts whose title or
+	// content contains the term (case-insensitive substring match).
+	Search string
+	// OrderBy selects the sort column: "date" (default) or "id".
+	OrderBy string
+	// Order selects sort direction: "desc" (default) or "asc".
+	Order string
 }
 
 // AdminPostRepository lists and counts content for the admin, including drafts
@@ -135,6 +156,19 @@ type OptionRepository interface {
 	Get(ctx context.Context, name string) (string, error)
 }
 
+// PostMetaRepository reads REST-relevant single-valued postmeta ({prefix}postmeta)
+// used to populate a post's featured_media and media_details fields. It is
+// additive and read-only: no schema change beyond 0004 is required, since it
+// reads the existing postmeta table.
+type PostMetaRepository interface {
+	// FeaturedMediaID returns the post's featured image attachment ID from
+	// its "_thumbnail_id" postmeta value, or 0 if unset or unparsable.
+	FeaturedMediaID(ctx context.Context, postID int64) (int64, error)
+	// AttachmentMetadata returns the raw (PHP-serialized) value of an
+	// attachment post's "_wp_attachment_metadata" postmeta, or "" if unset.
+	AttachmentMetadata(ctx context.Context, postID int64) (string, error)
+}
+
 // UserRepository reads and writes users ({prefix}users).
 type UserRepository interface {
 	// ByLogin returns a user by user_login, or ErrNotFound.
@@ -146,6 +180,11 @@ type UserRepository interface {
 	// UpdatePass replaces the stored password hash for a user. It returns
 	// ErrNotFound when no user has the given ID.
 	UpdatePass(ctx context.Context, id int64, passHash string) error
+	// List returns users ordered by ID ascending, for REST /users pagination.
+	List(ctx context.Context, limit, offset int) ([]User, error)
+	// Count returns the total number of users, ignoring limit/offset (used
+	// for pagination totals).
+	Count(ctx context.Context) (int64, error)
 }
 
 // UserMetaRepository reads and writes user metadata ({prefix}usermeta). It

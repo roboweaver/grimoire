@@ -15,9 +15,12 @@ import (
 )
 
 // postColumns are the posts columns selected into a postRow, in WP order.
+// post_date_gmt, post_modified, post_modified_gmt, ping_status,
+// post_password, and guid come from the 0004 migration.
 var postColumns = []string{
 	"ID", "post_author", "post_date", "post_content",
 	"post_title", "post_excerpt", "post_status", "post_name", "post_type", "comment_status",
+	"post_date_gmt", "post_modified", "post_modified_gmt", "ping_status", "post_password", "guid",
 }
 
 type postRow struct {
@@ -31,6 +34,12 @@ type postRow struct {
 	Slug          string    `bun:"post_name"`
 	Type          string    `bun:"post_type"`
 	CommentStatus string    `bun:"comment_status"`
+	DateGMT       time.Time `bun:"post_date_gmt"`
+	Modified      time.Time `bun:"post_modified"`
+	ModifiedGMT   time.Time `bun:"post_modified_gmt"`
+	PingStatus    string    `bun:"ping_status"`
+	Password      string    `bun:"post_password"`
+	GUID          string    `bun:"guid"`
 }
 
 func (r postRow) toDomain() domain.Post {
@@ -45,6 +54,12 @@ func (r postRow) toDomain() domain.Post {
 		Slug:          r.Slug,
 		Type:          r.Type,
 		CommentStatus: r.CommentStatus,
+		DateGMT:       r.DateGMT,
+		Modified:      r.Modified,
+		ModifiedGMT:   r.ModifiedGMT,
+		PingStatus:    r.PingStatus,
+		Password:      r.Password,
+		GUID:          r.GUID,
 	}
 }
 
@@ -115,6 +130,7 @@ func (r *PostRepo) ByTermSlug(ctx context.Context, taxonomy, termSlug string, li
 		TableExpr("? AS p", bun.Ident(r.prefix+"posts")).
 		ColumnExpr("p.?", bun.Ident("ID")).
 		ColumnExpr("p.post_author, p.post_date, p.post_content, p.post_title, p.post_excerpt, p.post_status, p.post_name, p.post_type, p.comment_status").
+		ColumnExpr("p.post_date_gmt, p.post_modified, p.post_modified_gmt, p.ping_status, p.post_password, p.guid").
 		Join("JOIN ? AS tr ON tr.object_id = p.?", bun.Ident(r.prefix+"term_relationships"), bun.Ident("ID")).
 		Join("JOIN ? AS tt ON tt.term_taxonomy_id = tr.term_taxonomy_id", bun.Ident(r.prefix+"term_taxonomy")).
 		Join("JOIN ? AS t ON t.term_id = tt.term_id", bun.Ident(r.prefix+"terms")).

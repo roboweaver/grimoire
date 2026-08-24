@@ -44,6 +44,12 @@ func (f *fakeUsers) Create(_ context.Context, u domain.User) (int64, error) {
 	f.add(u)
 	return u.ID, nil
 }
+func (f *fakeUsers) List(_ context.Context, limit, offset int) ([]domain.User, error) {
+	return nil, nil
+}
+func (f *fakeUsers) Count(_ context.Context) (int64, error) {
+	return int64(len(f.byID)), nil
+}
 func (f *fakeUsers) UpdatePass(_ context.Context, id int64, hash string) error {
 	if _, ok := f.byID[id]; !ok {
 		return domain.ErrNotFound

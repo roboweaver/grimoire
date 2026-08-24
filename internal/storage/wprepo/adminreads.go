@@ -2,6 +2,7 @@ package wprepo
 
 import (
 	"context"
+	"strings"
 
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/uptrace/bun"
@@ -26,8 +27,9 @@ func adminTypes(f domain.AdminPostFilter) []string {
 }
 
 // ListForAdmin returns posts matching the filter ordered newest first
-// (post_date DESC, ID DESC). Unlike RecentPosts it does not constrain
-// post_status, so drafts and pages are included. Pure SELECT; no writes.
+// (post_date DESC, ID DESC) by default, or per f.OrderBy/f.Order when set.
+// Unlike RecentPosts it does not constrain post_status, so drafts and pages
+// are included. Pure SELECT; no writes.
 func (r *PostRepo) ListForAdmin(ctx context.Context, f domain.AdminPostFilter) ([]domain.Post, error) {
 	var rows []postRow
 	q := r.db.NewSelect().
@@ -37,7 +39,8 @@ func (r *PostRepo) ListForAdmin(ctx context.Context, f domain.AdminPostFilter) (
 	if len(f.Statuses) > 0 {
 		q = q.Where("post_status IN (?)", bun.In(f.Statuses))
 	}
-	q = q.OrderExpr("post_date DESC, ? DESC", bun.Ident("ID"))
+	q = applyAdminSearch(q, f.Search)
+	q = applyAdminOrder(q, f.OrderBy, f.Order)
 	if f.Limit > 0 {
 		q = q.Limit(f.Limit)
 	}
@@ -50,6 +53,35 @@ func (r *PostRepo) ListForAdmin(ctx context.Context, f domain.AdminPostFilter) (
 	return toDomainPosts(rows), nil
 }
 
+// applyAdminSearch restricts a posts query to rows whose title or content
+// contains search (case-insensitive substring match), when search is
+// non-empty. LOWER() is used instead of a vendor-specific case-insensitive
+// LIKE (e.g. Postgres's ILIKE) to keep the query text identical across all
+// three vendors.
+func applyAdminSearch(q *bun.SelectQuery, search string) *bun.SelectQuery {
+	if search == "" {
+		return q
+	}
+	like := "%" + strings.ToLower(search) + "%"
+	return q.Where("LOWER(post_title) LIKE ? OR LOWER(post_content) LIKE ?", like, like)
+}
+
+// applyAdminOrder applies the admin list's sort order. orderBy selects the
+// sort column ("id" or the default "date"); order selects direction ("asc"
+// or the default "desc"). Unrecognized values fall back to the defaults
+// (post_date DESC, ID DESC) rather than erroring, since this is a read-only
+// convenience filter.
+func applyAdminOrder(q *bun.SelectQuery, orderBy, order string) *bun.SelectQuery {
+	dir := "DESC"
+	if strings.EqualFold(order, "asc") {
+		dir = "ASC"
+	}
+	if strings.EqualFold(orderBy, "id") {
+		return q.OrderExpr("? "+dir, bun.Ident("ID"))
+	}
+	return q.OrderExpr("post_date "+dir+", ? "+dir, bun.Ident("ID"))
+}
+
 // CountForAdmin returns the number of posts matching the filter, ignoring
 // Limit/Offset (used for pagination totals). Pure COUNT(*).
 func (r *PostRepo) CountForAdmin(ctx context.Context, f domain.AdminPostFilter) (int, error) {
@@ -59,6 +91,7 @@ func (r *PostRepo) CountForAdmin(ctx context.Context, f domain.AdminPostFilter) 
 	if len(f.Statuses) > 0 {
 		q = q.Where("post_status IN (?)", bun.In(f.Statuses))
 	}
+	q = applyAdminSearch(q, f.Search)
 	return q.Count(ctx)
 }
 

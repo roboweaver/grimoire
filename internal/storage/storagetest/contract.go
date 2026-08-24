@@ -24,6 +24,11 @@ type NewReposFunc func(t *testing.T) (*storage.Repositories, func())
 //   - 1 draft post (excluded from reads)
 //   - 1 published page (slug "about")
 //   - category term "news" related to hello-3 and hello-2
+//   - hello-1 related to 2 category terms ("Zeta","Alpha") and 1 post_tag
+//     term ("Golang"), inserted out of alphabetical order
+//   - hello-3 has a featured image (attachment 201, via "_thumbnail_id");
+//     attachment 201 has "_wp_attachment_metadata"; hello-2 and attachment
+//     202 deliberately have neither
 //   - options blogname + blogdescription
 func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error {
 	stmts := []struct {
@@ -47,10 +52,26 @@ func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error 
 			[]any{10, "News", "news"}},
 		{`INSERT INTO ` + prefix + `terms (term_id, name, slug) VALUES (?, ?, ?)`,
 			[]any{30, "Primary", "primary"}},
+		// term_id 11/12/13 back the PostTermsRepository name-ascending-order
+		// contract test: inserted Zeta-then-Alpha (insertion order) but related
+		// to hello-1 so a correct TermsForPost must still return them
+		// Alpha-then-Zeta (name-ascending), not insertion order.
+		{`INSERT INTO ` + prefix + `terms (term_id, name, slug) VALUES (?, ?, ?)`,
+			[]any{11, "Zeta", "zeta"}},
+		{`INSERT INTO ` + prefix + `terms (term_id, name, slug) VALUES (?, ?, ?)`,
+			[]any{12, "Alpha", "alpha"}},
+		{`INSERT INTO ` + prefix + `terms (term_id, name, slug) VALUES (?, ?, ?)`,
+			[]any{13, "Golang", "golang"}},
 		{`INSERT INTO ` + prefix + `term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)`,
 			[]any{20, 10, "category", "", 0, 2}},
 		{`INSERT INTO ` + prefix + `term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)`,
 			[]any{40, 30, "nav_menu", "", 0, 4}},
+		{`INSERT INTO ` + prefix + `term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)`,
+			[]any{21, 11, "category", "", 0, 1}},
+		{`INSERT INTO ` + prefix + `term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)`,
+			[]any{22, 12, "category", "", 0, 1}},
+		{`INSERT INTO ` + prefix + `term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)`,
+			[]any{23, 13, "post_tag", "", 0, 1}},
 		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
 			[]any{3, 20, 0}},
 		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
@@ -63,6 +84,15 @@ func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error 
 			[]any{303, 40, 0}},
 		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
 			[]any{304, 40, 0}},
+		// hello-1 (post 1) related to Zeta (category) first, then Alpha
+		// (category), then Golang (post_tag) -- insertion order deliberately
+		// not alphabetical.
+		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
+			[]any{1, 21, 0}},
+		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
+			[]any{1, 22, 0}},
+		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
+			[]any{1, 23, 0}},
 		{`INSERT INTO ` + prefix + `options (option_name, option_value, autoload) VALUES (?, ?, ?)`,
 			[]any{"blogname", "grimoire test", "yes"}},
 		{`INSERT INTO ` + prefix + `options (option_name, option_value, autoload) VALUES (?, ?, ?)`,
@@ -125,6 +155,14 @@ func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error 
 			[]any{304, "_menu_item_menu_item_parent", "301"}},
 		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
 			[]any{304, "_menu_item_url", "/home-custom/sub"}},
+		// PostMetaRepository fixtures: hello-3 (post 3) has a featured image
+		// pointing at attachment 201; attachment 201 carries attachment
+		// metadata. hello-2 (post 2) and attachment 202 deliberately have
+		// neither, to exercise the unset/zero-value cases.
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{3, "_thumbnail_id", "201"}},
+		{`INSERT INTO ` + prefix + `postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`,
+			[]any{201, "_wp_attachment_metadata", `a:2:{s:5:"width";i:800;s:6:"height";i:600;}`}},
 	}
 	for _, s := range stmts {
 		if _, err := db.ExecContext(ctx, rebind.Rebind(vendor, s.q), s.args...); err != nil {
@@ -263,6 +301,8 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 	runCommentsContract(t, newRepos)
 	runMediaContract(t, newRepos)
 	runMenusContract(t, newRepos)
+	runPostTermsContract(t, newRepos)
+	runPostMetaContract(t, newRepos)
 }
 
 // runUserContract covers UserRepository + UserMetaRepository, including the
@@ -387,6 +427,49 @@ func runUserContract(t *testing.T, newRepos NewReposFunc) {
 		}
 		if _, err := repos.UserMeta.Get(ctx, 1, "no_such_key"); !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("missing meta err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("UserRepository List and Count paginate seeded + created users", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		// 1 seeded user ("admin", ID 1); create 2 more so List/Count have
+		// something to paginate over.
+		for _, login := range []string{"writer", "subscriber"} {
+			if _, err := repos.Users.Create(ctx, domain.User{
+				Login:       login,
+				Nicename:    login,
+				DisplayName: login,
+				Pass:        "$2a$10$abcdefghijklmnopqrstuv",
+				Email:       login + "@example.com",
+				Registered:  time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
+			}); err != nil {
+				t.Fatalf("Create %s: %v", login, err)
+			}
+		}
+		total, err := repos.Users.Count(ctx)
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		if total != 3 {
+			t.Fatalf("Count = %d, want 3", total)
+		}
+		page1, err := repos.Users.List(ctx, 2, 0)
+		if err != nil {
+			t.Fatalf("List page1: %v", err)
+		}
+		page2, err := repos.Users.List(ctx, 2, 2)
+		if err != nil {
+			t.Fatalf("List page2: %v", err)
+		}
+		if len(page1) != 2 || len(page2) != 1 {
+			t.Fatalf("List pagination sizes: page1=%d page2=%d", len(page1), len(page2))
+		}
+		if page1[0].Login != "admin" || page1[1].Login != "writer" {
+			t.Errorf("List page1 order = %q / %q, want admin / writer", page1[0].Login, page1[1].Login)
+		}
+		if page2[0].Login != "subscriber" {
+			t.Errorf("List page2 = %q, want subscriber", page2[0].Login)
 		}
 	})
 }

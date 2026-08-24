@@ -25,6 +25,25 @@ func TestHashAndVerify(t *testing.T) {
 	}
 }
 
+// TestVerifyWPHashMagicQuotesLegacy reproduces a real WordPress historical
+// quirk: wp_magic_quotes() applies addslashes() to all of $_POST (including
+// pwd) before wp_signon() reads it, and wp_signon() never wp_unslash()'s the
+// password field. So any password containing a quote, backslash, or NUL byte
+// was actually hashed (and is later checked) in its *slashed* form by real
+// WordPress — not its literal form. Imported accounts whose real password
+// contains such a character can never log in unless Verify accounts for it.
+//
+// Hash below is genuine PHP output: wp_hash_password(addslashes("O'Brien123!")).
+func TestVerifyWPHashMagicQuotesLegacy(t *testing.T) {
+	const raw = "O'Brien123!"
+	const h = "$wp$2y$12$pIZ38i.tj5zPQCDAd2VEG.JiCUXo.PdElX0/c/ldr80nPl2YplsUG"
+
+	ok, err := Verify(raw, h)
+	if err != nil || !ok {
+		t.Fatalf("Verify(raw password containing quote) = (%v, %v), want (true, nil)", ok, err)
+	}
+}
+
 func TestVerifyPhpass(t *testing.T) {
 	// Genuine WordPress portable hash for "hunter2".
 	const h = "$P$6WXYZ7890QmrM8eXI0pZSYhKFDWsuF0"

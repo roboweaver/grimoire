@@ -38,12 +38,36 @@ func Hash(password string) (string, error) {
 // Verify reports whether password matches the stored hash. A wrong password
 // returns (false, nil); only a malformed or unrecognized hash returns a
 // non-nil error. Comparisons are constant-time within each scheme.
+//
+// For legacy WordPress hash formats ($wp$ and phpass), a second comparison is
+// attempted against the PHP addslashes()-escaped form of password if the
+// literal form doesn't match. This compensates for a real, historical
+// WordPress quirk: wp_magic_quotes() applies addslashes() to the entirety of
+// $_POST (including the password field) before wp_signon() reads it, and
+// wp_signon() never wp_unslash()'s $_POST['pwd']. So any WordPress account
+// whose real password contains a quote, backslash, or NUL byte has always had
+// that *slashed* string hashed and verified by WordPress itself — not the
+// literal password the user typed. Without this fallback, such imported
+// accounts could never log into grimoire even with their correct password.
 func Verify(password, hash string) (bool, error) {
 	switch {
 	case isWPHash(hash):
-		return wpVerify(password, hash)
+		ok, err := wpVerify(password, hash)
+		if err != nil || ok {
+			return ok, err
+		}
+		if slashed := wpMagicQuotesSlash(password); slashed != password {
+			return wpVerify(slashed, hash)
+		}
+		return false, nil
 	case phpass.Identify(hash):
-		return phpass.Verify(password, hash), nil
+		if phpass.Verify(password, hash) {
+			return true, nil
+		}
+		if slashed := wpMagicQuotesSlash(password); slashed != password {
+			return phpass.Verify(slashed, hash), nil
+		}
+		return false, nil
 	case isBcrypt(hash):
 		err := bcrypt.CompareHashAndPassword([]byte(normalizeBcrypt(hash)), []byte(password))
 		switch {
@@ -57,6 +81,28 @@ func Verify(password, hash string) (bool, error) {
 	default:
 		return false, ErrUnknownFormat
 	}
+}
+
+// wpMagicQuotesSlash reproduces PHP's addslashes(), which WordPress's
+// wp_magic_quotes() historically applied to all of $_POST (including the
+// password field) before wp_signon() ever saw it. It backslash-escapes
+// single quotes, double quotes, backslashes, and NUL bytes.
+func wpMagicQuotesSlash(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\'', '"', '\\':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case 0:
+			b.WriteByte('\\')
+			b.WriteByte('0')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // NeedsRehash reports whether a successfully verified hash should be replaced

@@ -1,6 +1,6 @@
-import { ActionButton, Cell, Column, Dialog, DialogContainer, Content, Divider, Flex, Grid, Heading , Row, TableBody, TableHeader, TableView, Text, View } from "@adobe/react-spectrum";
+import { ActionButton, Cell, Column, Dialog, DialogContainer, Content, Divider, Flex, Grid, Heading, Image, Row, TableBody, TableHeader, TableView, Text, View } from "@adobe/react-spectrum";
 import Add from "@spectrum-icons/workflow/Add";
-import Image from "@spectrum-icons/workflow/Image";
+import ImageIcon from "@spectrum-icons/workflow/Image";
 import { useState } from "react";
 import { api } from "../api/client";
 import { Empty, ErrorState, Forbidden, Loading } from "../components/States";
@@ -43,7 +43,11 @@ export function Media() {
             {state.data.items.map((item) => (
               <View key={item.id} borderWidth="thin" borderColor="gray-300" borderRadius="medium" padding="size-200">
                 <Flex direction="column" gap="size-100">
-                  <Image aria-label="Media item" />
+                  {item.mimeType.startsWith("image/") ? (
+                    <Image src={item.url} alt={item.title || item.filename} objectFit="cover" height="size-1600" />
+                  ) : (
+                    <ImageIcon aria-label="Media item" />
+                  )}
                   <Text>{item.title || item.filename}</Text>
                   <Text>{item.mimeType}</Text>
                 </Flex>

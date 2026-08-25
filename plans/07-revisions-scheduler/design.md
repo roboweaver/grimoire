@@ -222,17 +222,34 @@ func (s *AutosaveService) Newer(ctx context.Context, actor auth.Principal, paren
 ```
 
 `PostWriteService.Update` gains exactly one new internal call, inserted
-between its existing conflict check and its existing persistence call:
+immediately after its existing `ConflictError` check and — critically —
+**before** the existing field-merge block that mutates `cur` in place. This
+snapshots the freshly-loaded, pre-edit `cur`, not the post-edit values, per
+Requirement 1.1's "immediately before the update" wording. The sketch below
+mirrors the real `Update`'s actual signature and field-merge lines
+(`internal/content/writeservices.go`) rather than eliding them, so the
+insertion point is unambiguous:
 
 ```go
-func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, id int64, fields UpdateFields, expectedModified time.Time) (domain.Post, error) {
-    cur, err := s.posts.ByID(ctx, id)
-    // ... existing authorization check ...
-    // ... existing ConflictError check ...
-    if err := s.revisions.Snapshot(ctx, cur, actor.UserID); err != nil { // NEW (Req 1.1)
-        return domain.Post{}, err
+func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p domain.Post, expectedModified time.Time) error {
+    cur, err := s.w.ByID(ctx, p.ID)
+    // ... existing error handling ...
+    // ... existing auth.CanEditPost check ...
+    if !expectedModified.IsZero() && !cur.Modified.Equal(expectedModified) {
+        return &ConflictError{CurrentModified: cur.Modified}
     }
-    // ... existing persistence, unchanged ...
+
+    if err := s.revisions.Snapshot(ctx, cur, actor.UserID); err != nil { // NEW (Req 1.1)
+        return err                                                       // snapshots cur BEFORE
+    }                                                                    // any field below mutates it
+
+    cur.Title = p.Title // existing field-merge block, unchanged
+    cur.Content = p.Content
+    cur.Excerpt = p.Excerpt
+    cur.Slug = p.Slug
+    cur.CommentStatus = p.CommentStatus
+    // ... existing Date/DateGMT and Status handling, unchanged ...
+    return s.w.Update(ctx, cur) // existing persistence, unchanged
 }
 ```
 

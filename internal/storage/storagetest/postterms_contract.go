@@ -67,3 +67,142 @@ func runPostTermsContract(t *testing.T, newRepos NewReposFunc) {
 		}
 	})
 }
+
+// runPostTermsWriterContract covers PostTermsWriter.SetPostTerms: assignment,
+// reassignment, clearing, taxonomy isolation on the same post, cross-post
+// isolation (assigning a term already used by another post must not disturb
+// that other post's relationships), and silent omission of a termID that has
+// no term_taxonomy row for the requested taxonomy (mirroring TermsByIDs'
+// documented silent-omission-of-unknown-IDs behavior, since neither
+// requirements.md nor design.md specifies an error for this case — see Req
+// 2.6, which establishes the sibling principle that SetPostTerms does not
+// reject taxonomy/post-type mismatches at the storage layer).
+func runPostTermsWriterContract(t *testing.T, newRepos NewReposFunc) {
+	t.Helper()
+	ctx := context.Background()
+
+	t.Run("SetPostTerms assigns then reassigns a taxonomy for a post with no prior terms", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		// Post 5 ("about") has no term relationships in the fixture.
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", []int64{10, 12}); err != nil {
+			t.Fatalf("SetPostTerms assign: %v", err)
+		}
+		ids, err := repos.PostTerms.TermsForPost(ctx, 5, "category")
+		if err != nil {
+			t.Fatalf("TermsForPost after assign: %v", err)
+		}
+		if len(ids) != 2 || ids[0] != 12 || ids[1] != 10 {
+			t.Errorf("TermsForPost(5, category) = %v, want [12 10] (name-ascending: Alpha, News)", ids)
+		}
+
+		// Reassign: drop 10 (News), keep 12 (Alpha).
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", []int64{12}); err != nil {
+			t.Fatalf("SetPostTerms reassign: %v", err)
+		}
+		ids, err = repos.PostTerms.TermsForPost(ctx, 5, "category")
+		if err != nil {
+			t.Fatalf("TermsForPost after reassign: %v", err)
+		}
+		if len(ids) != 1 || ids[0] != 12 {
+			t.Errorf("TermsForPost(5, category) after reassign = %v, want [12]", ids)
+		}
+
+		// Clear entirely.
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", nil); err != nil {
+			t.Fatalf("SetPostTerms clear: %v", err)
+		}
+		ids, err = repos.PostTerms.TermsForPost(ctx, 5, "category")
+		if err != nil {
+			t.Fatalf("TermsForPost after clear: %v", err)
+		}
+		if len(ids) != 0 {
+			t.Errorf("TermsForPost(5, category) after clear = %v, want empty", ids)
+		}
+	})
+
+	t.Run("SetPostTerms isolates taxonomies on the same post", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", []int64{12}); err != nil {
+			t.Fatalf("SetPostTerms category: %v", err)
+		}
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "post_tag", []int64{13}); err != nil {
+			t.Fatalf("SetPostTerms post_tag: %v", err)
+		}
+		cats, err := repos.PostTerms.TermsForPost(ctx, 5, "category")
+		if err != nil {
+			t.Fatalf("TermsForPost category: %v", err)
+		}
+		if len(cats) != 1 || cats[0] != 12 {
+			t.Errorf("category relations disturbed by post_tag assignment: %v", cats)
+		}
+		tags, err := repos.PostTerms.TermsForPost(ctx, 5, "post_tag")
+		if err != nil {
+			t.Fatalf("TermsForPost post_tag: %v", err)
+		}
+		if len(tags) != 1 || tags[0] != 13 {
+			t.Errorf("TermsForPost(5, post_tag) = %v, want [13]", tags)
+		}
+
+		// Clearing post_tag must not disturb category.
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "post_tag", nil); err != nil {
+			t.Fatalf("SetPostTerms clear post_tag: %v", err)
+		}
+		cats, err = repos.PostTerms.TermsForPost(ctx, 5, "category")
+		if err != nil {
+			t.Fatalf("TermsForPost category after clearing post_tag: %v", err)
+		}
+		if len(cats) != 1 || cats[0] != 12 {
+			t.Errorf("category relations disturbed by clearing post_tag: %v", cats)
+		}
+	})
+
+	t.Run("SetPostTerms isolates posts sharing a term", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		// hello-1 (post 1) is already related to category term 12 (Alpha) in
+		// the fixture. Assigning the same term to post 5 must not disturb
+		// post 1's relationship, and clearing post 5's later must not
+		// disturb post 1's either.
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", []int64{12}); err != nil {
+			t.Fatalf("SetPostTerms post5: %v", err)
+		}
+		post1Terms, err := repos.PostTerms.TermsForPost(ctx, 1, "category")
+		if err != nil {
+			t.Fatalf("TermsForPost post1: %v", err)
+		}
+		if len(post1Terms) != 2 || post1Terms[0] != 12 || post1Terms[1] != 11 {
+			t.Errorf("post 1's category relations disturbed by post 5's assignment: %v", post1Terms)
+		}
+
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", nil); err != nil {
+			t.Fatalf("SetPostTerms clear post5: %v", err)
+		}
+		post1Terms, err = repos.PostTerms.TermsForPost(ctx, 1, "category")
+		if err != nil {
+			t.Fatalf("TermsForPost post1 after clearing post5: %v", err)
+		}
+		if len(post1Terms) != 2 || post1Terms[0] != 12 || post1Terms[1] != 11 {
+			t.Errorf("post 1's category relations disturbed by clearing post 5: %v", post1Terms)
+		}
+	})
+
+	t.Run("SetPostTerms silently skips a termID with no term_taxonomy row for the taxonomy", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		// Term 13 (Golang) exists but only as post_tag, not category; term
+		// 999999 does not exist at all. Neither should error nor be
+		// reflected in the resulting category relations.
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", []int64{12, 13, 999999}); err != nil {
+			t.Fatalf("SetPostTerms with unresolvable termIDs: %v", err)
+		}
+		ids, err := repos.PostTerms.TermsForPost(ctx, 5, "category")
+		if err != nil {
+			t.Fatalf("TermsForPost: %v", err)
+		}
+		if len(ids) != 1 || ids[0] != 12 {
+			t.Errorf("TermsForPost(5, category) = %v, want [12] (13 and 999999 silently skipped)", ids)
+		}
+	})
+}

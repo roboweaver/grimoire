@@ -5,9 +5,11 @@ each builds on the last and references the requirements it satisfies. Keep
 `gofmt -l .` empty, `go vet ./...`, `go build ./...`, and `go test ./...`
 green after every phase (SQLite unconditional; MySQL/Postgres contract runs
 gated on `GRIMOIRE_TEST_MYSQL_DSN` / `GRIMOIRE_TEST_POSTGRES_DSN`, same
-convention as every prior milestone). **M7 adds exactly one new migration**
-(`0005_post_parent`, additive, all three vendors) — see `design.md`'s
-Migrations section. Commit in logical increments with the trailer
+convention as every prior milestone). **M7 was originally scoped to add one
+new migration** (`0005_post_parent`); tasks 1.1/1.2 discovered that column
+already exists via M4's `0003_comments_media_menus` migration, so no new
+migration was added — see `design.md`'s Migrations section and 1.1/1.2's
+discovery notes below. Commit in logical increments with the trailer
 `Co-authored-by: Copilot App <223556219+Copilot@users.noreply.github.com>`.
 
 Requirement acceptance-criteria counts in `requirements.md` (for citation

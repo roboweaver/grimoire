@@ -2,7 +2,9 @@
 
 ## Overview
 
-M7 adds one new schema element (a `post_parent` column), one new background
+M7 exposes one existing-but-previously-unused schema element (the
+`post_parent` column, physically present since M4's `0003` migration but
+not yet surfaced through the domain/repo layer), one new background
 runtime component (a publish scheduler), a small set of new admin-API routes
 (revisions, autosave), and a new REST resource family (categories, tags).
 Every new capability is built as additive wiring over M1-M6 infrastructure:
@@ -305,13 +307,13 @@ var systemPrincipal = auth.Principal{
   pre-existing WordPress database's own autosave rows are recognized
   without translation. Normal revisions use `"{id}-revision-v1"`,
   `"{id}-revision-v2"`, etc., also WordPress's own convention.
-- New file `internal/storage/migrations/{sqlite,mysql,postgres}/0005_post_parent.up.sql`:
-  additive `ALTER TABLE {{prefix}}posts ADD COLUMN post_parent <int-type> NOT NULL DEFAULT 0`
-  (vendor-appropriate integer type, matching the existing 0004 migration's
-  per-vendor style), with the same "a pre-existing live WordPress database
-  is read as-is" comment convention already used by migrations 0001-0004 --
-  a real WordPress database already has this exact column with this exact
-  default, so no backfill is needed for the columns it introduces.
+- **No new migration file.** `post_parent` already exists physically across
+  all three vendors via M4's `0003_comments_media_menus` migration
+  (`ALTER TABLE {{prefix}}posts ADD COLUMN post_parent <int-type> NOT NULL
+  DEFAULT 0`, added for attachment parent-post tracking). M7 only adds the
+  domain/repo-level exposure of that pre-existing column (`ParentID` on
+  `domain.Post`, general `PostRepo` read/write support); see the
+  Migrations section below for the as-built detail.
 
 ### `internal/web`
 
@@ -378,24 +380,36 @@ draws between its post routes (404) and its admin-only term routes (403).
 
 ## Migrations
 
-One new migration, `0005_post_parent`, additive across all three vendors:
+**No new migration.** During implementation of tasks 1.1-1.2 it was
+discovered that `post_parent` already exists physically across all three
+vendors: M4's `0003_comments_media_menus` migration added it (for
+attachment parent-post tracking, see `internal/storage/wprepo/media.go`),
+additive with the exact `NOT NULL DEFAULT 0` shape originally sketched
+below for a hypothetical `0005_post_parent`:
 
 ```sql
--- sqlite
+-- sqlite (already present via 0003)
 ALTER TABLE {{prefix}}posts ADD COLUMN post_parent INTEGER NOT NULL DEFAULT 0;
 
--- mysql
+-- mysql (already present via 0003)
 ALTER TABLE {{prefix}}posts ADD COLUMN post_parent BIGINT UNSIGNED NOT NULL DEFAULT 0;
 
--- postgres
+-- postgres (already present via 0003)
 ALTER TABLE {{prefix}}posts ADD COLUMN post_parent BIGINT NOT NULL DEFAULT 0;
 ```
 
 A pre-existing live WordPress database already has this exact column with
 this exact default (WordPress has shipped `post_parent` since its earliest
-schema); grimoire's migration only needs to add it for databases grimoire
-itself created from scratch, matching the documented convention already
-used by migrations 0001-0004. No data backfill is required.
+schema), which is why M4 was able to add it as a plain additive column
+with no data backfill.
+
+M7's tasks 1.1-1.2 therefore did not add a migration; they only exposed
+the already-physically-present column through the domain/repo layer
+(`domain.Post.ParentID`, general `PostRepo` read/write support), and
+task 1.1's contract test validates that pre-existing column's read/write
+behavior rather than a migration-application test. See
+`plans/07-revisions-scheduler/tasks.md` tasks 1.1-1.2 for the as-built
+detail.
 
 ## Concurrency window
 

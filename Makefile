@@ -1,7 +1,7 @@
 GO ?= go
 CONFIG ?= configs/grimoire.sqlite.yaml
 
-.PHONY: fmt vet build test run migrate seed tidy admin
+.PHONY: fmt vet build test run migrate seed tidy admin theme-css
 
 fmt:
 	gofmt -l -w .
@@ -23,6 +23,9 @@ tidy:
 # tests never invoke it (a placeholder dist is committed so the embed compiles).
 admin:
 	cd web/admin && npm ci && npm run build
+
+theme-css:
+	cd web/theme && npm ci && npm run build
 
 run:
 	$(GO) run ./cmd/grimoire -config $(CONFIG)

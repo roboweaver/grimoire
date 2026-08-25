@@ -1,0 +1,10 @@
+/* GENERATED FILE. Do not edit by hand.
+ * Run `make theme-css` (web/theme/build.mjs) to regenerate. */
+@import url("vendor/tokens.css");
+@import url("vendor/typography.css");
+@import url("vendor/page.css");
+@import url("vendor/card.css");
+@import url("vendor/link.css");
+@import url("vendor/button.css");
+@import url("vendor/textfield.css");
+@import url("vendor/divider.css");

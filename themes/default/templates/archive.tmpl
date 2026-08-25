@@ -5,16 +5,7 @@
 </div>
 <div class="theme-card-grid">
 {{range .Posts}}
-<article class="spectrum-Card theme-card">
-<div class="spectrum-Card-body">
-<div class="spectrum-Card-header"><h2 class="spectrum-Card-title"><a class="spectrum-Link spectrum-Link--quiet" href="/{{.Slug}}">{{.Title}}</a></h2></div>
-<div class="spectrum-Card-content">
-<time class="spectrum-Body spectrum-Body--sizeS theme-card-date" datetime="{{.Date.Format "2006-01-02"}}">{{.Date.Format "Jan 2, 2006"}}</time>
-<div class="spectrum-Body spectrum-Body--sizeM theme-card-excerpt">{{.Excerpt}}</div>
-</div>
-</div>
-<div class="spectrum-Card-footer"><a class="spectrum-Button spectrum-Button--secondary spectrum-Button--sizeM" href="/{{.Slug}}"><span class="spectrum-Button-label">Read more</span></a></div>
-</article>
+{{template "post-card" .}}
 {{else}}
 <p class="spectrum-Body spectrum-Body--sizeM">Nothing here yet.</p>
 {{end}}

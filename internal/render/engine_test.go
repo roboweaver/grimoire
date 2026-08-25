@@ -18,6 +18,9 @@ func writeTheme(t *testing.T, files map[string]string) (string, string) {
 		t.Fatal(err)
 	}
 	for name, body := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -72,5 +75,24 @@ func TestRenderSingleFallsBackToIndex(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "fallback") {
 		t.Fatalf("fallback render missing content: %q", buf.String())
+	}
+}
+
+func TestLoadIncludesTemplatePartials(t *testing.T) {
+	root, theme := writeTheme(t, map[string]string{
+		"base.tmpl":               miniBase,
+		"index.tmpl":              `{{define "content"}}{{template "post-card" .}}{{end}}`,
+		"partials/post-card.tmpl": `{{define "post-card"}}<article>{{.SiteTitle}}</article>{{end}}`,
+	})
+	e, err := Load(root, theme)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := e.Render(&buf, "index", IndexData{SiteTitle: "partial"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(buf.String(), "<article>partial</article>") {
+		t.Fatalf("output missing partial content: %q", buf.String())
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -52,12 +53,11 @@ func Load(themesDir, theme string) (*Engine, error) {
 	}
 
 	e := &Engine{templates: make(map[string]*template.Template)}
-	partials := []string{}
-	for _, partial := range []string{"partials/comments.tmpl", "partials/nav-menu.tmpl"} {
-		if fileExists(filepath.Join(dir, partial)) {
-			partials = append(partials, filepath.Join(dir, partial))
-		}
+	partials, err := filepath.Glob(filepath.Join(dir, "partials", "*.tmpl"))
+	if err != nil {
+		return nil, fmt.Errorf("render: load partials: %w", err)
 	}
+	sort.Strings(partials)
 	for _, name := range contentTemplates {
 		contentPath := filepath.Join(dir, name+".tmpl")
 		if !fileExists(contentPath) || strings.HasPrefix(name, "partials/") {

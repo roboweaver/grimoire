@@ -244,6 +244,30 @@ func TestRESTPostCreateRejectsFutureStatusWithNoDate(t *testing.T) {
 	}
 }
 
+// TestRESTPostUpdateRejectsFutureTransitionWithUnchangedPastDate guards
+// re-review finding #2 at the REST layer: the unchanged-date exception (Req
+// 5.2) must only apply when the post is ALREADY status "future". A draft
+// post with a past date, PUT to status "future" while resubmitting that
+// same past date unchanged, must still be rejected -- otherwise any
+// past-dated post could become "future" with no future date required
+// simply by not touching the date field (REST PATCH semantics mean the
+// date field is commonly omitted/unchanged on updates).
+func TestRESTPostUpdateRejectsFutureTransitionWithUnchangedPastDate(t *testing.T) {
+	h, _, ap := newAppPasswordWriteRESTRouter(t)
+	secret := mintAppPassword(t, context.Background(), ap)
+
+	pastDate := "2000-01-01T00:00:00"
+	createRec := doRESTWrite(t, h, http.MethodPost, "/wp-json/wp/v2/posts", secret,
+		`{"title":"Original","status":"draft","date":"`+pastDate+`"}`, nil)
+	id := restJSONID(t, createRec)
+
+	updateRec := doRESTWrite(t, h, http.MethodPut, "/wp-json/wp/v2/posts/"+strconv.FormatInt(id, 10), secret,
+		`{"status":"future","date":"`+pastDate+`"}`, nil)
+	if updateRec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (draft->future transition must require an explicit future date), body = %s", updateRec.Code, updateRec.Body.String())
+	}
+}
+
 func TestRESTPostUpdate(t *testing.T) {
 	h, _, ap := newAppPasswordWriteRESTRouter(t)
 	secret := mintAppPassword(t, context.Background(), ap)

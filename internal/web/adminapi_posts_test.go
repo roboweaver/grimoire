@@ -376,6 +376,30 @@ func TestAdminPostUpdateAllowsUnchangedFutureDate(t *testing.T) {
 	}
 }
 
+// TestAdminPostUpdateRejectsFutureTransitionWithUnchangedPastDate guards
+// re-review finding #2: the unchanged-date exception (Req 5.2) must only
+// apply when the post is ALREADY status "future". A draft/published post
+// (whose date is necessarily in the past) transitioning into "future" while
+// resubmitting its own currently-stored past date unchanged must still be
+// rejected -- otherwise the exception lets any past-dated post become
+// "future" with no future date required, simply by not touching the date
+// field.
+func TestAdminPostUpdateRejectsFutureTransitionWithUnchangedPastDate(t *testing.T) {
+	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := &fakeAdmin{detail: func(id int64) (domain.Post, error) {
+		return domain.Post{ID: id, Status: "draft", Date: past, Modified: past}, nil
+	}}
+	s := testWriteServer(a, &fakePostWrite{}, nil, nil, nil)
+	body := `{"title":"x","status":"future","date":"2000-01-01T00:00:00Z","modified":"2000-01-01T00:00:00Z"}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/posts/9", strings.NewReader(body)).WithContext(principalCtx("edit_posts"))
+	req = withURLParam(req, "id", "9")
+	rec := httptest.NewRecorder()
+	s.jsonHandler(s.adminPostUpdate).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (draft->future transition must require an explicit future date), body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminPostUpdateRejectsChangedPastFutureDate(t *testing.T) {
 	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	otherPast := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)

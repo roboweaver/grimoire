@@ -193,7 +193,13 @@ describe("PostEditor", () => {
   // that past date and fail the now-tightened server validation. The picker
   // must instead start empty in that case, forcing an explicit future pick.
   it("does not preload a past stored date into the picker when a non-future post is switched to future", async () => {
-    apiPost.mockResolvedValue(detail({ id: 7, status: "draft", date: "2020-01-01T00:00:00Z" }));
+    // Midday UTC keeps the fixture's calendar date stable across every
+    // timezone parseAbsoluteToLocal might localize into (a midnight-UTC
+    // fixture shifts to the prior day west of UTC, which previously let
+    // this assertion pass even with the preload bug present, since the
+    // buggy year rendered was "2019" rather than the "2020" being matched
+    // against).
+    apiPost.mockResolvedValue(detail({ id: 7, status: "draft", date: "2020-07-01T12:00:00Z" }));
     renderEditor("/posts/7");
 
     await screen.findByDisplayValue("Existing title");
@@ -203,10 +209,13 @@ describe("PostEditor", () => {
     const segments = screen.getAllByLabelText(/publish date/i);
     expect(segments.length).toBeGreaterThan(0);
     // Spectrum renders "Publish date" segments with placeholder text (e.g.
-    // "mm", "dd", "yyyy") when the value is null, rather than digits from a
-    // preloaded 2020-01-01 date.
+    // "mm", "dd", "yyyy") when the value is null. Assert no digits at all
+    // are rendered -- a stronger, timezone-independent check than matching
+    // a specific stale year, since a null value never renders any digit
+    // regardless of which calendar date the preloaded fixture would have
+    // localized to.
     for (const segment of segments) {
-      expect(segment.textContent ?? "").not.toMatch(/2020/);
+      expect(segment.textContent ?? "").not.toMatch(/\d/);
     }
   });
 });

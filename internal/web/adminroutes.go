@@ -31,6 +31,15 @@ func (s *Server) WithAdminWrites(postWrite postAdminWriter, termWrite termAdminS
 	return s
 }
 
+// WithAdminRevisions enables the M7 revision-history admin routes under
+// /admin/api, gated by the same edit_posts capability the post routes
+// require, with the restore route also requiring CSRF. It returns the same
+// Server for chaining. When revisions is nil the routes are not registered.
+func (s *Server) WithAdminRevisions(revisions revisionAdminService) *Server {
+	s.revisions = revisions
+	return s
+}
+
 // registerAdmin mounts the /admin group onto r. It MUST be called before the
 // public catch-all /{slug} route so admin paths are never shadowed by content
 // resolution (Req 1.2). The JSON API is a nested subrouter registered ahead of
@@ -77,12 +86,22 @@ func (s *Server) adminAPIRouter() http.Handler {
 		gr.Method(http.MethodGet, "/menus", s.jsonHandler(s.adminMenus))
 		gr.Method(http.MethodGet, "/menus/{id}", s.jsonHandler(s.adminMenu))
 		gr.Method(http.MethodGet, "/terms", s.jsonHandler(s.adminTerms))
+		if s.revisions != nil {
+			gr.Method(http.MethodGet, "/posts/{id}/revisions", s.jsonHandler(s.adminRevisionList))
+			gr.Method(http.MethodGet, "/posts/{id}/revisions/{revisionId}", s.jsonHandler(s.adminRevisionGet))
+		}
 		if s.postWrite != nil {
 			gr.Group(func(wgr chi.Router) {
 				wgr.Use(s.csrfJSONMiddleware) // adapter around the existing M4 helper
 				wgr.Method(http.MethodPost, "/posts", s.jsonHandler(s.adminPostCreate))
 				wgr.Method(http.MethodPut, "/posts/{id}", s.jsonHandler(s.adminPostUpdate))
 				wgr.Method(http.MethodDelete, "/posts/{id}", s.jsonHandler(s.adminPostDelete))
+			})
+		}
+		if s.revisions != nil {
+			gr.Group(func(wgr chi.Router) {
+				wgr.Use(s.csrfJSONMiddleware)
+				wgr.Method(http.MethodPost, "/posts/{id}/revisions/{revisionId}/restore", s.jsonHandler(s.adminRevisionRestore))
 			})
 		}
 	})

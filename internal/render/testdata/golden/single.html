@@ -24,21 +24,33 @@
   <div class="spectrum-Body spectrum-Body--sizeM theme-article-content"><p>Body <em>html</em>.</p></div>
 </article>
 
-<section id="comments">
-  <h2>0 Comments</h2>
+<section id="comments" class="theme-comments">
+  <h2 class="spectrum-Heading spectrum-Heading--sizeL">0 Comments</h2>
   
   
-    <p>No comments yet</p>
+    <p class="spectrum-Body spectrum-Body--sizeM">No comments yet</p>
   
-  <form method="post" action="/comment">
+  <form method="post" action="/comment" class="theme-comment-form">
     <input type="hidden" name="post_id" value="1">
     <input type="hidden" name="comment_csrf_token" value="">
-    <p><label>Name <input name="author"></label></p>
-    <p><label>Email <input name="email"></label></p>
-    <p><label>URL <input name="url"></label></p>
+    <div class="spectrum-Textfield theme-form-field">
+      <label class="spectrum-FieldLabel" for="comment-author">Name</label>
+      <input class="spectrum-Textfield-input" id="comment-author" name="author">
+    </div>
+    <div class="spectrum-Textfield theme-form-field">
+      <label class="spectrum-FieldLabel" for="comment-email">Email</label>
+      <input class="spectrum-Textfield-input" id="comment-email" name="email">
+    </div>
+    <div class="spectrum-Textfield theme-form-field">
+      <label class="spectrum-FieldLabel" for="comment-url">URL</label>
+      <input class="spectrum-Textfield-input" id="comment-url" name="url">
+    </div>
     <p style="display:none"><label>Website <input name="website"></label></p>
-    <p><label>Comment <textarea name="content"></textarea></label></p>
-    <button type="submit">Submit comment</button>
+    <div class="spectrum-Textfield theme-form-field theme-form-field--textarea">
+      <label class="spectrum-FieldLabel" for="comment-content">Comment</label>
+      <textarea class="spectrum-Textfield-input" id="comment-content" name="content"></textarea>
+    </div>
+    <button type="submit" class="spectrum-Button spectrum-Button--accent spectrum-Button--fill"><span class="spectrum-Button-label">Submit comment</span></button>
   </form>
 </section>
 

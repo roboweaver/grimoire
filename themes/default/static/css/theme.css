@@ -84,3 +84,24 @@
 	color: var(--spectrum-gray-700);
 	margin: var(--spectrum-spacing-100) 0 var(--spectrum-spacing-300);
 }
+
+.theme-comments {
+	max-width: 720px;
+	margin: var(--spectrum-spacing-500) auto 0;
+	border-top: var(--spectrum-border-width-100) solid var(--spectrum-gray-300);
+	padding-top: var(--spectrum-spacing-400);
+}
+
+.theme-comment-list {
+	list-style: none;
+	padding: 0;
+}
+
+.theme-comment {
+	padding: var(--spectrum-spacing-200) 0;
+	border-bottom: var(--spectrum-border-width-100) solid var(--spectrum-gray-200);
+}
+
+.theme-form-field {
+	margin-bottom: var(--spectrum-spacing-200);
+}

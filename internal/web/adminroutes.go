@@ -31,12 +31,14 @@ func (s *Server) WithAdminWrites(postWrite postAdminWriter, termWrite termAdminS
 	return s
 }
 
-// WithAdminRevisions enables the M7 revision-history admin routes under
-// /admin/api, gated by the same edit_posts capability the post routes
-// require, with the restore route also requiring CSRF. It returns the same
-// Server for chaining. When revisions is nil the routes are not registered.
-func (s *Server) WithAdminRevisions(revisions revisionAdminService) *Server {
+// WithAdminRevisions enables the M7 revision-history and autosave admin
+// routes under /admin/api, each gated by the same edit_posts capability the
+// post routes require, with the write routes (restore, autosave save) also
+// requiring CSRF. It returns the same Server for chaining. When an argument
+// is nil that pair of routes is not registered.
+func (s *Server) WithAdminRevisions(revisions revisionAdminService, autosave autosaveAdminService) *Server {
 	s.revisions = revisions
+	s.autosave = autosave
 	return s
 }
 
@@ -90,6 +92,9 @@ func (s *Server) adminAPIRouter() http.Handler {
 			gr.Method(http.MethodGet, "/posts/{id}/revisions", s.jsonHandler(s.adminRevisionList))
 			gr.Method(http.MethodGet, "/posts/{id}/revisions/{revisionId}", s.jsonHandler(s.adminRevisionGet))
 		}
+		if s.autosave != nil {
+			gr.Method(http.MethodGet, "/posts/{id}/autosave", s.jsonHandler(s.adminAutosaveGet))
+		}
 		if s.postWrite != nil {
 			gr.Group(func(wgr chi.Router) {
 				wgr.Use(s.csrfJSONMiddleware) // adapter around the existing M4 helper
@@ -102,6 +107,12 @@ func (s *Server) adminAPIRouter() http.Handler {
 			gr.Group(func(wgr chi.Router) {
 				wgr.Use(s.csrfJSONMiddleware)
 				wgr.Method(http.MethodPost, "/posts/{id}/revisions/{revisionId}/restore", s.jsonHandler(s.adminRevisionRestore))
+			})
+		}
+		if s.autosave != nil {
+			gr.Group(func(wgr chi.Router) {
+				wgr.Use(s.csrfJSONMiddleware)
+				wgr.Method(http.MethodPost, "/posts/{id}/autosave", s.jsonHandler(s.adminAutosaveSave))
 			})
 		}
 	})

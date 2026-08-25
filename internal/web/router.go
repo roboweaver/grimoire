@@ -49,6 +49,7 @@ type Server struct {
 	// in which case the corresponding /admin/api routes are not registered
 	// (see adminAPIRouter).
 	revisions revisionAdminService
+	autosave  autosaveAdminService
 
 	// REST API dependencies; restMapper nil until WithREST, in which case the
 	// /wp-json/* routes are not registered at all.

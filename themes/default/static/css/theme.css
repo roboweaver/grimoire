@@ -59,6 +59,18 @@
 	padding: var(--spectrum-component-edge-to-text-100);
 }
 
+/* Spectrum's card component expects the whole card to be a single focusable
+ * link/button, so its :before/:after focus-ring and selection overlays are
+ * absolutely positioned over the entire card. Our card markup instead nests
+ * separate links (title, "Read more") inside a plain <article>, so those
+ * overlays end up painting above the in-flow links and swallow clicks.
+ * Disable pointer events on the overlays so clicks reach the real links.
+ */
+.theme-card:before,
+.theme-card:after {
+	pointer-events: none;
+}
+
 .theme-card .spectrum-Card-content {
 	flex-direction: column;
 	align-items: flex-start;

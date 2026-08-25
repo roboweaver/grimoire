@@ -73,3 +73,14 @@
 .theme-card-excerpt {
 	margin-top: var(--spectrum-spacing-100);
 }
+
+.theme-article {
+	max-width: 720px;
+	margin: 0 auto;
+}
+
+.theme-article-date {
+	display: block;
+	color: var(--spectrum-gray-700);
+	margin: var(--spectrum-spacing-100) 0 var(--spectrum-spacing-300);
+}

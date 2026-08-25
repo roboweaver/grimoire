@@ -21,6 +21,7 @@ type Server struct {
 	comments *content.CommentService
 	media    *content.MediaService
 	menus    *content.NavMenuService
+	featured *content.FeaturedImageService
 	render   *render.Engine
 	log      *slog.Logger
 

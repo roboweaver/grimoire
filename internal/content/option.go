@@ -3,6 +3,7 @@ package content
 import (
 	"context"
 	"errors"
+	"html"
 	"strings"
 
 	"github.com/roboweaver/grimoire/internal/domain"
@@ -51,9 +52,14 @@ func (s *OptionService) GetErr(ctx context.Context, name string) (string, error)
 }
 
 // SiteInfo returns the site title (blogname) and tagline (blogdescription),
-// each empty when unset.
+// each empty when unset. WordPress stores these options with any special
+// characters already HTML-entity-encoded at rest (e.g. a literal "&#039;"
+// for an apostrophe), relying on its own display path to decode them back.
+// html.UnescapeString reverses that encoding here so html/template's
+// auto-escaper (which only escapes, never decodes) renders the intended
+// character instead of the literal entity text.
 func (s *OptionService) SiteInfo(ctx context.Context) (title, tagline string) {
-	return s.Get(ctx, OptionBlogName), s.Get(ctx, OptionBlogDescription)
+	return html.UnescapeString(s.Get(ctx, OptionBlogName)), html.UnescapeString(s.Get(ctx, OptionBlogDescription))
 }
 
 // BaseURLs returns the distinct, trailing-slash-trimmed "siteurl" and "home"

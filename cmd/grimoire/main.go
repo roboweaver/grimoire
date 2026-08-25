@@ -77,6 +77,7 @@ func main() {
 	media := content.NewMediaService(repos.Media, repos.MediaWriter, content.MediaConfig{UploadsDir: cfg.Media.UploadsDir, BaseURL: "/wp-content/uploads", AllowedMIMEs: cfg.Media.AllowedMIMEs, MaxUploadSize: cfg.Media.MaxUploadSize})
 
 	restMapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, cfg.Database.TablePrefix)
+	featured := content.NewFeaturedImageService(repos.PostMeta, repos.Media)
 	appPasswords := &auth.ApplicationPasswords{
 		Users:  repos.Users,
 		Meta:   repos.UserMeta,
@@ -89,7 +90,7 @@ func main() {
 		content.NewOptionService(repos.Options),
 		eng,
 		log,
-	).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithAuth(sm, web.AuthConfig{
+	).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

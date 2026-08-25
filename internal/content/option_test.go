@@ -48,6 +48,27 @@ func TestOptionServiceSiteInfo(t *testing.T) {
 	}
 }
 
+// TestOptionServiceSiteInfoDecodesHTMLEntities: WordPress stores option
+// values with special characters already HTML-entity-encoded at rest (e.g.
+// blogdescription = "Weaver&#039;s Loom"). SiteInfo must decode these so
+// html/template (which only escapes, never decodes) renders the intended
+// apostrophe instead of the literal entity text.
+func TestOptionServiceSiteInfoDecodesHTMLEntities(t *testing.T) {
+	repo := &fakeOptionRepo{values: map[string]string{
+		"blogname":        "Weaver&#039;s Site",
+		"blogdescription": "Weaver&#039;s Loom: Technology &amp; musings",
+	}}
+	svc := NewOptionService(repo)
+
+	title, tagline := svc.SiteInfo(context.Background())
+	if title != "Weaver's Site" {
+		t.Fatalf("title = %q, want decoded apostrophe", title)
+	}
+	if tagline != "Weaver's Loom: Technology & musings" {
+		t.Fatalf("tagline = %q, want decoded entities", tagline)
+	}
+}
+
 // TestOptionServiceBaseURLs verifies siteurl/home are trimmed, deduped, and
 // each expanded to both http/https variants so content authored under either
 // scheme can be rewritten.

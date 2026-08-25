@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"html/template"
 	"strings"
 
@@ -24,22 +25,27 @@ import (
 // baseURLs (from OptionService.BaseURLs) are the site's own configured
 // siteurl/home option values, absolute self-references to which are rewritten
 // to relative paths — see rewriteSelfURLs.
-func postView(p domain.Post, baseURLs []string) render.PostView {
+//
+// featured resolves the post's featured image (may be nil, in which case
+// FeaturedImageURL is left empty); its URL is already a grimoire-relative
+// path (see wprepo.MediaRepo), so no rewriteSelfURLs pass is needed.
+func postView(ctx context.Context, p domain.Post, baseURLs []string, featured *content.FeaturedImageService) render.PostView {
 	return render.PostView{
-		ID:      p.ID,
-		Slug:    p.Slug,
-		Title:   p.Title,
-		Excerpt: template.HTML(rewriteSelfURLs(content.Excerpt(p), baseURLs)), // trusted excerpt HTML — see trust boundary note above
-		Content: template.HTML(rewriteSelfURLs(p.Content, baseURLs)),          // trusted DB HTML — see trust boundary note above
-		Date:    p.Date,
-		Author:  p.Author,
+		ID:               p.ID,
+		Slug:             p.Slug,
+		Title:            p.Title,
+		Excerpt:          template.HTML(rewriteSelfURLs(content.Excerpt(p), baseURLs)), // trusted excerpt HTML — see trust boundary note above
+		Content:          template.HTML(rewriteSelfURLs(p.Content, baseURLs)),          // trusted DB HTML — see trust boundary note above
+		Date:             p.Date,
+		Author:           p.Author,
+		FeaturedImageURL: featured.URL(ctx, p.ID),
 	}
 }
 
-func postViews(ps []domain.Post, baseURLs []string) []render.PostView {
+func postViews(ctx context.Context, ps []domain.Post, baseURLs []string, featured *content.FeaturedImageService) []render.PostView {
 	out := make([]render.PostView, 0, len(ps))
 	for _, p := range ps {
-		out = append(out, postView(p, baseURLs))
+		out = append(out, postView(ctx, p, baseURLs, featured))
 	}
 	return out
 }

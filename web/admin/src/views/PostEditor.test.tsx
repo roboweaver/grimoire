@@ -14,10 +14,12 @@ vi.mock("../api/client", async (importOriginal) => {
   };
 });
 
-// RichTextEditor and TermPicker have their own dedicated test suites
-// (RichTextEditor.test.tsx, TermPicker.test.tsx); PostEditor's tests stub
-// them with minimal controllable doubles so failures here are about
-// PostEditor's own load/save/conflict wiring, not TipTap/Spectrum internals.
+// RichTextEditor, TermPicker and RevisionsPanel have their own dedicated
+// test suites (RichTextEditor.test.tsx, TermPicker.test.tsx,
+// RevisionsPanel.test.tsx); PostEditor's tests stub them with minimal
+// controllable doubles so failures here are about PostEditor's own
+// load/save/conflict wiring, not TipTap/Spectrum internals or revision
+// fetches.
 vi.mock("../components/RichTextEditor", () => ({
   RichTextEditor: ({ content, onChange }: { content: string; onChange: (html: string) => void }) => (
     <textarea
@@ -27,6 +29,9 @@ vi.mock("../components/RichTextEditor", () => ({
       onChange={(e) => onChange(e.target.value)}
     />
   ),
+}));
+vi.mock("../components/RevisionsPanel", () => ({
+  RevisionsPanel: () => <div data-testid="revisions-panel-stub" />,
 }));
 vi.mock("../components/TermPicker", () => ({
   TermPicker: ({ label }: { label: string; selected: TermSummary[]; onChange: (next: TermSummary[]) => void }) => (

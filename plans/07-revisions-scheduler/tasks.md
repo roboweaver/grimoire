@@ -75,9 +75,9 @@ has 4, Req 6 has 7, Req 7 has 4, Req 8 has 6.
   - _Acceptance:_ 5.1's test passes. _(Req 4.1–4.3, 4.6, 4.8)_
 
 ## Phase 6 — Spectrum admin UI: revisions, restore, and autosave (`web/admin`)
-- [ ] 6.1 Extend `api/client.ts`/`api/types.ts` with `listRevisions`/`getRevision`/`restoreRevision`/`getAutosave`/`saveAutosave` and their corresponding types (`RevisionSummary`, `RevisionDetail`), matching `design.md`'s shapes.
-- [ ] 6.2 Write failing component tests for `RevisionsPanel.tsx`: fetches and lists revisions on mount; selecting one renders a diff against the current post content (client-side diff over the two content strings — no new server call for the diff itself); a "Restore this revision" action calls `restoreRevision` and then signals the parent editor to reload (Req 8.1–8.3).
-- [ ] 6.3 Implement `components/RevisionsPanel.tsx`.
+- [x] 6.1 Extend `api/client.ts`/`api/types.ts` with `listRevisions`/`getRevision`/`restoreRevision`/`getAutosave`/`saveAutosave` and their corresponding types (`RevisionSummary`, `RevisionDetail`), matching `design.md`'s shapes.
+- [x] 6.2 Write failing component tests for `RevisionsPanel.tsx`: fetches and lists revisions on mount; selecting one renders a diff against the current post content (client-side diff over the two content strings — no new server call for the diff itself); a "Restore this revision" action calls `restoreRevision` and then signals the parent editor to reload (Req 8.1–8.3).
+- [x] 6.3 Implement `components/RevisionsPanel.tsx`.
   - _Acceptance:_ 6.2's suite passes. _(Req 8.1–8.3)_
 - [ ] 6.4 Write failing component tests for an autosave hook/component (e.g. `useAutosave.ts`): calls `saveAutosave` on an interval while the post has unsaved changes, and does not call it (or the normal save path) when there are none; on mount, checks `getAutosave` and — only if a newer autosave is found — surfaces a dismissible "restore this autosave?" notice without applying it automatically (Req 8.4–8.6).
 - [ ] 6.5 Implement the autosave hook/component and wire it into `views/PostEditor.tsx` (and `PageEditor.tsx`, which wraps it per M6), alongside the existing `RevisionsPanel` from 6.3.

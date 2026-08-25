@@ -22,6 +22,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { api, ConflictError, ForbiddenError } from "../api/client";
 import type { PostDetail, PostWriteInput, TermSummary } from "../api/types";
 import { ConflictDialog } from "../components/ConflictDialog";
+import { RevisionsPanel } from "../components/RevisionsPanel";
 import { RichTextEditor } from "../components/RichTextEditor";
 import { TermPicker } from "../components/TermPicker";
 import { ErrorState, Forbidden, Loading } from "../components/States";
@@ -229,6 +230,10 @@ export function PostEditor({ type }: PostEditorProps) {
           <TermPicker taxonomy="category" label="Categories" selected={categories} onChange={setCategories} />
           <TermPicker taxonomy="post_tag" label="Tags" selected={tags} onChange={setTags} />
         </Flex>
+      ) : null}
+
+      {!isNew && id ? (
+        <RevisionsPanel postId={id} currentContent={content} onRestored={() => load()} />
       ) : null}
 
       <ButtonGroup>

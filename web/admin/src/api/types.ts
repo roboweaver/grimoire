@@ -162,3 +162,41 @@ export interface NavMenu {
   slug: string;
   items: NavMenuItem[];
 }
+
+// RevisionSummary mirrors internal/web.revisionSummary (Req 2.1): no content
+// body, newest-first list entries for the Revisions panel.
+export interface RevisionSummary {
+  id: number;
+  author: number;
+  modified: string;
+}
+
+// RevisionDetail mirrors internal/web.revisionDetail (Req 2.2): the full
+// title/content/excerpt body for a single revision, used for the
+// restore-preview diff and the restore action's response shape (a PostDetail,
+// reused as-is).
+export interface RevisionDetail {
+  id: number;
+  title: string;
+  content: string;
+  excerpt: string;
+  modified: string;
+}
+
+// AutosaveDetail mirrors internal/web.autosaveResponse (Req 3.5/3.6): both
+// GET and POST .../autosave return this same title/content/excerpt/modified
+// shape.
+export interface AutosaveDetail {
+  title: string;
+  content: string;
+  excerpt: string;
+  modified: string;
+}
+
+// AutosaveWriteInput is the JSON body POST .../autosave accepts
+// (internal/web.autosaveWriteRequest, Req 3.1).
+export interface AutosaveWriteInput {
+  title: string;
+  content: string;
+  excerpt: string;
+}

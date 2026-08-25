@@ -105,3 +105,17 @@
 .theme-form-field {
 	margin-bottom: var(--spectrum-spacing-200);
 }
+
+.theme-nav-list {
+	display: flex;
+	gap: var(--spectrum-spacing-200);
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.theme-nav-sublist {
+	list-style: none;
+	margin: 0;
+	padding-left: var(--spectrum-spacing-200);
+}

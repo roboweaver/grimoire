@@ -50,7 +50,7 @@ func newTestServer(t *testing.T) http.Handler {
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,
-	)
+	).WithThemeStatic(filepath.Join("..", "..", "themes"), "default")
 	return srv.Routes()
 }
 

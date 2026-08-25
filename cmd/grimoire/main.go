@@ -89,7 +89,7 @@ func main() {
 		content.NewOptionService(repos.Options),
 		eng,
 		log,
-	).WithContentFeatures(comments, media, menus).WithAuth(sm, web.AuthConfig{
+	).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

@@ -3,6 +3,7 @@ package web
 import (
 	"log/slog"
 	"net/http"
+	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
 
@@ -22,6 +23,8 @@ type Server struct {
 	menus    *content.NavMenuService
 	render   *render.Engine
 	log      *slog.Logger
+
+	themeStaticDir string
 
 	auth    Sessions
 	authCfg AuthConfig
@@ -67,6 +70,15 @@ func (s *Server) WithAuth(sessions Sessions, cfg AuthConfig) *Server {
 	return s
 }
 
+// WithThemeStatic configures the server to serve the given theme's static/
+// directory (e.g. its vendored Spectrum CSS) at /theme/static/*. themesDir is
+// the root themes directory (as passed to render.Load), theme is the active
+// theme name.
+func (s *Server) WithThemeStatic(themesDir, theme string) *Server {
+	s.themeStaticDir = filepath.Join(themesDir, theme, "static")
+	return s
+}
+
 // WithApplicationPasswords enables HTTP Basic Application Password auth on
 // the /wp-json REST surface (Req 8), wiring the shared
 // *auth.ApplicationPasswords verifier into the server. requireTLS gates the
@@ -101,6 +113,9 @@ func (s *Server) Routes() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	registerStatic(r)
+	if s.themeStaticDir != "" {
+		registerThemeStatic(r, s.themeStaticDir)
+	}
 	if s.auth != nil {
 		r.Method(http.MethodGet, "/login", s.handler(s.loginForm))
 		r.Method(http.MethodPost, "/login", s.handler(s.loginSubmit))

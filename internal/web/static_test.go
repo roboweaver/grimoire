@@ -31,6 +31,17 @@ func TestIconAssetServed(t *testing.T) {
 	}
 }
 
+func TestThemeStaticServesVendoredCSS(t *testing.T) {
+	h := newTestServer(t)
+	rec := get(t, h, "/theme/static/css/spectrum.css")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /theme/static/css/spectrum.css: got %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "text/css") {
+		t.Fatalf("Content-Type = %q, want text/css", ct)
+	}
+}
+
 func TestHomeHasFaviconLinks(t *testing.T) {
 	h := newTestServer(t)
 	rec := get(t, h, "/")

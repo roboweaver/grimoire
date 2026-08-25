@@ -34,8 +34,8 @@ has 4, Req 6 has 7, Req 7 has 4, Req 8 has 6.
 - [x] 1.8 Write failing contract tests for `PostRepo.DueScheduled`: given posts with a mix of `status` values and `post_date`s, returns only those with `status='future'` and `post_date <= asOf`; returns none when `asOf` is earlier than every `future` post's `post_date`.
 - [x] 1.9 Implement `CreateRevision`, `ListRevisions`, `RevisionByID`, `AutosaveFor`, `UpdateAutosave`, `PruneRevisions`, `DeleteRevisionsOf`, and `DueScheduled` in `internal/storage/wprepo/writers.go` (or a new sibling file in the same package), reusing the existing rebind/parameterized-query pattern; add `domain.RevisionMeta`, `domain.RevisionWriter`, and `domain.ScheduledPostFinder` to `internal/domain/entities.go`/`repository.go` per `design.md`; add compile-time `var _ domain.RevisionWriter = (*PostRepo)(nil)` and `var _ domain.ScheduledPostFinder = (*PostRepo)(nil)`; wire into `storage.Set`/`storage.New`.
   - _Acceptance:_ 1.3–1.8's full contract suite passes on SQLite unconditionally and MySQL/Postgres when DSNs are set, identical results across vendors. _(Req 1.1–1.7, 3.1–3.2, 5.2–5.4)_
-- [ ] 1.10 Write failing tests confirming a post `Delete` call cascades to `DeleteRevisionsOf` (Req 1.6): deleting a post with existing revisions and an autosave row leaves zero rows behind for that `parentID`.
-- [ ] 1.11 Wire the cascade from 1.10 into `PostWriteService.Delete` (`internal/content/writeservices.go`).
+- [x] 1.10 Write failing tests confirming a post `Delete` call cascades to `DeleteRevisionsOf` (Req 1.6): deleting a post with existing revisions and an autosave row leaves zero rows behind for that `parentID`.
+- [x] 1.11 Wire the cascade from 1.10 into `PostWriteService.Delete` (`internal/content/writeservices.go`).
   - _Acceptance:_ 1.10's test passes. _(Req 1.6)_
 
 ## Phase 2 — Content services: revisions, autosave, scheduler (`internal/content`, `internal/scheduler`)

@@ -126,6 +126,14 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 // by ID and evaluates the delete capability against THAT record's Type, Status,
 // and Author, so a forged struct cannot delete another user's post. A missing
 // record returns the generic ErrForbidden (existence is not leaked).
+//
+// When the writer also implements domain.RevisionWriter (true for every
+// production PostWriter, backed by wprepo.PostRepo, which implements both
+// ports on the same concrete type) the delete cascades into
+// DeleteRevisionsOf so no revision or autosave row is left pointing at a
+// deleted parent (Req 1.6). A type assertion is used here, rather than a
+// second constructor parameter, so callers/tests that only need PostWriter
+// (no revisions) are unaffected.
 func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p domain.Post) error {
 	cur, err := s.w.ByID(ctx, p.ID)
 	if err != nil {
@@ -140,7 +148,13 @@ func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p d
 	if !auth.CanDeletePost(actor, cur.Type, cur.Status, cur.Author) {
 		return ErrForbidden
 	}
-	return s.w.Delete(ctx, cur.ID)
+	if err := s.w.Delete(ctx, cur.ID); err != nil {
+		return err
+	}
+	if rw, ok := s.w.(domain.RevisionWriter); ok {
+		return rw.DeleteRevisionsOf(ctx, cur.ID)
+	}
+	return nil
 }
 
 // TermWriteService performs capability-checked create/update/delete of taxonomy

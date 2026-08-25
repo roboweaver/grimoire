@@ -49,6 +49,44 @@ func (f *fakePostWriter) Delete(_ context.Context, id int64) error {
 	return nil
 }
 
+// fakeRevisionWriter is a minimal domain.RevisionWriter fake. Only
+// DeleteRevisionsOf is exercised so far (task 1.10); the other methods exist
+// solely to satisfy the interface.
+type fakeRevisionWriter struct {
+	deletedRevisionsOf   int64
+	deleteRevisionsOfErr error
+}
+
+func (f *fakeRevisionWriter) CreateRevision(_ context.Context, _, _ int64, _ domain.Post, _ bool) (int64, error) {
+	return 0, nil
+}
+func (f *fakeRevisionWriter) ListRevisions(_ context.Context, _ int64) ([]domain.RevisionMeta, error) {
+	return nil, nil
+}
+func (f *fakeRevisionWriter) RevisionByID(_ context.Context, _ int64) (domain.Post, error) {
+	return domain.Post{}, nil
+}
+func (f *fakeRevisionWriter) AutosaveFor(_ context.Context, _, _ int64) (domain.Post, bool, error) {
+	return domain.Post{}, false, nil
+}
+func (f *fakeRevisionWriter) UpdateAutosave(_ context.Context, _ int64, _ domain.Post) error {
+	return nil
+}
+func (f *fakeRevisionWriter) PruneRevisions(_ context.Context, _ int64, _ int) error { return nil }
+func (f *fakeRevisionWriter) DeleteRevisionsOf(_ context.Context, parentID int64) error {
+	f.deletedRevisionsOf = parentID
+	return f.deleteRevisionsOfErr
+}
+
+// postWriterWithRevisions combines a fakePostWriter and a fakeRevisionWriter
+// into a single value satisfying both domain.PostWriter and
+// domain.RevisionWriter, mirroring how wprepo.PostRepo backs both ports with
+// one concrete type in production.
+type postWriterWithRevisions struct {
+	*fakePostWriter
+	*fakeRevisionWriter
+}
+
 type fakeTermWriter struct {
 	created *domain.Term
 	updated *domain.Term
@@ -224,6 +262,32 @@ func TestPostWriteUpdateAndDeleteEnforceOwnership(t *testing.T) {
 	}
 	if w.deleted != 3 {
 		t.Errorf("deleted id = %d, want 3", w.deleted)
+	}
+}
+
+// TestPostWriteDeleteCascadesToDeleteRevisionsOf is task 1.10's failing test
+// (Req 1.6): deleting a post whose writer also implements domain.RevisionWriter
+// must cascade into DeleteRevisionsOf for that post's ID, so no revision or
+// autosave row is left behind pointing at a deleted parent. The underlying
+// DeleteRevisionsOf query behavior itself (removing every revision, including
+// the autosave) is already covered by the storagetest contract suite (task
+// 1.7); this test only asserts PostWriteService.Delete triggers the cascade.
+func TestPostWriteDeleteCascadesToDeleteRevisionsOf(t *testing.T) {
+	w := &fakePostWriter{store: map[int64]domain.Post{
+		9: {ID: 9, Author: 5, Type: "post", Status: "publish"},
+	}}
+	rw := &fakeRevisionWriter{}
+	combined := postWriterWithRevisions{fakePostWriter: w, fakeRevisionWriter: rw}
+	svc := NewPostWriteService(combined)
+
+	if err := svc.Delete(context.Background(), actor(auth.RoleEditor, 5), domain.Post{ID: 9}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if w.deleted != 9 {
+		t.Errorf("post deleted id = %d, want 9", w.deleted)
+	}
+	if rw.deletedRevisionsOf != 9 {
+		t.Errorf("DeleteRevisionsOf called with parentID = %d, want 9", rw.deletedRevisionsOf)
 	}
 }
 

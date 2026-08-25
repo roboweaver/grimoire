@@ -19,11 +19,11 @@ format**. Each milestone is a self-contained spec directory with three files:
 
 | # | Spec | Status | Summary |
 |---|------|--------|---------|
-| 01 | [`01-content-core-read-rendering`](./01-content-core-read-rendering) | 📝 Specified | Content core + switchable DB (MySQL/Postgres/SQLite) + WordPress-compatible schema + public read rendering + default theme |
-| 02 | [`02-users-auth-roles`](./02-users-auth-roles) | 🚧 In progress | Users + WordPress-compatible auth (phpass→bcrypt), server-side sessions, 5 default roles/capabilities, CSRF, internal content write API, minimal login UI |
-| 02.1 | [`02.1-wp-hash-real-db`](./02.1-wp-hash-real-db) | 🚧 In progress | WordPress 6.8 `$wp$` (HMAC-SHA384→bcrypt) password verification + capabilities scalar-truthiness lock-in + env-gated real-WordPress-DB validation |
-| 02.2 | [`02.2-excerpt-rendering`](./02.2-excerpt-rendering) | 🚧 In progress | WordPress-faithful excerpts on list views — manual excerpts render as HTML (not escaped), empty excerpts auto-generate from content (`wp_trim_excerpt`: strip Gutenberg block comments/shortcodes/tags, ~55-word trim + `…`), extend trusted-content boundary to `Excerpt` |
-| 03 | [`03-spectrum-admin`](./03-spectrum-admin) | 📝 Specified | Adobe React Spectrum **read-only** admin SPA — served by the Go binary via `go:embed` (no Node at runtime), reusing M2 session auth + a read-only `/admin/api` (session, dashboard counts, posts/pages list + detail). CRUD (create/update/delete, editor, media) deferred to milestone 06. |
+| 01 | [`01-content-core-read-rendering`](./01-content-core-read-rendering) | ✅ Implemented | Content core + switchable DB (MySQL/Postgres/SQLite) + WordPress-compatible schema + public read rendering + default theme |
+| 02 | [`02-users-auth-roles`](./02-users-auth-roles) | ✅ Implemented | Users + WordPress-compatible auth (phpass→bcrypt), server-side sessions, 5 default roles/capabilities, CSRF, internal content write API, minimal login UI |
+| 02.1 | [`02.1-wp-hash-real-db`](./02.1-wp-hash-real-db) | ✅ Implemented | WordPress 6.8 `$wp$` (HMAC-SHA384→bcrypt) password verification + capabilities scalar-truthiness lock-in + env-gated real-WordPress-DB validation |
+| 02.2 | [`02.2-excerpt-rendering`](./02.2-excerpt-rendering) | ✅ Implemented | WordPress-faithful excerpts on list views — manual excerpts render as HTML (not escaped), empty excerpts auto-generate from content (`wp_trim_excerpt`: strip Gutenberg block comments/shortcodes/tags, ~55-word trim + `…`), extend trusted-content boundary to `Excerpt` |
+| 03 | [`03-spectrum-admin`](./03-spectrum-admin) | ✅ Implemented | Adobe React Spectrum **read-only** admin SPA — served by the Go binary via `go:embed` (no Node at runtime), reusing M2 session auth + a read-only `/admin/api` (session, dashboard counts, posts/pages list + detail). CRUD (create/update/delete, editor, media) deferred to milestone 06. |
 | 04 | [`04-comments-media-menus`](./04-comments-media-menus) | ✅ Implemented | Comments (public list + moderation-queue submission + admin approve/spam/trash), media library (attachment listing, traversal-safe `/wp-content/uploads/` serving, multipart upload, attach-to-post), and **read-only** navigation menus (`nav_menu` taxonomy read + public theme render + admin tree, incl. theme-location resolution). grimoire's first write paths: activates the M3-designed `X-CSRF-Token` contract for authenticated admin writes and adds a double-submit token + pluggable spam filter for anonymous comment submits. Overlay-safe (only an additive greenfield `{prefix}comments`/`commentmeta` migration plus `{prefix}posts` column additions the M1 greenfield schema omits; media/menus reuse existing tables). Menu **editing** deferred. |
 | 05 | [`05-extensions-rest-api`](./05-extensions-rest-api) | ✅ Implemented | WordPress REST API parity (`/wp-json/wp/v2/*` read for posts/pages/comments/media/users, WP-shaped `_links`/`_embedded`/pagination headers, `$generic$`/`wp_fast_hash` Application Passwords auth over TLS/loopback) plus one write endpoint (`POST .../comments`, reusing M4's `CommentService.Create`) — all other REST writes deferred to M6 (`501`, not `404`/`405`). A native Go extension mechanism (`pkg/extensions`: compiled action/filter hook registry, no PHP, no dynamic loading, externally importable) wired at three points: post-render, REST request/response, comment-submit. One additive greenfield-only migration (`0004_rest_post_fields`; Postgres dialect is a safe no-op if re-run, MySQL/SQLite dialects error if run against an already-overlaid DB and so are simply never run there) plus additive post→term-IDs/postmeta read ports and `UserRepository`/`AdminPostFilter` extensions — no other schema change. |
 | 06 | [`06-admin-crud-editor`](./06-admin-crud-editor) | ✅ Implemented | Admin write path for posts/pages: create/update/delete via `/admin/api` (reusing M2's `PostWriteService`, M4's `X-CSRF-Token` contract unchanged) **and** REST parity at `/wp-json/wp/v2/posts`/`/pages`, closing the `501`s M5 deferred here. Adds inline category/tag management (new `TermWriter.Update` + `PostTermsWriter` write port), a full draft/pending/publish/private/future status lifecycle (scheduled-publish execution documented as a known, deferred limitation — no cron exists), lightweight optimistic concurrency (`modified`-timestamp check, admin API required / REST `If-Unmodified-Since` optional, matching WordPress's own lack of native REST concurrency), and a TipTap-based rich-text editor embedded in Spectrum-styled toolbar chrome (HTML-native, matching `post_content`). No new migration. Revisions, autosave, scheduled-publish execution, and REST categories/tags/media/user writes deferred to M7+. |
@@ -40,15 +40,19 @@ format**. Each milestone is a self-contained spec directory with three files:
   suite runs against every vendor.
 - **Each milestone gets its own spec → plan → implementation cycle.**
 
+## Resolved decisions
+
+- **License.** grimoire is licensed under Apache-2.0. That choice supports broad
+  commercial and open-source adoption, includes an explicit patent grant,
+  avoids incorporating GPLv2-only WordPress PHP source, and keeps the project
+  focused on schema/API interoperability rather than source-code reuse. This is
+  not legal advice.
+
 ## Open decisions
 
 These are tracked here and must be resolved before or during the relevant
 milestone:
 
-- **License.** grimoire replicates WordPress's schema/behavior, not its GPL PHP
-  source, so the project may choose its own license (candidates: Apache-2.0, or a
-  GPLv2-compatible license). _Owner: project lead. Target: before first public
-  release._
 - **Query builder dependency.** M1 design selects [Bun](https://bun.uptrace.dev)
   for multi-dialect SQL over `database/sql`. Revisit if a vendor Bun does not
   support is required.

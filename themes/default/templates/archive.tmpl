@@ -1,12 +1,22 @@
 {{define "title"}}Archive · {{.SiteTitle}}{{end}}
 {{define "content"}}
-<h1>Archive</h1>
+<div class="theme-page-head">
+<h1 class="spectrum-Heading spectrum-Heading--sizeXL">Archive</h1>
+</div>
+<div class="theme-card-grid">
 {{range .Posts}}
-  <article>
-    <h2><a href="/{{.Slug}}">{{.Title}}</a></h2>
-    <div>{{.Excerpt}}</div>
-  </article>
+<article class="spectrum-Card theme-card">
+<div class="spectrum-Card-body">
+<div class="spectrum-Card-header"><h2 class="spectrum-Card-title"><a class="spectrum-Link spectrum-Link--quiet" href="/{{.Slug}}">{{.Title}}</a></h2></div>
+<div class="spectrum-Card-content">
+<time class="spectrum-Body spectrum-Body--sizeS theme-card-date" datetime="{{.Date.Format "2006-01-02"}}">{{.Date.Format "Jan 2, 2006"}}</time>
+<div class="spectrum-Body spectrum-Body--sizeM theme-card-excerpt">{{.Excerpt}}</div>
+</div>
+</div>
+<div class="spectrum-Card-footer"><a class="spectrum-Button spectrum-Button--secondary spectrum-Button--sizeM" href="/{{.Slug}}"><span class="spectrum-Button-label">Read more</span></a></div>
+</article>
 {{else}}
-  <p>Nothing here yet.</p>
+<p class="spectrum-Body spectrum-Body--sizeM">Nothing here yet.</p>
 {{end}}
+</div>
 {{end}}

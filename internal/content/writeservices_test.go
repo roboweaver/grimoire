@@ -49,30 +49,81 @@ func (f *fakePostWriter) Delete(_ context.Context, id int64) error {
 	return nil
 }
 
-// fakeRevisionWriter is a minimal domain.RevisionWriter fake. Only
-// DeleteRevisionsOf is exercised so far (task 1.10); the other methods exist
-// solely to satisfy the interface.
+// createRevisionCall records one CreateRevision invocation for assertions in
+// RevisionWriteService/AutosaveService tests.
+type createRevisionCall struct {
+	parentID, authorID int64
+	snapshot           domain.Post
+	autosave           bool
+}
+
+// pruneRevisionsCall records one PruneRevisions invocation.
+type pruneRevisionsCall struct {
+	parentID int64
+	keep     int
+}
+
+// fakeRevisionWriter is a full domain.RevisionWriter fake used across the
+// PostWriteService.Delete cascade test (task 1.10) and the
+// RevisionWriteService/AutosaveService tests (Phase 2). Every method records
+// its call so tests can assert both "was called with X" and "was never
+// called".
 type fakeRevisionWriter struct {
+	createRevisionCalls []createRevisionCall
+	nextRevisionID      int64
+	createRevisionErr   error
+
+	listRevisions    []domain.RevisionMeta
+	listRevisionsErr error
+
+	revisionByID    domain.Post
+	revisionByIDErr error
+
+	autosavePost      domain.Post
+	autosaveFound     bool
+	autosaveForErr    error
+	lastAutosaveForID struct{ parentID, authorID int64 }
+
+	updateAutosaveErr  error
+	lastUpdateAutosave struct {
+		revisionID int64
+		snapshot   domain.Post
+	}
+
+	pruneRevisionsCalls []pruneRevisionsCall
+	pruneRevisionsErr   error
+
 	deletedRevisionsOf   int64
 	deleteRevisionsOfErr error
 }
 
-func (f *fakeRevisionWriter) CreateRevision(_ context.Context, _, _ int64, _ domain.Post, _ bool) (int64, error) {
-	return 0, nil
+func (f *fakeRevisionWriter) CreateRevision(_ context.Context, parentID, authorID int64, snapshot domain.Post, autosave bool) (int64, error) {
+	f.createRevisionCalls = append(f.createRevisionCalls, createRevisionCall{parentID, authorID, snapshot, autosave})
+	if f.createRevisionErr != nil {
+		return 0, f.createRevisionErr
+	}
+	return f.nextRevisionID, nil
 }
 func (f *fakeRevisionWriter) ListRevisions(_ context.Context, _ int64) ([]domain.RevisionMeta, error) {
-	return nil, nil
+	return f.listRevisions, f.listRevisionsErr
 }
 func (f *fakeRevisionWriter) RevisionByID(_ context.Context, _ int64) (domain.Post, error) {
-	return domain.Post{}, nil
+	return f.revisionByID, f.revisionByIDErr
 }
-func (f *fakeRevisionWriter) AutosaveFor(_ context.Context, _, _ int64) (domain.Post, bool, error) {
-	return domain.Post{}, false, nil
+func (f *fakeRevisionWriter) AutosaveFor(_ context.Context, parentID, authorID int64) (domain.Post, bool, error) {
+	f.lastAutosaveForID.parentID = parentID
+	f.lastAutosaveForID.authorID = authorID
+	return f.autosavePost, f.autosaveFound, f.autosaveForErr
 }
-func (f *fakeRevisionWriter) UpdateAutosave(_ context.Context, _ int64, _ domain.Post) error {
-	return nil
+func (f *fakeRevisionWriter) UpdateAutosave(_ context.Context, revisionID int64, snapshot domain.Post) error {
+	f.lastUpdateAutosave.revisionID = revisionID
+	f.lastUpdateAutosave.snapshot = snapshot
+	return f.updateAutosaveErr
 }
-func (f *fakeRevisionWriter) PruneRevisions(_ context.Context, _ int64, _ int) error { return nil }
+func (f *fakeRevisionWriter) PruneRevisions(_ context.Context, parentID int64, keep int) error {
+	f.pruneRevisionsCalls = append(f.pruneRevisionsCalls, pruneRevisionsCall{parentID, keep})
+	return f.pruneRevisionsErr
+}
 func (f *fakeRevisionWriter) DeleteRevisionsOf(_ context.Context, parentID int64) error {
 	f.deletedRevisionsOf = parentID
 	return f.deleteRevisionsOfErr

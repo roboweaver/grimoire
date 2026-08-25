@@ -17,12 +17,13 @@ var SupportedVendors = []string{"mysql", "postgres", "sqlite"}
 
 // Config is the top-level grimoire configuration.
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Theme    string         `yaml:"theme"`
-	Database DatabaseConfig `yaml:"database"`
-	Session  SessionConfig  `yaml:"session"`
-	Media    MediaConfig    `yaml:"media"`
-	REST     RESTConfig     `yaml:"rest"`
+	Server    ServerConfig    `yaml:"server"`
+	Theme     string          `yaml:"theme"`
+	Database  DatabaseConfig  `yaml:"database"`
+	Session   SessionConfig   `yaml:"session"`
+	Media     MediaConfig     `yaml:"media"`
+	REST      RESTConfig      `yaml:"rest"`
+	Scheduler SchedulerConfig `yaml:"scheduler"`
 }
 
 type MediaConfig struct {
@@ -93,6 +94,20 @@ type DatabaseConfig struct {
 	TablePrefix string `yaml:"table_prefix"`
 }
 
+// SchedulerConfig configures the publish scheduler (Requirement 4) that
+// polls for "future" posts whose post_date has passed and flips them to
+// "publish".
+type SchedulerConfig struct {
+	// IntervalSeconds is how often the scheduler polls for due posts
+	// (default 60, Req 4.2).
+	IntervalSeconds int `yaml:"interval_seconds"`
+}
+
+// Interval returns the scheduler poll interval as a time.Duration.
+func (s SchedulerConfig) Interval() time.Duration {
+	return time.Duration(s.IntervalSeconds) * time.Second
+}
+
 // Load reads a YAML config file, applies environment overrides and defaults,
 // then validates the result.
 func Load(path string) (Config, error) {
@@ -160,6 +175,11 @@ func (c *Config) applyEnv() {
 			c.REST.PerPageMax = n
 		}
 	}
+	if v, ok := os.LookupEnv("GRIMOIRE_SCHEDULER_INTERVAL_SECONDS"); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Scheduler.IntervalSeconds = n
+		}
+	}
 }
 
 func (c *Config) applyDefaults() {
@@ -189,6 +209,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.REST.PerPageMax <= 0 {
 		c.REST.PerPageMax = 100
+	}
+	if c.Scheduler.IntervalSeconds <= 0 {
+		c.Scheduler.IntervalSeconds = 60
 	}
 }
 

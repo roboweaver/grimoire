@@ -70,8 +70,8 @@ has 4, Req 6 has 7, Req 7 has 4, Req 8 has 6.
   - _Acceptance:_ 4.1–4.4's HTTP suite passes; `GET /wp-json/` and `GET /wp-json/wp/v2/` list the new routes. _(Req 6.1–6.7, 7.2)_
 
 ## Phase 5 — Scheduler wiring (`cmd/grimoire/main.go`)
-- [ ] 5.1 Write a failing integration test (or extend an existing `main`-adjacent test harness, if one exists) asserting that starting the server with a short scheduler interval and a `future` post whose `post_date` is already in the past results in that post becoming `publish` within one interval, without any HTTP request being made against it — and that cancelling the shared shutdown context stops the scheduler goroutine (no goroutine leak, verified via the test's cleanup).
-- [ ] 5.2 Add a `Scheduler.Interval` config field (`internal/config`, matching the existing config-struct/env-var convention) defaulting to 60 seconds (Req 4.2); construct and start `scheduler.New(...)` in `main.go` alongside the existing HTTP server goroutine, sharing the same `signal.NotifyContext`-derived context (Req 4.3), per `design.md`.
+- [x] 5.1 Write a failing integration test (or extend an existing `main`-adjacent test harness, if one exists) asserting that starting the server with a short scheduler interval and a `future` post whose `post_date` is already in the past results in that post becoming `publish` within one interval, without any HTTP request being made against it — and that cancelling the shared shutdown context stops the scheduler goroutine (no goroutine leak, verified via the test's cleanup).
+- [x] 5.2 Add a `Scheduler.Interval` config field (`internal/config`, matching the existing config-struct/env-var convention) defaulting to 60 seconds (Req 4.2); construct and start `scheduler.New(...)` in `main.go` alongside the existing HTTP server goroutine, sharing the same `signal.NotifyContext`-derived context (Req 4.3), per `design.md`.
   - _Acceptance:_ 5.1's test passes. _(Req 4.1–4.3, 4.6, 4.8)_
 
 ## Phase 6 — Spectrum admin UI: revisions, restore, and autosave (`web/admin`)

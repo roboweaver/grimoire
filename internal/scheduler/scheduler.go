@@ -41,10 +41,16 @@ func New(finder domain.ScheduledPostFinder, posts postUpdater, interval time.Dur
 // never returned, never accepted as a parameter from outside the package.
 // It cannot be obtained via any HTTP route, session, or Application
 // Password (Requirement 4.5).
+// edit_published_posts is required alongside publish_posts and
+// edit_others_posts: PostWriteService.Update's auth.CanEditPost check
+// evaluates the capability for the post's TARGET status when the status is
+// changing, and every real WordPress role that carries publish_posts also
+// carries edit_published_posts (see roles.go) -- so the scheduler needs it
+// too to actually flip a "future" post to "publish" through that path.
 var systemPrincipal = auth.Principal{
 	UserID: 0,
 	Login:  "grimoire-scheduler",
-	Caps:   map[string]bool{"publish_posts": true, "edit_others_posts": true, "edit_posts": true},
+	Caps:   map[string]bool{"publish_posts": true, "edit_others_posts": true, "edit_posts": true, "edit_published_posts": true},
 }
 
 // Run blocks, ticking every s.interval, until ctx is cancelled. main.go

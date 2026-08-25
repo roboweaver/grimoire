@@ -20,6 +20,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/internal/scheduler"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/web"
 	// Extension packages register grimoire hooks (see pkg/extensions:
@@ -128,6 +129,14 @@ func main() {
 			stop()
 		}
 	}()
+
+	// sched polls for "future" posts whose post_date has passed and
+	// publishes them (Requirement 4). It shares ctx with the HTTP server
+	// goroutine above, so cancelling ctx (via signal or the server error
+	// path) stops both the same way -- no separate scheduler lifecycle to
+	// reason about (Req 4.3).
+	sched := scheduler.New(repos.Scheduled, postWrite, cfg.Scheduler.Interval(), log)
+	go sched.Run(ctx)
 
 	<-ctx.Done()
 	log.Info("shutting down")

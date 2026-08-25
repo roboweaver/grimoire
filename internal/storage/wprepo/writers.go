@@ -52,12 +52,12 @@ func (r *PostRepo) Create(ctx context.Context, p domain.Post) (int64, error) {
 	cols := []string{
 		"post_author", "post_date", "post_content", "post_title",
 		"post_excerpt", "post_status", "post_name", "post_type", "comment_status",
-		"post_date_gmt", "post_modified", "post_modified_gmt",
+		"post_date_gmt", "post_modified", "post_modified_gmt", "post_parent",
 	}
 	args := []any{
 		p.Author, formatTS(p.Date), p.Content, p.Title,
 		p.Excerpt, p.Status, p.Slug, p.Type, p.CommentStatus,
-		formatTS(dateGMT), formatTS(now), formatTS(now),
+		formatTS(dateGMT), formatTS(now), formatTS(now), p.ParentID,
 	}
 	return insertReturningID(ctx, r.db, vendorOf(r.db), r.prefix+"posts", cols, `"ID"`, args...)
 }
@@ -93,6 +93,7 @@ func (r *PostRepo) Update(ctx context.Context, p domain.Post) error {
 		Set("comment_status = ?", p.CommentStatus).
 		Set("post_modified = ?", formatTS(now)).
 		Set("post_modified_gmt = ?", formatTS(now)).
+		Set("post_parent = ?", p.ParentID).
 		Where("? = ?", bun.Ident("ID"), p.ID).
 		Exec(ctx)
 	if err != nil {

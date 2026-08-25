@@ -33,12 +33,50 @@ func (e *ConflictError) Error() string {
 // pages. The acting Principal is passed per call; the service enforces the
 // WordPress-style ownership and status capabilities before touching the writer.
 type PostWriteService struct {
-	w domain.PostWriter
+	w         domain.PostWriter
+	revisions revisionSnapshotter
 }
 
-// NewPostWriteService constructs a PostWriteService over a PostWriter.
-func NewPostWriteService(w domain.PostWriter) *PostWriteService {
-	return &PostWriteService{w: w}
+// revisionSnapshotter is the narrow capability PostWriteService.Update needs
+// from a *RevisionWriteService: snapshot the pre-edit post as a new revision
+// (Req 1.1), enforcing whatever retention policy that service was configured
+// with. It is intentionally much narrower than domain.RevisionWriter so
+// PostWriteService depends only on the one call it actually makes.
+type revisionSnapshotter interface {
+	Snapshot(ctx context.Context, cur domain.Post, actorID int64) error
+}
+
+// noopRevisionSnapshotter is the default revisionSnapshotter used when a
+// PostWriteService is constructed without WithRevisionSnapshotter (every
+// M6-era call site that predates M7 and has no interest in revisions). Its
+// Snapshot is a deliberate no-op so PostWriteService.Update can call
+// s.revisions.Snapshot unconditionally, matching design.md's pseudocode,
+// without a nil check and without altering M6 behavior for those callers.
+type noopRevisionSnapshotter struct{}
+
+func (noopRevisionSnapshotter) Snapshot(context.Context, domain.Post, int64) error { return nil }
+
+// PostWriteOption configures optional PostWriteService dependencies that most
+// callers don't need, keeping NewPostWriteService's required single-argument
+// signature backward compatible with every pre-M7 call site.
+type PostWriteOption func(*PostWriteService)
+
+// WithRevisionSnapshotter wires a revision-snapshotting dependency (in
+// production, a *RevisionWriteService) into PostWriteService.Update so every
+// save creates a revision per the configured retention policy (Req 1.1, 5.1).
+func WithRevisionSnapshotter(rs revisionSnapshotter) PostWriteOption {
+	return func(s *PostWriteService) { s.revisions = rs }
+}
+
+// NewPostWriteService constructs a PostWriteService over a PostWriter. By
+// default Update's revision-snapshot hook is a no-op; pass
+// WithRevisionSnapshotter to wire in real revisioning (Req 1.1).
+func NewPostWriteService(w domain.PostWriter, opts ...PostWriteOption) *PostWriteService {
+	s := &PostWriteService{w: w, revisions: noopRevisionSnapshotter{}}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Create authorizes and inserts a new post. When p.Author is zero it defaults to
@@ -98,6 +136,13 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	if !expectedModified.IsZero() && !cur.Modified.Equal(expectedModified) {
 		return &ConflictError{CurrentModified: cur.Modified}
 	}
+	// Snapshot and post update use narrow, independently implemented ports, so
+	// they cannot share a transaction here. Snapshotting first favors retaining
+	// the pre-edit state; if the later update fails, retention may temporarily
+	// include that duplicate snapshot, but no historical state is lost.
+	if err := s.revisions.Snapshot(ctx, cur, actor.UserID); err != nil { // NEW (Req 1.1)
+		return err // snapshots cur BEFORE any field below mutates it
+	}
 	cur.Title = p.Title
 	cur.Content = p.Content
 	cur.Excerpt = p.Excerpt
@@ -126,6 +171,13 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 // by ID and evaluates the delete capability against THAT record's Type, Status,
 // and Author, so a forged struct cannot delete another user's post. A missing
 // record returns the generic ErrForbidden (existence is not leaked).
+//
+// When the writer also implements domain.RevisionWriter (true for every
+// production PostWriter), revision cleanup runs before deleting the parent.
+// The narrow storage ports do not expose a shared transaction, so this order
+// ensures a cleanup failure leaves the parent intact rather than orphaning its
+// revision/autosave rows (Req 1.6). A type assertion keeps pre-M7 callers that
+// only provide PostWriter unaffected.
 func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p domain.Post) error {
 	cur, err := s.w.ByID(ctx, p.ID)
 	if err != nil {
@@ -139,6 +191,11 @@ func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p d
 	}
 	if !auth.CanDeletePost(actor, cur.Type, cur.Status, cur.Author) {
 		return ErrForbidden
+	}
+	if rw, ok := s.w.(domain.RevisionWriter); ok {
+		if err := rw.DeleteRevisionsOf(ctx, cur.ID); err != nil {
+			return err
+		}
 	}
 	return s.w.Delete(ctx, cur.ID)
 }

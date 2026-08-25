@@ -1,5 +1,7 @@
 import type {
   ApiErrorBody,
+  AutosaveDetail,
+  AutosaveWriteInput,
   CommentList,
   MediaItem,
   MediaList,
@@ -7,6 +9,8 @@ import type {
   PostDetail,
   PostList,
   PostWriteInput,
+  RevisionDetail,
+  RevisionSummary,
   SessionInfo,
   Stats,
   TermDetail,
@@ -233,4 +237,20 @@ export const api = {
     }),
   deleteTerm: (id: number | string) =>
     send<void>(`/terms/${id}`, { method: "DELETE" }),
+  listRevisions: (postId: number | string, signal?: AbortSignal) =>
+    get<RevisionSummary[]>(`/posts/${postId}/revisions`, signal),
+  getRevision: (postId: number | string, revisionId: number | string, signal?: AbortSignal) =>
+    get<RevisionDetail>(`/posts/${postId}/revisions/${revisionId}`, signal),
+  restoreRevision: (postId: number | string, revisionId: number | string) =>
+    send<PostDetail>(`/posts/${postId}/revisions/${revisionId}/restore`, {
+      method: "POST",
+    }),
+  getAutosave: (postId: number | string, signal?: AbortSignal) =>
+    get<AutosaveDetail>(`/posts/${postId}/autosave`, signal),
+  saveAutosave: (postId: number | string, body: AutosaveWriteInput) =>
+    send<AutosaveDetail>(`/posts/${postId}/autosave`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 };

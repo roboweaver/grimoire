@@ -20,6 +20,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/internal/scheduler"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/web"
 	// Extension packages register grimoire hooks (see pkg/extensions:
@@ -91,7 +92,15 @@ func main() {
 	// content.NewTermWriteService requires, without touching Phase 1's
 	// already-committed factory.go Set shape.
 	termRW := termReadWriter{TermWriter: repos.TermWriter, TermReader: repos.TermReader}
-	postWrite := content.NewPostWriteService(repos.PostWriter)
+	// revisionWrite snapshots a post's pre-edit state on every update/delete
+	// (Req 1, 5) and backs the admin revision-history routes (Req 2).
+	// maxPerPost is -1 (unlimited retention) since M7 adds no config knob
+	// for Requirement 5.1's "configurable maximum" -- operators wanting a
+	// cap can be served by a future config field without changing this
+	// wiring shape.
+	revisionWrite := content.NewRevisionWriteService(repos.Revisions, repos.PostWriter, -1)
+	autosave := content.NewAutosaveService(repos.Revisions, repos.PostWriter)
+	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite))
 	termWrite := content.NewTermWriteService(termRW)
 	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
 
@@ -110,6 +119,8 @@ func main() {
 		repos.UserCounter, repos.TermCounter, repos.Users,
 	)).WithAdminWrites(
 		postWrite, termWrite, postTermsWrite, repos.PostTerms,
+	).WithAdminRevisions(
+		revisionWrite, autosave,
 	).WithREST(
 		restMapper, repos.AdminPosts, repos.PostWriter, repos.Posts, repos.Media, repos.Users,
 		cfg.REST.PerPageMax,
@@ -128,6 +139,14 @@ func main() {
 			stop()
 		}
 	}()
+
+	// sched polls for "future" posts whose post_date has passed and
+	// publishes them (Requirement 4). It shares ctx with the HTTP server
+	// goroutine above, so cancelling ctx (via signal or the server error
+	// path) stops both the same way -- no separate scheduler lifecycle to
+	// reason about (Req 4.3).
+	sched := scheduler.New(repos.Scheduled, postWrite, cfg.Scheduler.Interval(), log)
+	go sched.Run(ctx)
 
 	<-ctx.Done()
 	log.Info("shutting down")

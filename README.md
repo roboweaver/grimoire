@@ -130,15 +130,16 @@ GRIMOIRE_TEST_POSTGRES_DSN='postgres://user:pass@127.0.0.1:5432/grimoire_test?ss
   go test ./internal/storage/storagetest/... -v
 ```
 
-## REST API & extensions (M5, write parity from M6)
+## REST API & extensions (M5, write parity from M6-M7)
 
 grimoire also exposes a WordPress-compatible REST API at `/wp-json/wp/v2/*`
 (read parity for posts/pages/comments/media/users, real WP response shape:
 `_links`, `?_embed`, `X-WP-Total*` pagination headers) plus write endpoints
-for comments (M4/M5) and posts/pages (M6: create/update/delete, Basic
+for comments (M4/M5), posts/pages (M6: create/update/delete, Basic
 auth over Application Passwords, optional `If-Unmodified-Since` optimistic
-concurrency); all other post-related writes (categories/tags, media,
-users) still return `501` (deferred to a later milestone). Authentication
+concurrency), and categories/tags (M7: create/update/delete, with delete
+detaching the term from any posts rather than deleting them); media and
+user writes still return `501` (deferred to a later milestone). Authentication
 for non-anonymous REST requests is via WordPress **Application Passwords**
 (HTTP Basic, `wp_fast_hash`/`$generic$`, phpass/`$wp$`/bcrypt fallback);
 self-service management lives at `/wp-json/wp/v2/users/me/application-passwords`.
@@ -160,6 +161,11 @@ full specification.
 - **M6:** admin CRUD editor — full post/page create/update/delete (rich-text
   editor, inline category/tag management, status lifecycle, optimistic
   concurrency) wired through both `/admin/api` and REST parity.
+- **M7:** revision history (auto-snapshotted on every update, browsable and
+  restorable from the editor), per-author autosave of in-progress edits,
+  a background scheduler that publishes `future`-status posts once their
+  scheduled date passes, and REST write parity for categories/tags
+  (create/update/delete via Application Passwords).
 
 ## Status
 

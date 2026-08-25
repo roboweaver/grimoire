@@ -21,6 +21,7 @@ var postColumns = []string{
 	"ID", "post_author", "post_date", "post_content",
 	"post_title", "post_excerpt", "post_status", "post_name", "post_type", "comment_status",
 	"post_date_gmt", "post_modified", "post_modified_gmt", "ping_status", "post_password", "guid",
+	"post_parent",
 }
 
 type postRow struct {
@@ -40,6 +41,7 @@ type postRow struct {
 	PingStatus    string    `bun:"ping_status"`
 	Password      string    `bun:"post_password"`
 	GUID          string    `bun:"guid"`
+	ParentID      int64     `bun:"post_parent"`
 }
 
 func (r postRow) toDomain() domain.Post {
@@ -60,6 +62,7 @@ func (r postRow) toDomain() domain.Post {
 		PingStatus:    r.PingStatus,
 		Password:      r.Password,
 		GUID:          r.GUID,
+		ParentID:      r.ParentID,
 	}
 }
 

@@ -92,6 +92,7 @@ func (s *Server) registerREST(r chi.Router) {
 			s.registerRESTUsers(nr)
 			s.registerRESTAppPasswords(nr)
 			s.registerRESTComments(nr)
+			s.registerRESTTerms(nr)
 		})
 	})
 }
@@ -163,6 +164,10 @@ func restRoutes() map[string]restRouteEntry {
 		"/wp/v2/users/me":                       {Methods: get},
 		"/wp/v2/users/me/application-passwords": {Methods: getPost},
 		"/wp/v2/users/me/application-passwords/(?P<uuid>[\\w-]+)": {Methods: []string{http.MethodDelete}},
+		"/wp/v2/categories":                {Methods: getPost},
+		"/wp/v2/categories/(?P<id>[\\d]+)": {Methods: []string{http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete}},
+		"/wp/v2/tags":                      {Methods: getPost},
+		"/wp/v2/tags/(?P<id>[\\d]+)":       {Methods: []string{http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete}},
 	}
 }
 

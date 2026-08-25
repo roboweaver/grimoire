@@ -206,14 +206,25 @@ describe("PostEditor", () => {
     await userEvent.click(screen.getByRole("button", { name: /status/i }));
     await userEvent.click(await screen.findByRole("option", { name: /^future$/i }));
 
-    const segments = screen.getAllByLabelText(/publish date/i);
+    // Scope to the individual editable date/time spinbutton segments
+    // (month/day/year/hour/minute/AM-PM), not the enclosing group (whose
+    // text concatenates all segments) or the time-zone segment. The
+    // time-zone segment is `role="textbox"`, not `role="spinbutton"`, and
+    // legitimately renders digit-containing ICU zone names with no short
+    // abbreviation (e.g. "GMT+5:30" for Asia/Kolkata, "GMT+14" for
+    // Pacific/Kiritimati) regardless of whether a date is loaded --
+    // asserting "no digits anywhere" would false-fail in those zones even
+    // on correct code.
+    const segments = screen
+      .getAllByLabelText(/publish date/i)
+      .filter((el) => el.getAttribute("role") === "spinbutton");
     expect(segments.length).toBeGreaterThan(0);
-    // Spectrum renders "Publish date" segments with placeholder text (e.g.
-    // "mm", "dd", "yyyy") when the value is null. Assert no digits at all
-    // are rendered -- a stronger, timezone-independent check than matching
-    // a specific stale year, since a null value never renders any digit
-    // regardless of which calendar date the preloaded fixture would have
-    // localized to.
+    // Spectrum renders these segments with placeholder text (e.g. "mm",
+    // "dd", "yyyy") when the value is null. Assert no digits at all are
+    // rendered in any date/time segment -- a stronger, timezone-independent
+    // check than matching a specific stale year, since a null value never
+    // renders any digit regardless of which calendar date the preloaded
+    // fixture would have localized to.
     for (const segment of segments) {
       expect(segment.textContent ?? "").not.toMatch(/\d/);
     }

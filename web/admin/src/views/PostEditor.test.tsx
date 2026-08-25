@@ -10,7 +10,18 @@ vi.mock("../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/client")>();
   return {
     ...actual,
-    api: { ...actual.api, post: vi.fn(), createPost: vi.fn(), updatePost: vi.fn(), deletePost: vi.fn() },
+    api: {
+      ...actual.api,
+      post: vi.fn(),
+      createPost: vi.fn(),
+      updatePost: vi.fn(),
+      deletePost: vi.fn(),
+      // Autosave has its own dedicated test suite (useAutosave.test.ts);
+      // stub it here so PostEditor's tests aren't making real (unmocked)
+      // network calls via the periodic/on-mount autosave checks.
+      getAutosave: vi.fn().mockRejectedValue(new (actual.ApiError)(404, "not_found", "none")),
+      saveAutosave: vi.fn(),
+    },
   };
 });
 

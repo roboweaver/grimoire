@@ -26,6 +26,7 @@ import { RevisionsPanel } from "../components/RevisionsPanel";
 import { RichTextEditor } from "../components/RichTextEditor";
 import { TermPicker } from "../components/TermPicker";
 import { ErrorState, Forbidden, Loading } from "../components/States";
+import { useAutosave } from "../useAutosave";
 
 const STATUS_OPTIONS = ["draft", "pending", "publish", "private", "future"] as const;
 
@@ -77,6 +78,19 @@ export function PostEditor({ type }: PostEditorProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<{ currentModified: string } | null>(null);
 
+  // savedSnapshot tracks the last loaded/saved title+content+excerpt, so
+  // isDirty (below) can tell whether the editor currently has unsaved
+  // changes without a separate "dirty" flag to keep in sync by hand.
+  const [savedSnapshot, setSavedSnapshot] = useState({ title: "", content: "", excerpt: "" });
+  const isDirty = title !== savedSnapshot.title || content !== savedSnapshot.content || excerpt !== savedSnapshot.excerpt;
+
+  const { notice: autosaveNotice, dismissNotice } = useAutosave({
+    postId: isNew ? undefined : id,
+    postModified: modified,
+    isDirty,
+    getSnapshot: () => ({ title, content, excerpt }),
+  });
+
   function applyLoaded(detail: PostDetail) {
     setTitle(detail.title);
     setSlug(detail.slug);
@@ -87,6 +101,7 @@ export function PostEditor({ type }: PostEditorProps) {
     setCategories(detail.terms?.category ?? []);
     setTags(detail.terms?.post_tag ?? []);
     setModified(detail.modified);
+    setSavedSnapshot({ title: detail.title, content: detail.content, excerpt: detail.excerpt });
     // Only preload scheduleDate when the post was ALREADY future-status: the
     // server's unchanged-date exemption (Req 5.2) only applies to a post
     // that stays future, so preloading a past date here for a draft/
@@ -196,6 +211,30 @@ export function PostEditor({ type }: PostEditorProps) {
         </View>
       ) : null}
 
+      {autosaveNotice ? (
+        <View backgroundColor="notice" borderRadius="medium" padding="size-150">
+          <Flex gap="size-150" alignItems="center" wrap>
+            <Text>
+              An autosaved draft from {formatDate(autosaveNotice.modified)} is newer than this {kind}.
+            </Text>
+            <Button
+              variant="secondary"
+              onPress={() => {
+                setTitle(autosaveNotice.title);
+                setContent(autosaveNotice.content);
+                setExcerpt(autosaveNotice.excerpt);
+                dismissNotice();
+              }}
+            >
+              Load autosave
+            </Button>
+            <ActionButton isQuiet onPress={dismissNotice} aria-label="Dismiss autosave notice">
+              Dismiss
+            </ActionButton>
+          </Flex>
+        </View>
+      ) : null}
+
       <TextField label="Title" value={title} onChange={setTitle} width="100%" />
       <TextField label="Slug" value={slug} onChange={setSlug} width="100%" />
       <TextArea label="Excerpt" value={excerpt} onChange={setExcerpt} width="100%" />
@@ -269,4 +308,16 @@ export function PostEditor({ type }: PostEditorProps) {
       />
     </Flex>
   );
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }

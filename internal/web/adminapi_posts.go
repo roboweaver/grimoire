@@ -120,17 +120,21 @@ func (s *Server) parsePostWrite(body postWriteRequest, current *domain.Post) (do
 		}
 	}
 	if status == "future" {
-		// Req 5.2 exception: an update that resubmits the post's own
-		// currently-stored date unchanged is allowed through even though
-		// that date is no longer in the future, so fixing an unrelated
-		// field on a stale future post never forces resolving its schedule.
-		// Omitting the date entirely (the zero value) never qualifies as
-		// "unchanged" here, so a future-status post always needs an
-		// explicit future date — whether on create or on a status
-		// transition into "future" — closing the gap where a future post
-		// could previously be created with no date at all and silently
-		// stored with today's date instead.
-		unchanged := current != nil && !current.Date.IsZero() && current.Date.Equal(date)
+		// Req 5.2 exception: an update that resubmits an ALREADY-future
+		// post's own currently-stored date unchanged is allowed through
+		// even though that date is no longer in the future, so fixing an
+		// unrelated field on a stale future post never forces resolving
+		// its schedule. This must NOT apply when the post is only now
+		// transitioning into "future" from another status — otherwise a
+		// draft/published post (whose date is necessarily in the past)
+		// could flip to "future" with no future date required, simply by
+		// resubmitting its stored date (which the admin API's
+		// full-replacement contract and the SPA's date-preloading
+		// DatePicker both do by default). Omitting the date entirely (the
+		// zero value) never qualifies as "unchanged" here, so a
+		// future-status post always needs an explicit future date —
+		// whether on create or on a status transition into "future".
+		unchanged := current != nil && current.Status == "future" && !current.Date.IsZero() && current.Date.Equal(date)
 		if !unchanged && !date.After(time.Now()) {
 			return domain.Post{}, badRequestError{msg: "future status requires a date in the future"}
 		}

@@ -86,7 +86,13 @@ export function PostEditor({ type }: PostEditorProps) {
     setCategories(detail.terms?.category ?? []);
     setTags(detail.terms?.post_tag ?? []);
     setModified(detail.modified);
-    setScheduleDate(detail.date ? parseAbsoluteToLocal(detail.date) : null);
+    // Only preload scheduleDate when the post was ALREADY future-status: the
+    // server's unchanged-date exemption (Req 5.2) only applies to a post
+    // that stays future, so preloading a past date here for a draft/
+    // published post would silently show a value that fails validation the
+    // moment the user flips status to "future" without touching the picker.
+    // Leaving it empty in that case forces an explicit (and valid) date pick.
+    setScheduleDate(detail.status === "future" && detail.date ? parseAbsoluteToLocal(detail.date) : null);
   }
 
   function load(signal?: AbortSignal) {

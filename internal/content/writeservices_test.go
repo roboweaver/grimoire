@@ -309,6 +309,66 @@ func TestPostWriteUpdateAppliesCommentStatus(t *testing.T) {
 	}
 }
 
+// TestPostWriteUpdateChangesDateGMT guards against a regression where
+// PostWriteService.Update applied a new Date to the loaded record without
+// also clearing/re-deriving DateGMT. PostRepo.Update only re-derives
+// post_date_gmt from Date when the incoming DateGMT is zero, but cur is
+// loaded via ByID here — which always returns a non-zero DateGMT for any
+// real stored post — so unless the service itself clears DateGMT when Date
+// actually changes, the repo's derivation branch is unreachable in
+// production and post_date_gmt would stay stuck at its original value
+// forever across date changes (PR #16 finding: date_gmt update-path dead
+// code). This exercises the real service call path end-to-end, not a
+// hand-zeroed repo call.
+func TestPostWriteUpdateChangesDateGMT(t *testing.T) {
+	const self = 5
+	oldDate := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	oldDateGMT := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	w := &fakePostWriter{store: map[int64]domain.Post{
+		7: {ID: 7, Author: self, Type: "post", Status: "draft", Date: oldDate, DateGMT: oldDateGMT},
+	}}
+	svc := NewPostWriteService(w)
+	newDate := time.Date(2023, 3, 15, 12, 0, 0, 0, time.UTC)
+	in := domain.Post{ID: 7, Author: self, Date: newDate}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in, time.Time{}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if w.updated == nil {
+		t.Fatal("writer.Update not called")
+	}
+	if !w.updated.Date.Equal(newDate) {
+		t.Errorf("Date = %v, want %v", w.updated.Date, newDate)
+	}
+	if !w.updated.DateGMT.IsZero() {
+		t.Errorf("DateGMT = %v, want zero (so PostRepo.Update re-derives it from the new Date)", w.updated.DateGMT)
+	}
+}
+
+// TestPostWriteUpdateUnchangedDatePreservesDateGMT is the flip side of
+// TestPostWriteUpdateChangesDateGMT: when the caller resubmits the same Date
+// (or omits it), DateGMT must be passed through unchanged rather than
+// cleared, so an update to an unrelated field never wipes a correct,
+// already-consistent post_date_gmt.
+func TestPostWriteUpdateUnchangedDatePreservesDateGMT(t *testing.T) {
+	const self = 5
+	date := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	dateGMT := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	w := &fakePostWriter{store: map[int64]domain.Post{
+		7: {ID: 7, Author: self, Type: "post", Status: "draft", Date: date, DateGMT: dateGMT, Title: "old"},
+	}}
+	svc := NewPostWriteService(w)
+	in := domain.Post{ID: 7, Author: self, Date: date, Title: "new title"}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in, time.Time{}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if w.updated == nil {
+		t.Fatal("writer.Update not called")
+	}
+	if !w.updated.DateGMT.Equal(dateGMT) {
+		t.Errorf("DateGMT = %v, want unchanged %v", w.updated.DateGMT, dateGMT)
+	}
+}
+
 // TestPostWriteUpdateNotFoundIsForbidden ensures a missing record does not leak
 // existence: the service returns the generic ErrForbidden and never writes.
 func TestPostWriteUpdateNotFoundIsForbidden(t *testing.T) {

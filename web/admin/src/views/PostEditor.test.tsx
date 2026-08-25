@@ -184,4 +184,29 @@ describe("PostEditor", () => {
     const [, body] = updatePost.mock.calls[0];
     expect(body.date).toBe("2099-06-01T12:00:00.000Z");
   });
+
+  // Guards the server-side fix where the future-date exemption for
+  // "unchanged date" now only applies to a post that was ALREADY
+  // future-status. If the SPA preloaded a draft/published post's
+  // (necessarily past) stored date into the picker unconditionally, flipping
+  // status to "future" without touching the picker would silently resubmit
+  // that past date and fail the now-tightened server validation. The picker
+  // must instead start empty in that case, forcing an explicit future pick.
+  it("does not preload a past stored date into the picker when a non-future post is switched to future", async () => {
+    apiPost.mockResolvedValue(detail({ id: 7, status: "draft", date: "2020-01-01T00:00:00Z" }));
+    renderEditor("/posts/7");
+
+    await screen.findByDisplayValue("Existing title");
+    await userEvent.click(screen.getByRole("button", { name: /status/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /^future$/i }));
+
+    const segments = screen.getAllByLabelText(/publish date/i);
+    expect(segments.length).toBeGreaterThan(0);
+    // Spectrum renders "Publish date" segments with placeholder text (e.g.
+    // "mm", "dd", "yyyy") when the value is null, rather than digits from a
+    // preloaded 2020-01-01 date.
+    for (const segment of segments) {
+      expect(segment.textContent ?? "").not.toMatch(/2020/);
+    }
+  });
 });

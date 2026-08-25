@@ -103,8 +103,15 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	cur.Excerpt = p.Excerpt
 	cur.Slug = p.Slug
 	cur.CommentStatus = p.CommentStatus
-	if !p.Date.IsZero() {
+	if !p.Date.IsZero() && !p.Date.Equal(cur.Date) {
 		cur.Date = p.Date
+		// PostRepo.Update only re-derives date_gmt from Date when DateGMT is
+		// zero — but cur was loaded via ByID, which always populates
+		// DateGMT from the stored row, so that derivation branch would
+		// never fire here otherwise, leaving post_date_gmt permanently
+		// stuck at its original value across date changes. Zero it out so
+		// the repo actually re-derives the GMT value from the new Date.
+		cur.DateGMT = time.Time{}
 	}
 	if p.Status != "" && p.Status != cur.Status {
 		if !auth.CanEditPost(actor, cur.Type, p.Status, cur.Author) {

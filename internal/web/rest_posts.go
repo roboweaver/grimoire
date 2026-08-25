@@ -270,12 +270,18 @@ func (s *Server) parseRESTPostWrite(body restPostWriteRequest, typ string, curre
 	}
 	if p.Status == "future" {
 		// Same Req 5.2 exception the admin API applies: resubmitting (or,
-		// for a PATCH, simply not touching) the post's own currently-stored
-		// date is allowed through even though that date is no longer in the
-		// future. Omitting the date entirely on a create (current == nil,
-		// p.Date left zero) never qualifies as "unchanged", so a
-		// future-status post always needs an explicit future date there.
-		unchanged := current != nil && !current.Date.IsZero() && current.Date.Equal(p.Date)
+		// for a PATCH, simply not touching) an ALREADY-future post's own
+		// currently-stored date is allowed through even though that date is
+		// no longer in the future. This exemption must never apply to a
+		// post that is only NOW transitioning into "future" — otherwise a
+		// draft/published post with a past date could flip to "future"
+		// with no future date required, simply by omitting date (REST) or
+		// resubmitting the stored date (admin), defeating the guarantee
+		// this check exists to enforce. Omitting the date entirely on a
+		// create (current == nil, p.Date left zero) never qualifies as
+		// "unchanged", so a future-status post always needs an explicit
+		// future date there.
+		unchanged := current != nil && current.Status == "future" && !current.Date.IsZero() && current.Date.Equal(p.Date)
 		if !unchanged && !p.Date.After(time.Now()) {
 			return domain.Post{}, "rest_invalid_param", errors.New("future status requires a date in the future")
 		}

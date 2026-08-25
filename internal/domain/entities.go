@@ -28,10 +28,23 @@ type Post struct {
 	Password   string
 	GUID       string
 
-	// ParentID backs post_parent (added by the 0005 migration; default 0).
-	// For post_type='revision' rows this is the owning post's ID; it is also
+	// ParentID backs post_parent (added by migration 0003, not a new M7
+	// migration -- see plans/07-revisions-scheduler/tasks.md 1.1/1.2). For
+	// post_type='revision' rows this is the owning post's ID; it is also
 	// used generically for WordPress-style hierarchical parenting.
 	ParentID int64
+}
+
+// RevisionMeta is the summary shape returned by revision listing (no
+// content/title/excerpt body -- Requirement 2.1). Declared now (task 1.4)
+// as a pure data shape so ListRevisions' contract test can compile before
+// task 1.9 implements the method that returns it.
+type RevisionMeta struct {
+	ID       int64
+	ParentID int64
+	Author   int64
+	Modified time.Time
+	Autosave bool
 }
 
 // Term is a taxonomy term (e.g. a category or tag) resolved together with the

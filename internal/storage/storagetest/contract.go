@@ -731,6 +731,425 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		}
 	})
 
+	// revisionStore is declared locally (rather than via domain.RevisionWriter,
+	// which task 1.9 adds) so these tests can be written and confirmed failing
+	// before PostRepo implements them. Go's structural interface satisfaction
+	// means no test change is needed once 1.9 lands: the type assertion below
+	// starts succeeding automatically the moment *wprepo.PostRepo grows
+	// matching methods. Expanded incrementally as tasks 1.3-1.8 add methods.
+	type revisionStore interface {
+		CreateRevision(ctx context.Context, parentID, authorID int64, snapshot domain.Post, autosave bool) (int64, error)
+		ListRevisions(ctx context.Context, parentID int64) ([]domain.RevisionMeta, error)
+		RevisionByID(ctx context.Context, id int64) (domain.Post, error)
+		AutosaveFor(ctx context.Context, parentID, authorID int64) (domain.Post, bool, error)
+		UpdateAutosave(ctx context.Context, revisionID int64, snapshot domain.Post) error
+		PruneRevisions(ctx context.Context, parentID int64, keep int) error
+		DeleteRevisionsOf(ctx context.Context, parentID int64) error
+		DueScheduled(ctx context.Context, asOf time.Time) ([]domain.Post, error)
+	}
+
+	// Req 1.1-1.4, 1.7: CreateRevision inserts a revision row without touching
+	// the parent post's own row, and is invisible to the default admin listing.
+	t.Run("PostRepo CreateRevision inserts a revision row without touching the parent", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		rc, ok := repos.PostWriter.(revisionStore)
+		if !ok {
+			t.Fatal("PostWriter does not implement CreateRevision (task 1.9 not yet implemented)")
+		}
+
+		parent, err := repos.Posts.BySlug(ctx, "hello-1")
+		if err != nil {
+			t.Fatalf("BySlug parent: %v", err)
+		}
+		parentBefore := parent
+
+		revID, err := rc.CreateRevision(ctx, parent.ID, 42, domain.Post{
+			Title:   "Old Title",
+			Content: "<p>old</p>",
+			Excerpt: "old excerpt",
+		}, false)
+		if err != nil {
+			t.Fatalf("CreateRevision: %v", err)
+		}
+		if revID == 0 {
+			t.Fatal("CreateRevision returned zero id")
+		}
+
+		row, err := repos.PostWriter.ByID(ctx, revID)
+		if err != nil {
+			t.Fatalf("ByID(revision): %v", err)
+		}
+		if row.Type != "revision" {
+			t.Errorf("revision Type = %q, want revision", row.Type)
+		}
+		if row.ParentID != parent.ID {
+			t.Errorf("revision ParentID = %d, want %d", row.ParentID, parent.ID)
+		}
+		if row.Status != "inherit" {
+			t.Errorf("revision Status = %q, want inherit", row.Status)
+		}
+		if row.Author != 42 {
+			t.Errorf("revision Author = %d, want 42", row.Author)
+		}
+		if row.Title != "Old Title" || row.Content != "<p>old</p>" || row.Excerpt != "old excerpt" {
+			t.Errorf("revision snapshot fields = %+v, want title/content/excerpt from the snapshot", row)
+		}
+
+		// Req 1.1: the parent post's own row is completely unchanged.
+		parentAfter, err := repos.PostWriter.ByID(ctx, parent.ID)
+		if err != nil {
+			t.Fatalf("ByID(parent) after CreateRevision: %v", err)
+		}
+		if !parentAfter.Modified.Equal(parentBefore.Modified) {
+			t.Errorf("parent Modified changed: before %v, after %v", parentBefore.Modified, parentAfter.Modified)
+		}
+		if parentAfter.Title != parentBefore.Title || parentAfter.Content != parentBefore.Content || parentAfter.Excerpt != parentBefore.Excerpt {
+			t.Errorf("parent title/content/excerpt changed: before %+v, after %+v", parentBefore, parentAfter)
+		}
+
+		// Req 1.7: invisible to the default admin listing/count (Types unset).
+		list, err := repos.AdminPosts.ListForAdmin(ctx, domain.AdminPostFilter{})
+		if err != nil {
+			t.Fatalf("ListForAdmin: %v", err)
+		}
+		for _, p := range list {
+			if p.ID == revID {
+				t.Errorf("ListForAdmin (default Types) unexpectedly returned the revision row %d", revID)
+			}
+		}
+		count, err := repos.AdminPosts.CountForAdmin(ctx, domain.AdminPostFilter{})
+		if err != nil {
+			t.Fatalf("CountForAdmin: %v", err)
+		}
+		if count != 5 {
+			t.Errorf("CountForAdmin (default Types) = %d, want 5 (fixture's 5 posts/pages, revision excluded)", count)
+		}
+	})
+
+	// Req 2.1-2.2: ListRevisions returns newest-first summaries (no content
+	// body) excluding the autosave row, scoped strictly to parentID.
+	// RevisionByID returns the full content/title/excerpt for a given ID.
+	t.Run("PostRepo ListRevisions and RevisionByID are scoped to their parent and exclude autosave", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		rs, ok := repos.PostWriter.(revisionStore)
+		if !ok {
+			t.Fatal("PostWriter does not implement ListRevisions/RevisionByID (task 1.9 not yet implemented)")
+		}
+
+		parentA, err := repos.Posts.BySlug(ctx, "hello-1")
+		if err != nil {
+			t.Fatalf("BySlug hello-1: %v", err)
+		}
+		parentB, err := repos.Posts.BySlug(ctx, "hello-2")
+		if err != nil {
+			t.Fatalf("BySlug hello-2: %v", err)
+		}
+
+		rev1, err := rs.CreateRevision(ctx, parentA.ID, 1, domain.Post{Title: "A rev1", Content: "c1", Excerpt: "e1"}, false)
+		if err != nil {
+			t.Fatalf("CreateRevision rev1: %v", err)
+		}
+		time.Sleep(1100 * time.Millisecond) // post_modified has 1s resolution
+		rev2, err := rs.CreateRevision(ctx, parentA.ID, 1, domain.Post{Title: "A rev2", Content: "c2", Excerpt: "e2"}, false)
+		if err != nil {
+			t.Fatalf("CreateRevision rev2: %v", err)
+		}
+		autosaveID, err := rs.CreateRevision(ctx, parentA.ID, 1, domain.Post{Title: "A autosave", Content: "cauto", Excerpt: "eauto"}, true)
+		if err != nil {
+			t.Fatalf("CreateRevision autosave: %v", err)
+		}
+		otherRev, err := rs.CreateRevision(ctx, parentB.ID, 1, domain.Post{Title: "B rev1", Content: "cb", Excerpt: "eb"}, false)
+		if err != nil {
+			t.Fatalf("CreateRevision (other parent): %v", err)
+		}
+
+		list, err := rs.ListRevisions(ctx, parentA.ID)
+		if err != nil {
+			t.Fatalf("ListRevisions: %v", err)
+		}
+		if len(list) != 2 {
+			t.Fatalf("ListRevisions len = %d, want 2 (autosave and other-parent's revision excluded): %+v", len(list), list)
+		}
+		if list[0].ID != rev2 || list[1].ID != rev1 {
+			t.Errorf("ListRevisions order = [%d, %d], want newest-first [%d, %d]", list[0].ID, list[1].ID, rev2, rev1)
+		}
+		for _, m := range list {
+			if m.ID == autosaveID {
+				t.Errorf("ListRevisions unexpectedly included the autosave row %d", autosaveID)
+			}
+			if m.ID == otherRev {
+				t.Errorf("ListRevisions(parentA) unexpectedly included parentB's revision %d", otherRev)
+			}
+			if m.ParentID != parentA.ID {
+				t.Errorf("RevisionMeta.ParentID = %d, want %d", m.ParentID, parentA.ID)
+			}
+			if m.Author != 1 {
+				t.Errorf("RevisionMeta.Author = %d, want 1", m.Author)
+			}
+		}
+
+		full, err := rs.RevisionByID(ctx, rev1)
+		if err != nil {
+			t.Fatalf("RevisionByID: %v", err)
+		}
+		if full.Title != "A rev1" || full.Content != "c1" || full.Excerpt != "e1" {
+			t.Errorf("RevisionByID content = %+v, want title/content/excerpt from rev1's snapshot", full)
+		}
+	})
+
+	// Req 3.2: AutosaveFor finds no row until an autosave write happens, then
+	// a second autosave write for the same (parentID, authorID) updates that
+	// same row in place instead of inserting a second one.
+	t.Run("PostRepo AutosaveFor and UpdateAutosave upsert a single row per (post, author)", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		rs, ok := repos.PostWriter.(revisionStore)
+		if !ok {
+			t.Fatal("PostWriter does not implement AutosaveFor/UpdateAutosave (task 1.9 not yet implemented)")
+		}
+
+		parent, err := repos.Posts.BySlug(ctx, "hello-1")
+		if err != nil {
+			t.Fatalf("BySlug: %v", err)
+		}
+
+		if _, found, err := rs.AutosaveFor(ctx, parent.ID, 7); err != nil {
+			t.Fatalf("AutosaveFor (before any autosave): %v", err)
+		} else if found {
+			t.Error("AutosaveFor found a row before any autosave write happened")
+		}
+
+		firstID, err := rs.CreateRevision(ctx, parent.ID, 7, domain.Post{Title: "draft v1", Content: "c1", Excerpt: "e1"}, true)
+		if err != nil {
+			t.Fatalf("CreateRevision (autosave=true): %v", err)
+		}
+
+		auto, found, err := rs.AutosaveFor(ctx, parent.ID, 7)
+		if err != nil {
+			t.Fatalf("AutosaveFor (after first autosave): %v", err)
+		}
+		if !found {
+			t.Fatal("AutosaveFor did not find the autosave row that was just created")
+		}
+		if auto.ID != firstID {
+			t.Errorf("AutosaveFor.ID = %d, want %d", auto.ID, firstID)
+		}
+		if auto.Title != "draft v1" || auto.Content != "c1" {
+			t.Errorf("AutosaveFor content = %+v, want the first autosave's snapshot", auto)
+		}
+
+		if err := rs.UpdateAutosave(ctx, firstID, domain.Post{Title: "draft v2", Content: "c2", Excerpt: "e2"}); err != nil {
+			t.Fatalf("UpdateAutosave: %v", err)
+		}
+
+		auto2, found, err := rs.AutosaveFor(ctx, parent.ID, 7)
+		if err != nil {
+			t.Fatalf("AutosaveFor (after UpdateAutosave): %v", err)
+		}
+		if !found {
+			t.Fatal("AutosaveFor lost the row after UpdateAutosave")
+		}
+		if auto2.ID != firstID {
+			t.Errorf("autosave row ID changed across updates: first %d, now %d (want the same row updated in place)", firstID, auto2.ID)
+		}
+		if auto2.Title != "draft v2" || auto2.Content != "c2" || auto2.Excerpt != "e2" {
+			t.Errorf("autosave content after UpdateAutosave = %+v, want draft v2/c2/e2", auto2)
+		}
+
+		list, err := rs.ListRevisions(ctx, parent.ID)
+		if err != nil {
+			t.Fatalf("ListRevisions: %v", err)
+		}
+		if len(list) != 0 {
+			t.Errorf("ListRevisions returned %d entries, want 0 (the only row for this parent is the autosave, which ListRevisions excludes)", len(list))
+		}
+	})
+
+	// Req 5.4: PruneRevisions deletes the oldest excess revisions (never the
+	// autosave row) leaving exactly `keep` remaining, and is a no-op when
+	// there are fewer revisions than `keep`.
+	t.Run("PostRepo PruneRevisions deletes oldest excess and never the autosave row", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		rs, ok := repos.PostWriter.(revisionStore)
+		if !ok {
+			t.Fatal("PostWriter does not implement PruneRevisions (task 1.9 not yet implemented)")
+		}
+
+		parent, err := repos.Posts.BySlug(ctx, "hello-1")
+		if err != nil {
+			t.Fatalf("BySlug: %v", err)
+		}
+
+		var ids []int64
+		for i := 0; i < 3; i++ {
+			id, err := rs.CreateRevision(ctx, parent.ID, 1, domain.Post{Title: fmt.Sprintf("rev %d", i)}, false)
+			if err != nil {
+				t.Fatalf("CreateRevision %d: %v", i, err)
+			}
+			ids = append(ids, id)
+			time.Sleep(1100 * time.Millisecond) // post_modified has 1s resolution
+		}
+		autosaveID, err := rs.CreateRevision(ctx, parent.ID, 1, domain.Post{Title: "auto"}, true)
+		if err != nil {
+			t.Fatalf("CreateRevision (autosave): %v", err)
+		}
+
+		// Fewer revisions than keep: no-op.
+		if err := rs.PruneRevisions(ctx, parent.ID, 10); err != nil {
+			t.Fatalf("PruneRevisions (keep=10, no-op case): %v", err)
+		}
+		list, err := rs.ListRevisions(ctx, parent.ID)
+		if err != nil {
+			t.Fatalf("ListRevisions: %v", err)
+		}
+		if len(list) != 3 {
+			t.Fatalf("ListRevisions len = %d after no-op prune, want 3", len(list))
+		}
+
+		// keep=2: deletes the single oldest (ids[0]).
+		if err := rs.PruneRevisions(ctx, parent.ID, 2); err != nil {
+			t.Fatalf("PruneRevisions (keep=2): %v", err)
+		}
+		list, err = rs.ListRevisions(ctx, parent.ID)
+		if err != nil {
+			t.Fatalf("ListRevisions after prune: %v", err)
+		}
+		if len(list) != 2 {
+			t.Fatalf("ListRevisions len = %d after PruneRevisions(keep=2), want 2", len(list))
+		}
+		for _, m := range list {
+			if m.ID == ids[0] {
+				t.Errorf("PruneRevisions(keep=2) left the oldest revision %d behind", ids[0])
+			}
+		}
+
+		// The autosave row must never be pruned.
+		if _, found, err := rs.AutosaveFor(ctx, parent.ID, 1); err != nil {
+			t.Fatalf("AutosaveFor after prune: %v", err)
+		} else if !found {
+			t.Error("PruneRevisions deleted the autosave row, which it must never touch")
+		}
+		if _, err := rs.RevisionByID(ctx, autosaveID); err != nil {
+			t.Errorf("RevisionByID(autosaveID) after prune: %v (autosave row must survive)", err)
+		}
+	})
+
+	// Req 1.6: DeleteRevisionsOf removes every revision row (including the
+	// autosave) for a given parentID, and leaves other posts' revisions alone.
+	t.Run("PostRepo DeleteRevisionsOf removes all revisions and the autosave for one parent only", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		rs, ok := repos.PostWriter.(revisionStore)
+		if !ok {
+			t.Fatal("PostWriter does not implement DeleteRevisionsOf (task 1.9 not yet implemented)")
+		}
+
+		parentA, err := repos.Posts.BySlug(ctx, "hello-1")
+		if err != nil {
+			t.Fatalf("BySlug hello-1: %v", err)
+		}
+		parentB, err := repos.Posts.BySlug(ctx, "hello-2")
+		if err != nil {
+			t.Fatalf("BySlug hello-2: %v", err)
+		}
+
+		if _, err := rs.CreateRevision(ctx, parentA.ID, 1, domain.Post{Title: "a rev"}, false); err != nil {
+			t.Fatalf("CreateRevision (A, normal): %v", err)
+		}
+		if _, err := rs.CreateRevision(ctx, parentA.ID, 1, domain.Post{Title: "a auto"}, true); err != nil {
+			t.Fatalf("CreateRevision (A, autosave): %v", err)
+		}
+		otherRev, err := rs.CreateRevision(ctx, parentB.ID, 1, domain.Post{Title: "b rev"}, false)
+		if err != nil {
+			t.Fatalf("CreateRevision (B): %v", err)
+		}
+
+		if err := rs.DeleteRevisionsOf(ctx, parentA.ID); err != nil {
+			t.Fatalf("DeleteRevisionsOf: %v", err)
+		}
+
+		list, err := rs.ListRevisions(ctx, parentA.ID)
+		if err != nil {
+			t.Fatalf("ListRevisions(A) after delete: %v", err)
+		}
+		if len(list) != 0 {
+			t.Errorf("ListRevisions(A) after DeleteRevisionsOf = %d entries, want 0", len(list))
+		}
+		if _, found, err := rs.AutosaveFor(ctx, parentA.ID, 1); err != nil {
+			t.Fatalf("AutosaveFor(A) after delete: %v", err)
+		} else if found {
+			t.Error("DeleteRevisionsOf left A's autosave row behind")
+		}
+
+		listB, err := rs.ListRevisions(ctx, parentB.ID)
+		if err != nil {
+			t.Fatalf("ListRevisions(B): %v", err)
+		}
+		if len(listB) != 1 || listB[0].ID != otherRev {
+			t.Errorf("ListRevisions(B) = %+v, want unaffected [%d]", listB, otherRev)
+		}
+	})
+
+	// Req 4: DueScheduled returns only status='future' posts whose post_date
+	// has passed asOf, and none when asOf precedes every future post's date.
+	t.Run("PostRepo DueScheduled returns only past-due future-status posts", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		ds, ok := repos.PostWriter.(revisionStore)
+		if !ok {
+			t.Fatal("PostWriter does not implement DueScheduled (task 1.9 not yet implemented)")
+		}
+
+		now := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+		pastDue, err := repos.PostWriter.Create(ctx, domain.Post{
+			Title: "past-due", Slug: "past-due-scheduled", Type: "post",
+			Status: "future", Date: now.Add(-1 * time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("Create pastDue: %v", err)
+		}
+		notYetDue, err := repos.PostWriter.Create(ctx, domain.Post{
+			Title: "not-yet-due", Slug: "not-yet-due-scheduled", Type: "post",
+			Status: "future", Date: now.Add(1 * time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("Create notYetDue: %v", err)
+		}
+		_, err = repos.PostWriter.Create(ctx, domain.Post{
+			Title: "already-published", Slug: "already-published-past", Type: "post",
+			Status: "publish", Date: now.Add(-2 * time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("Create already-published: %v", err)
+		}
+
+		due, err := ds.DueScheduled(ctx, now)
+		if err != nil {
+			t.Fatalf("DueScheduled: %v", err)
+		}
+		if len(due) != 1 || due[0].ID != pastDue {
+			t.Fatalf("DueScheduled(now) = %+v, want exactly [%d] (past-due future post only)", due, pastDue)
+		}
+		_ = notYetDue
+
+		none, err := ds.DueScheduled(ctx, now.Add(-3*time.Hour))
+		if err != nil {
+			t.Fatalf("DueScheduled (before every future post's date): %v", err)
+		}
+		if len(none) != 0 {
+			t.Errorf("DueScheduled(asOf before all future posts) = %+v, want none", none)
+		}
+	})
+
 	t.Run("TermWriter Create, Update, and Delete", func(t *testing.T) {
 		repos, cleanup := newRepos(t)
 		defer cleanup()

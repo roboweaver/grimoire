@@ -136,6 +136,10 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	if !expectedModified.IsZero() && !cur.Modified.Equal(expectedModified) {
 		return &ConflictError{CurrentModified: cur.Modified}
 	}
+	// Snapshot and post update use narrow, independently implemented ports, so
+	// they cannot share a transaction here. Snapshotting first favors retaining
+	// the pre-edit state; if the later update fails, retention may temporarily
+	// include that duplicate snapshot, but no historical state is lost.
 	if err := s.revisions.Snapshot(ctx, cur, actor.UserID); err != nil { // NEW (Req 1.1)
 		return err // snapshots cur BEFORE any field below mutates it
 	}
@@ -169,12 +173,11 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 // record returns the generic ErrForbidden (existence is not leaked).
 //
 // When the writer also implements domain.RevisionWriter (true for every
-// production PostWriter, backed by wprepo.PostRepo, which implements both
-// ports on the same concrete type) the delete cascades into
-// DeleteRevisionsOf so no revision or autosave row is left pointing at a
-// deleted parent (Req 1.6). A type assertion is used here, rather than a
-// second constructor parameter, so callers/tests that only need PostWriter
-// (no revisions) are unaffected.
+// production PostWriter), revision cleanup runs before deleting the parent.
+// The narrow storage ports do not expose a shared transaction, so this order
+// ensures a cleanup failure leaves the parent intact rather than orphaning its
+// revision/autosave rows (Req 1.6). A type assertion keeps pre-M7 callers that
+// only provide PostWriter unaffected.
 func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p domain.Post) error {
 	cur, err := s.w.ByID(ctx, p.ID)
 	if err != nil {
@@ -189,13 +192,12 @@ func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p d
 	if !auth.CanDeletePost(actor, cur.Type, cur.Status, cur.Author) {
 		return ErrForbidden
 	}
-	if err := s.w.Delete(ctx, cur.ID); err != nil {
-		return err
-	}
 	if rw, ok := s.w.(domain.RevisionWriter); ok {
-		return rw.DeleteRevisionsOf(ctx, cur.ID)
+		if err := rw.DeleteRevisionsOf(ctx, cur.ID); err != nil {
+			return err
+		}
 	}
-	return nil
+	return s.w.Delete(ctx, cur.ID)
 }
 
 // TermWriteService performs capability-checked create/update/delete of taxonomy

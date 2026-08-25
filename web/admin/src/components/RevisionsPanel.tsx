@@ -16,17 +16,29 @@ interface DiffSegment {
   value: string;
 }
 
+const MAX_LCS_MATRIX_CELLS = 100_000;
+
 // diffWords computes a minimal word-level diff between two content strings
 // entirely on the client, so selecting a revision never issues an extra
 // server round trip for the comparison (Req 8.2). It tokenizes on whitespace
 // boundaries (keeping the whitespace itself as tokens) and finds an LCS-based
-// alignment, matching the classic Myers-style diff shape without pulling in
-// a dependency.
+// alignment. Large comparisons fall back to a whole-text replacement before
+// allocating the quadratic LCS matrix.
 function diffWords(oldText: string, newText: string): DiffSegment[] {
   const a = oldText.split(/(\s+)/).filter((token) => token.length > 0);
   const b = newText.split(/(\s+)/).filter((token) => token.length > 0);
   const m = a.length;
   const n = b.length;
+
+  if ((m + 1) * (n + 1) > MAX_LCS_MATRIX_CELLS) {
+    if (oldText === newText) {
+      return oldText ? [{ type: "same", value: oldText }] : [];
+    }
+    const segments: DiffSegment[] = [];
+    if (oldText) segments.push({ type: "removed", value: oldText });
+    if (newText) segments.push({ type: "added", value: newText });
+    return segments;
+  }
 
   const lcs: number[][] = Array.from({ length: m + 1 }, () =>
     new Array<number>(n + 1).fill(0),

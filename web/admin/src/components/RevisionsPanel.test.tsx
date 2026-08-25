@@ -60,6 +60,28 @@ describe("RevisionsPanel", () => {
     expect(within(diff).getByText("new")).toBeInTheDocument();
   });
 
+  it("falls back to a whole-text replacement for large comparisons", async () => {
+    const oldContent = Array.from({ length: 225 }, (_, i) => `old-${i}`).join(" ");
+    const currentContent = Array.from({ length: 225 }, (_, i) => `new-${i}`).join(" ");
+    listRevisions.mockResolvedValue([{ id: 5, author: 2, modified: "2024-01-02T03:04:00Z" }]);
+    getRevision.mockResolvedValue({
+      id: 5,
+      title: "T",
+      content: oldContent,
+      excerpt: "",
+      modified: "2024-01-02T03:04:00Z",
+    });
+    renderPanel({ currentContent, onRestored: vi.fn() });
+
+    await userEvent.click(await screen.findByRole("button", { name: /author 2/i }));
+
+    const diff = await screen.findByTestId("revision-diff");
+    expect(within(diff).getAllByTestId("diff-removed")).toHaveLength(1);
+    expect(within(diff).getAllByTestId("diff-added")).toHaveLength(1);
+    expect(within(diff).getByTestId("diff-removed")).toHaveTextContent(oldContent);
+    expect(within(diff).getByTestId("diff-added")).toHaveTextContent(currentContent);
+  });
+
   it('offers "Restore this revision", which calls the restore endpoint and reloads the editor (Req 8.3)', async () => {
     listRevisions.mockResolvedValue([{ id: 5, author: 2, modified: "2024-01-02T03:04:00Z" }]);
     getRevision.mockResolvedValue({ id: 5, title: "T", content: "old", excerpt: "", modified: "2024-01-02T03:04:00Z" });

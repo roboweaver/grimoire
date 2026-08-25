@@ -342,6 +342,25 @@ func TestPostWriteDeleteCascadesToDeleteRevisionsOf(t *testing.T) {
 	}
 }
 
+func TestPostWriteDeleteKeepsParentWhenRevisionCleanupFails(t *testing.T) {
+	cleanupErr := errors.New("revision cleanup failed")
+	w := &fakePostWriter{store: map[int64]domain.Post{
+		9: {ID: 9, Author: 5, Type: "post", Status: "publish"},
+	}}
+	rw := &fakeRevisionWriter{deleteRevisionsOfErr: cleanupErr}
+	combined := postWriterWithRevisions{fakePostWriter: w, fakeRevisionWriter: rw}
+	svc := NewPostWriteService(combined)
+
+	err := svc.Delete(context.Background(), actor(auth.RoleEditor, 5), domain.Post{ID: 9})
+
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("delete error = %v, want %v", err, cleanupErr)
+	}
+	if w.deleted != 0 {
+		t.Fatalf("post deleted id = %d after revision cleanup failure, want parent preserved", w.deleted)
+	}
+}
+
 // TestPostWriteAuthorizesAgainstPersistedRecord is the regression for the
 // forged-field privilege escalation: an author who owns post A must not be able
 // to edit or delete post B (owned by someone else) by submitting a struct that

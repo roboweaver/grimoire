@@ -60,7 +60,9 @@ func (r *PostRepo) CreateRevision(ctx context.Context, parentID, authorID int64,
 }
 
 // nextRevisionVersion returns 1 + the number of existing non-autosave
-// revisions already stored for parentID.
+// revisions already stored for parentID. Retention pruning can therefore
+// reuse a cosmetic vN suffix; revision IDs and modified timestamps remain the
+// authoritative identity and ordering, and no code looks revisions up by name.
 func (r *PostRepo) nextRevisionVersion(ctx context.Context, parentID int64) (int, error) {
 	var count int
 	err := r.db.NewSelect().

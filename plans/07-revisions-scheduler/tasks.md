@@ -62,11 +62,11 @@ has 4, Req 6 has 7, Req 7 has 4, Req 8 has 6.
   - _Acceptance:_ 3.5–3.6's HTTP suite passes; existing M6 admin-API post HTTP tests still pass unchanged. _(Req 3.1–3.6, 7.1)_
 
 ## Phase 4 — REST API writes: categories and tags (`internal/web/rest_terms.go`)
-- [ ] 4.1 Write failing HTTP tests for `GET /wp-json/wp/v2/categories` and `/tags`: 200 + WP-shaped collection (`id`, `count`, `name`, `slug`, `taxonomy`, `link`, placeholder `parent: 0`) with no authentication required; single-item `GET .../{id}` 200 on an existing term, 404 on a nonexistent one or a taxonomy/type mismatch (e.g. a category ID requested via `/tags/{id}`, Req 6.6).
-- [ ] 4.2 Write failing HTTP tests for `POST /wp-json/wp/v2/categories` and `/tags`: 201 + created term on a valid, `manage_categories`-authorized request via Application Password; 403 for insufficient capability (Req 6.5, not 404 — terms have no existence to leak, per `design.md`'s Status codes note).
-- [ ] 4.3 Write failing HTTP tests for `PUT`/`PATCH .../{id}` and `DELETE .../{id}` on both resources: 200 happy paths; 404 per 4.1's taxonomy-mismatch/nonexistent-ID cases; 403 for insufficient capability; deleting a term detaches it from posts without deleting those posts (Req 6.7).
-- [ ] 4.4 Write a failing regression test confirming every other still-`501` `wp/v2` write verb (media, users) is unaffected by this phase's changes.
-- [ ] 4.5 Implement `internal/web/rest_terms.go`'s eight routes, reusing `content.TermWriteService` (M6, unchanged) for writes and `domain.TermReader` (M6) for reads; register inside `registerREST`'s existing `/wp/v2` block in `rest_router.go`; extend `restRoutes()`'s discovery map with the eight new entries.
+- [x] 4.1 Write failing HTTP tests for `GET /wp-json/wp/v2/categories` and `/tags`: 200 + WP-shaped collection (`id`, `count`, `name`, `slug`, `taxonomy`, `link`, placeholder `parent: 0`) with no authentication required; single-item `GET .../{id}` 200 on an existing term, 404 on a nonexistent one or a taxonomy/type mismatch (e.g. a category ID requested via `/tags/{id}`, Req 6.6).
+- [x] 4.2 Write failing HTTP tests for `POST /wp-json/wp/v2/categories` and `/tags`: 201 + created term on a valid, `manage_categories`-authorized request via Application Password; 403 for insufficient capability (Req 6.5, not 404 — terms have no existence to leak, per `design.md`'s Status codes note).
+- [x] 4.3 Write failing HTTP tests for `PUT`/`PATCH .../{id}` and `DELETE .../{id}` on both resources: 200 happy paths; 404 per 4.1's taxonomy-mismatch/nonexistent-ID cases; 403 for insufficient capability; deleting a term detaches it from posts without deleting those posts (Req 6.7).
+- [x] 4.4 Write a failing regression test confirming every other still-`501` `wp/v2` write verb (media, users) is unaffected by this phase's changes.
+- [x] 4.5 Implement `internal/web/rest_terms.go`'s eight routes, reusing `content.TermWriteService` (M6, unchanged) for writes and `domain.TermReader` (M6) for reads; register inside `registerREST`'s existing `/wp/v2` block in `rest_router.go`; extend `restRoutes()`'s discovery map with the eight new entries.
   - _Acceptance:_ 4.1–4.4's HTTP suite passes; `GET /wp-json/` and `GET /wp-json/wp/v2/` list the new routes. _(Req 6.1–6.7, 7.2)_
 
 ## Phase 5 — Scheduler wiring (`cmd/grimoire/main.go`)

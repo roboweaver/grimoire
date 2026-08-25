@@ -33,12 +33,50 @@ func (e *ConflictError) Error() string {
 // pages. The acting Principal is passed per call; the service enforces the
 // WordPress-style ownership and status capabilities before touching the writer.
 type PostWriteService struct {
-	w domain.PostWriter
+	w         domain.PostWriter
+	revisions revisionSnapshotter
 }
 
-// NewPostWriteService constructs a PostWriteService over a PostWriter.
-func NewPostWriteService(w domain.PostWriter) *PostWriteService {
-	return &PostWriteService{w: w}
+// revisionSnapshotter is the narrow capability PostWriteService.Update needs
+// from a *RevisionWriteService: snapshot the pre-edit post as a new revision
+// (Req 1.1), enforcing whatever retention policy that service was configured
+// with. It is intentionally much narrower than domain.RevisionWriter so
+// PostWriteService depends only on the one call it actually makes.
+type revisionSnapshotter interface {
+	Snapshot(ctx context.Context, cur domain.Post, actorID int64) error
+}
+
+// noopRevisionSnapshotter is the default revisionSnapshotter used when a
+// PostWriteService is constructed without WithRevisionSnapshotter (every
+// M6-era call site that predates M7 and has no interest in revisions). Its
+// Snapshot is a deliberate no-op so PostWriteService.Update can call
+// s.revisions.Snapshot unconditionally, matching design.md's pseudocode,
+// without a nil check and without altering M6 behavior for those callers.
+type noopRevisionSnapshotter struct{}
+
+func (noopRevisionSnapshotter) Snapshot(context.Context, domain.Post, int64) error { return nil }
+
+// PostWriteOption configures optional PostWriteService dependencies that most
+// callers don't need, keeping NewPostWriteService's required single-argument
+// signature backward compatible with every pre-M7 call site.
+type PostWriteOption func(*PostWriteService)
+
+// WithRevisionSnapshotter wires a revision-snapshotting dependency (in
+// production, a *RevisionWriteService) into PostWriteService.Update so every
+// save creates a revision per the configured retention policy (Req 1.1, 5.1).
+func WithRevisionSnapshotter(rs revisionSnapshotter) PostWriteOption {
+	return func(s *PostWriteService) { s.revisions = rs }
+}
+
+// NewPostWriteService constructs a PostWriteService over a PostWriter. By
+// default Update's revision-snapshot hook is a no-op; pass
+// WithRevisionSnapshotter to wire in real revisioning (Req 1.1).
+func NewPostWriteService(w domain.PostWriter, opts ...PostWriteOption) *PostWriteService {
+	s := &PostWriteService{w: w, revisions: noopRevisionSnapshotter{}}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Create authorizes and inserts a new post. When p.Author is zero it defaults to
@@ -97,6 +135,9 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	}
 	if !expectedModified.IsZero() && !cur.Modified.Equal(expectedModified) {
 		return &ConflictError{CurrentModified: cur.Modified}
+	}
+	if err := s.revisions.Snapshot(ctx, cur, actor.UserID); err != nil { // NEW (Req 1.1)
+		return err // snapshots cur BEFORE any field below mutates it
 	}
 	cur.Title = p.Title
 	cur.Content = p.Content

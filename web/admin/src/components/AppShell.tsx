@@ -12,6 +12,7 @@ import type { SessionInfo } from "../api/types";
 const NAV = [
   { label: "Dashboard", path: "/" },
   { label: "Content", path: "/posts" },
+  { label: "Pages", path: "/pages" },
   { label: "Comments", path: "/comments" },
   { label: "Media", path: "/media" },
   { label: "Menus", path: "/menus" },

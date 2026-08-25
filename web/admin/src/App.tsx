@@ -5,7 +5,8 @@ import { AppShell } from "./components/AppShell";
 import { ErrorState, Loading } from "./components/States";
 import { Dashboard } from "./views/Dashboard";
 import { PostsList } from "./views/PostsList";
-import { PostDetail } from "./views/PostDetail";
+import { PostEditor } from "./views/PostEditor";
+import { PageEditor } from "./views/PageEditor";
 import { Comments } from "./views/Comments";
 import { Media } from "./views/Media";
 import { Menus } from "./views/Menus";
@@ -32,8 +33,12 @@ export function App() {
     <Routes>
       <Route element={<AppShell session={state.data} />}>
         <Route index element={<Dashboard />} />
-        <Route path="posts" element={<PostsList />} />
-        <Route path="posts/:id" element={<PostDetail />} />
+        <Route path="posts" element={<PostsList type="post" />} />
+        <Route path="posts/new" element={<PostEditor type="post" />} />
+        <Route path="posts/:id" element={<PostEditor type="post" />} />
+        <Route path="pages" element={<PostsList type="page" />} />
+        <Route path="pages/new" element={<PageEditor />} />
+        <Route path="pages/:id" element={<PageEditor />} />
         <Route path="comments" element={<Comments />} />
         <Route path="media" element={<Media />} />
         <Route path="menus" element={<Menus />} />

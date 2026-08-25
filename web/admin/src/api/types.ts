@@ -35,6 +35,14 @@ export interface PostList {
   totalPages: number;
 }
 
+// TermSummary mirrors internal/web.termSummary (Req 2.1/2.4, 4.1's terms map
+// values).
+export interface TermSummary {
+  id: number;
+  name: string;
+  slug: string;
+}
+
 export interface PostDetail {
   id: number;
   title: string;
@@ -43,8 +51,54 @@ export interface PostDetail {
   status: string;
   author: number;
   date: string;
+  // modified backs Req 3's optimistic-concurrency check: it must be sent
+  // back unchanged as the update request's `modified` field.
+  modified: string;
   excerpt: string;
   content: string;
+  commentStatus: string;
+  // terms is keyed by taxonomy ("category", "post_tag"); every known
+  // taxonomy is always present with a (possibly empty) array (Req 4.1).
+  terms: Record<string, TermSummary[]>;
+  // partial reports per-taxonomy term-assignment failures that happened
+  // after the post write itself already succeeded (Req 2.2); absent when
+  // every taxonomy in the request applied cleanly.
+  partial?: Record<string, string>;
+}
+
+// PostWriteInput is the create/update request body
+// (internal/web.postWriteRequest). `modified` is required on update (the
+// optimistic-concurrency token, Req 3) and omitted on create; `termIds` maps
+// taxonomy -> the full desired set of term IDs for that taxonomy (Req 2.2).
+export interface PostWriteInput {
+  title: string;
+  content: string;
+  excerpt: string;
+  slug: string;
+  status: string;
+  type: string;
+  date?: string;
+  commentStatus: string;
+  modified?: string;
+  termIds?: Record<string, number[]>;
+}
+
+// TermDetail mirrors internal/web.termDetailResponse (Req 2.3/2.4).
+export interface TermDetail {
+  id: number;
+  name: string;
+  slug: string;
+  taxonomy?: string;
+}
+
+export interface TermWriteInput {
+  name: string;
+  slug: string;
+  taxonomy?: string;
+}
+
+export interface TermList {
+  items: TermSummary[];
 }
 
 export interface ApiErrorBody {

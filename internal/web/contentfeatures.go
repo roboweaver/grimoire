@@ -8,3 +8,12 @@ func (s *Server) WithContentFeatures(comments *content.CommentService, media *co
 	s.menus = menus
 	return s
 }
+
+// WithFeaturedImages wires the featured-image lookup used to populate
+// PostView.FeaturedImageURL on the home, category, and single/page views.
+// featured may be nil, in which case featured images are simply omitted from
+// every card/post (FeaturedImageService.URL is nil-receiver safe).
+func (s *Server) WithFeaturedImages(featured *content.FeaturedImageService) *Server {
+	s.featured = featured
+	return s
+}

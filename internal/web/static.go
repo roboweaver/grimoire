@@ -4,6 +4,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/roboweaver/grimoire/assets"
 )
 
@@ -31,4 +33,15 @@ func registerStatic(r interface {
 
 	fileServer := http.StripPrefix("/assets/icons/", http.FileServer(http.FS(iconsFS)))
 	r.Handle("/assets/icons/*", fileServer)
+}
+
+// registerThemeStatic mounts the active theme's static/ directory (e.g. its
+// vendored Spectrum CSS) at /theme/static/*. Unlike registerStatic (which
+// serves go:embed'd assets), themes are already loaded from disk at runtime,
+// so this serves directly from themeDir with no embedding.
+func registerThemeStatic(r chi.Router, themeStaticDir string) {
+	fileServer := http.StripPrefix("/theme/static/", http.FileServer(http.Dir(themeStaticDir)))
+	r.Get("/theme/static/*", func(w http.ResponseWriter, req *http.Request) {
+		fileServer.ServeHTTP(w, req)
+	})
 }

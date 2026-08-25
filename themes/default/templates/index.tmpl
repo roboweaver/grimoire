@@ -1,11 +1,13 @@
 {{define "content"}}
-<h1>{{.SiteTitle}}</h1>
+<div class="theme-page-head">
+<h1 class="spectrum-Heading spectrum-Heading--sizeXL">{{.SiteTitle}}</h1>
+{{if .Tagline}}<p class="spectrum-Body spectrum-Body--sizeL theme-tagline">{{.Tagline}}</p>{{end}}
+</div>
+<div class="theme-card-grid">
 {{range .Posts}}
-  <article>
-    <h2><a href="/{{.Slug}}">{{.Title}}</a></h2>
-    <div>{{.Excerpt}}</div>
-  </article>
+{{template "post-card" .}}
 {{else}}
-  <p>No posts yet.</p>
+<p class="spectrum-Body spectrum-Body--sizeM">No posts yet.</p>
 {{end}}
+</div>
 {{end}}

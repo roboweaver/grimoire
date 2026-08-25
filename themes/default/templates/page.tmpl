@@ -1,8 +1,8 @@
 {{define "title"}}{{.Post.Title}} · {{.SiteTitle}}{{end}}
 {{define "content"}}
 {{template "nav-menu" .Menu}}
-<article class="page">
-  <h1>{{.Post.Title}}</h1>
-  <div>{{.Post.Content}}</div>
+<article class="theme-article theme-page">
+  <h1 class="spectrum-Heading spectrum-Heading--sizeXXL">{{.Post.Title}}</h1>
+  <div class="spectrum-Body spectrum-Body--sizeM theme-article-content">{{.Post.Content}}</div>
 </article>
 {{end}}

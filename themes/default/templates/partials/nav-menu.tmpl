@@ -1,7 +1,7 @@
 {{define "nav-menu"}}
 {{if .Items}}
-<nav>
-  <ul>
+<nav class="theme-nav">
+  <ul class="theme-nav-list">
     {{template "nav-menu-items" .Items}}
   </ul>
 </nav>
@@ -10,6 +10,6 @@
 
 {{define "nav-menu-items"}}
 {{range .}}
-<li><a href="{{.URL}}">{{.Label}}</a>{{if .Children}}<ul>{{template "nav-menu-items" .Children}}</ul>{{end}}</li>
+<li class="theme-nav-item"><a class="spectrum-Link spectrum-Link--quiet" href="{{.URL}}">{{.Label}}</a>{{if .Children}}<ul class="theme-nav-sublist">{{template "nav-menu-items" .Children}}</ul>{{end}}</li>
 {{end}}
 {{end}}

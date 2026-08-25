@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="spectrum spectrum--light spectrum--medium">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,55 +9,52 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
   <link rel="manifest" href="/assets/icons/site.webmanifest">
-  <style>
-    footer {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-top: 3rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid #e0e0e0;
-      color: #666;
-    }
-    footer img {
-      width: 28px;
-      height: 28px;
-    }
-  </style>
+  <link rel="stylesheet" href="/theme/static/css/spectrum.css">
+  <link rel="stylesheet" href="/theme/static/css/theme.css">
 </head>
-<body>
-  <header><a href="/">grimoire</a></header>
-  <main>
+<body class="theme-body">
+  <header class="theme-header"><a class="spectrum-Link spectrum-Link--quiet theme-header-link" href="/">grimoire</a></header>
+  <main class="theme-main">
 
 
 
-<article>
-  <h1>Hello World</h1>
-  <div><p>Body <em>html</em>.</p></div>
+<article class="theme-article">
+  <h1 class="spectrum-Heading spectrum-Heading--sizeXXL">Hello World</h1>
+  <time class="spectrum-Body spectrum-Body--sizeS theme-article-date" datetime="2024-01-02">January 2, 2024</time>
+  <div class="spectrum-Body spectrum-Body--sizeM theme-article-content"><p>Body <em>html</em>.</p></div>
 </article>
 
-<section id="comments">
-  <h2>0 Comments</h2>
+<section id="comments" class="theme-comments">
+  <h2 class="spectrum-Heading spectrum-Heading--sizeL">0 Comments</h2>
   
   
-    <p>No comments yet</p>
+    <p class="spectrum-Body spectrum-Body--sizeM">No comments yet</p>
   
-  <form method="post" action="/comment">
+  <form method="post" action="/comment" class="theme-comment-form">
     <input type="hidden" name="post_id" value="1">
     <input type="hidden" name="comment_csrf_token" value="">
-    <p><label>Name <input name="author"></label></p>
-    <p><label>Email <input name="email"></label></p>
-    <p><label>URL <input name="url"></label></p>
+    <div class="spectrum-Textfield theme-form-field">
+      <label class="spectrum-FieldLabel" for="comment-author">Name</label>
+      <input class="spectrum-Textfield-input" id="comment-author" name="author">
+    </div>
+    <div class="spectrum-Textfield theme-form-field">
+      <label class="spectrum-FieldLabel" for="comment-email">Email</label>
+      <input class="spectrum-Textfield-input" id="comment-email" name="email">
+    </div>
+    <div class="spectrum-Textfield theme-form-field">
+      <label class="spectrum-FieldLabel" for="comment-url">URL</label>
+      <input class="spectrum-Textfield-input" id="comment-url" name="url">
+    </div>
     <p style="display:none"><label>Website <input name="website"></label></p>
-    <p><label>Comment <textarea name="content"></textarea></label></p>
-    <button type="submit">Submit comment</button>
+    <div class="spectrum-Textfield theme-form-field theme-form-field--textarea">
+      <label class="spectrum-FieldLabel" for="comment-content">Comment</label>
+      <textarea class="spectrum-Textfield-input" id="comment-content" name="content"></textarea>
+    </div>
+    <button type="submit" class="spectrum-Button spectrum-Button--accent spectrum-Button--fill"><span class="spectrum-Button-label">Submit comment</span></button>
   </form>
 </section>
 
 </main>
-  <footer>
-    <img src="/assets/icons/icon-64.png" width="28" height="28" alt="grimoire logo">
-    <small>Powered by grimoire</small>
-  </footer>
+  <footer class="theme-footer"><small class="spectrum-Body spectrum-Body--sizeS">Powered by grimoire</small></footer>
 </body>
 </html>

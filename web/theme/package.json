@@ -1,0 +1,19 @@
+{
+  "name": "grimoire-theme-css",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@spectrum-css/tokens": "^16",
+    "@spectrum-css/typography": "^8",
+    "@spectrum-css/page": "^9",
+    "@spectrum-css/card": "^11",
+    "@spectrum-css/link": "^7",
+    "@spectrum-css/button": "^14",
+    "@spectrum-css/textfield": "^8",
+    "@spectrum-css/divider": "^5"
+  }
+}

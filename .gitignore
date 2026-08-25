@@ -21,5 +21,8 @@ coverage.*
 .idea/
 .vscode/
 
+# Node build artifacts
+web/theme/node_modules/
+
 # Local preview runtime (db, logs)
 /data/

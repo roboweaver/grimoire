@@ -1,0 +1,156 @@
+/* Grimoire public theme composition rules (Direction A: Faithful).
+ * Adapted from the plan's illustrative pre-v16 Spectrum token names to the
+ * installed @spectrum-css/tokens@16.0.2 names verified in dist/css/*.css.
+ * Use only token names confirmed in web/theme/node_modules/@spectrum-css/tokens/dist/css.
+ */
+
+.theme-body {
+	margin: 0;
+	background: var(--spectrum-gray-100);
+	color: var(--spectrum-gray-900);
+}
+
+.theme-header {
+	display: flex;
+	align-items: center;
+	padding: var(--spectrum-spacing-300) var(--spectrum-spacing-400);
+	background: var(--spectrum-gray-50);
+	border-bottom: var(--spectrum-border-width-100) solid var(--spectrum-gray-300);
+}
+
+.theme-header-link {
+	font-size: var(--spectrum-font-size-400);
+}
+
+.theme-main {
+	max-width: 960px;
+	margin: 0 auto;
+	padding: var(--spectrum-spacing-400);
+}
+
+.theme-footer {
+	padding: var(--spectrum-spacing-300);
+	color: var(--spectrum-gray-700);
+	text-align: center;
+}
+
+.theme-page-head {
+	margin-bottom: var(--spectrum-spacing-400);
+}
+
+.theme-tagline {
+	color: var(--spectrum-gray-700);
+	margin-top: var(--spectrum-text-to-visual-100);
+}
+
+.theme-card-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: var(--spectrum-spacing-300);
+}
+
+@media (max-width: 640px) {
+	.theme-card-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+.theme-card {
+	padding: var(--spectrum-component-edge-to-text-100);
+}
+
+/* Spectrum's card component expects the whole card to be a single focusable
+ * link/button, so its :before/:after focus-ring and selection overlays are
+ * absolutely positioned over the entire card. Our card markup instead nests
+ * separate links (title, "Read more") inside a plain <article>, so those
+ * overlays end up painting above the in-flow links and swallow clicks.
+ * Disable pointer events on the overlays so clicks reach the real links.
+ */
+.theme-card:before,
+.theme-card:after {
+	pointer-events: none;
+}
+
+.theme-card .spectrum-Card-content {
+	flex-direction: column;
+	align-items: flex-start;
+}
+
+/* Bleed the featured image to the card's outer edge, since .theme-card
+ * applies uniform padding that would otherwise inset the preview along
+ * with the body text. */
+.theme-card .spectrum-Card-preview {
+	margin: calc(var(--spectrum-component-edge-to-text-100) * -1) calc(var(--spectrum-component-edge-to-text-100) * -1) 0;
+}
+
+.theme-card-image {
+	display: block;
+	width: 100%;
+	height: 200px;
+	object-fit: cover;
+}
+
+.theme-card-date {
+	display: block;
+	color: var(--spectrum-gray-700);
+	margin-bottom: var(--spectrum-spacing-100);
+}
+
+.theme-card-excerpt {
+	margin-top: var(--spectrum-spacing-100);
+}
+
+.theme-article {
+	max-width: 720px;
+	margin: 0 auto;
+}
+
+.theme-article-image {
+	display: block;
+	width: 100%;
+	max-height: 400px;
+	object-fit: cover;
+	border-radius: var(--spectrum-card-corner-radius, 8px);
+	margin-bottom: var(--spectrum-spacing-300);
+}
+
+.theme-article-date {
+	display: block;
+	color: var(--spectrum-gray-700);
+	margin: var(--spectrum-spacing-100) 0 var(--spectrum-spacing-300);
+}
+
+.theme-comments {
+	max-width: 720px;
+	margin: var(--spectrum-spacing-500) auto 0;
+	border-top: var(--spectrum-border-width-100) solid var(--spectrum-gray-300);
+	padding-top: var(--spectrum-spacing-400);
+}
+
+.theme-comment-list {
+	list-style: none;
+	padding: 0;
+}
+
+.theme-comment {
+	padding: var(--spectrum-spacing-200) 0;
+	border-bottom: var(--spectrum-border-width-100) solid var(--spectrum-gray-200);
+}
+
+.theme-form-field {
+	margin-bottom: var(--spectrum-spacing-200);
+}
+
+.theme-nav-list {
+	display: flex;
+	gap: var(--spectrum-spacing-200);
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.theme-nav-sublist {
+	list-style: none;
+	margin: 0;
+	padding-left: var(--spectrum-spacing-200);
+}

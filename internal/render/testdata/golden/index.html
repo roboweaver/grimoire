@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="spectrum spectrum--light spectrum--medium">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,41 +9,42 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
   <link rel="manifest" href="/assets/icons/site.webmanifest">
-  <style>
-    footer {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-top: 3rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid #e0e0e0;
-      color: #666;
-    }
-    footer img {
-      width: 28px;
-      height: 28px;
-    }
-  </style>
+  <link rel="stylesheet" href="/theme/static/css/spectrum.css">
+  <link rel="stylesheet" href="/theme/static/css/theme.css">
 </head>
-<body>
-  <header><a href="/">grimoire</a></header>
-  <main>
-<h1>grimoire</h1>
+<body class="theme-body">
+  <header class="theme-header"><a class="spectrum-Link spectrum-Link--quiet theme-header-link" href="/">grimoire</a></header>
+  <main class="theme-main">
+<div class="theme-page-head">
+<h1 class="spectrum-Heading spectrum-Heading--sizeXL">grimoire</h1>
+<p class="spectrum-Body spectrum-Body--sizeL theme-tagline">A Go-native CMS</p>
+</div>
+<div class="theme-card-grid">
 
-  <article>
-    <h2><a href="/hello-world">Hello World</a></h2>
-    <div>First post.</div>
-  </article>
+<article class="spectrum-Card theme-card">
+<div class="spectrum-Card-body">
+<div class="spectrum-Card-header"><h2 class="spectrum-Card-title"><a class="spectrum-Link spectrum-Link--quiet" href="/hello-world">Hello World</a></h2></div>
+<div class="spectrum-Card-content">
+<time class="spectrum-Body spectrum-Body--sizeS theme-card-date" datetime="2024-01-02">Jan 2, 2024</time>
+<div class="spectrum-Body spectrum-Body--sizeM theme-card-excerpt">First post.</div>
+</div>
+</div>
+<div class="spectrum-Card-footer"><a class="spectrum-Button spectrum-Button--secondary" href="/hello-world"><span class="spectrum-Button-label">Read more</span></a></div>
+</article>
 
-  <article>
-    <h2><a href="/second">Second Post</a></h2>
-    <div>Another one.</div>
-  </article>
+<article class="spectrum-Card theme-card">
+<div class="spectrum-Card-body">
+<div class="spectrum-Card-header"><h2 class="spectrum-Card-title"><a class="spectrum-Link spectrum-Link--quiet" href="/second">Second Post</a></h2></div>
+<div class="spectrum-Card-content">
+<time class="spectrum-Body spectrum-Body--sizeS theme-card-date" datetime="2024-01-02">Jan 2, 2024</time>
+<div class="spectrum-Body spectrum-Body--sizeM theme-card-excerpt">Another one.</div>
+</div>
+</div>
+<div class="spectrum-Card-footer"><a class="spectrum-Button spectrum-Button--secondary" href="/second"><span class="spectrum-Button-label">Read more</span></a></div>
+</article>
 
+</div>
 </main>
-  <footer>
-    <img src="/assets/icons/icon-64.png" width="28" height="28" alt="grimoire logo">
-    <small>Powered by grimoire</small>
-  </footer>
+  <footer class="theme-footer"><small class="spectrum-Body spectrum-Body--sizeS">Powered by grimoire</small></footer>
 </body>
 </html>

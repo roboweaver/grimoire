@@ -1,9 +1,11 @@
 {{define "title"}}{{.Post.Title}} · {{.SiteTitle}}{{end}}
 {{define "content"}}
 {{template "nav-menu" .Menu}}
-<article>
-  <h1>{{.Post.Title}}</h1>
-  <div>{{.Post.Content}}</div>
+<article class="theme-article">
+  {{if .Post.FeaturedImageURL}}<img class="theme-article-image" src="{{.Post.FeaturedImageURL}}" alt="" loading="lazy">
+  {{end}}<h1 class="spectrum-Heading spectrum-Heading--sizeXXL">{{.Post.Title}}</h1>
+  <time class="spectrum-Body spectrum-Body--sizeS theme-article-date" datetime="{{.Post.Date.Format "2006-01-02"}}">{{.Post.Date.Format "January 2, 2006"}}</time>
+  <div class="spectrum-Body spectrum-Body--sizeM theme-article-content">{{.Post.Content}}</div>
 </article>
 {{template "comments" .}}
 {{end}}

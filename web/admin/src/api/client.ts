@@ -6,8 +6,12 @@ import type {
   NavMenu,
   PostDetail,
   PostList,
+  PostWriteInput,
   SessionInfo,
   Stats,
+  TermDetail,
+  TermList,
+  TermWriteInput,
 } from "./types";
 
 // ForbiddenError signals an authenticated-but-uncapable response (403). Views
@@ -28,6 +32,20 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+  }
+}
+
+// ConflictError signals a 409 from a post update (Req 3.2, 9.3). The admin
+// API's conflict response is a deliberately non-standard envelope
+// (`{"error":"conflict","currentModified":"..."}`, see adminapi.go's
+// jsonHandler) rather than the usual `{error:{code,message}}` shape, so it
+// gets its own error type instead of reusing ApiError.
+export class ConflictError extends Error {
+  currentModified: string;
+  constructor(currentModified: string) {
+    super("The post changed since it was loaded.");
+    this.name = "ConflictError";
+    this.currentModified = currentModified;
   }
 }
 
@@ -105,6 +123,20 @@ async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (res.status === 403) {
     throw new ForbiddenError();
   }
+  if (res.status === 409) {
+    // adminapi.go's jsonHandler emits a non-standard envelope for conflicts
+    // (`{"error":"conflict","currentModified":"..."}`), not the usual
+    // `{error:{code,message}}` shape every other error uses.
+    let currentModified = "";
+    try {
+      const body = (await res.json()) as { currentModified?: string };
+      currentModified = body?.currentModified ?? "";
+    } catch {
+      // Fall through with an empty currentModified; ConflictDialog still
+      // has enough to prompt a reload even without the exact timestamp.
+    }
+    throw new ConflictError(currentModified);
+  }
   if (!res.ok) {
     let code = "error";
     let message = `Request failed (${res.status}).`;
@@ -171,4 +203,34 @@ export const api = {
       body: JSON.stringify({ parentId }),
     }),
   menus: (signal?: AbortSignal) => get<{ items: NavMenu[] }>("/menus", signal),
+  createPost: (body: PostWriteInput) =>
+    send<PostDetail>("/posts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  updatePost: (id: number | string, body: PostWriteInput) =>
+    send<PostDetail>(`/posts/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  deletePost: (id: number | string) =>
+    send<void>(`/posts/${id}`, { method: "DELETE" }),
+  listTerms: (taxonomy: string, signal?: AbortSignal) =>
+    get<TermList>(`/terms?taxonomy=${encodeURIComponent(taxonomy)}`, signal),
+  createTerm: (body: TermWriteInput) =>
+    send<TermDetail>("/terms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  updateTerm: (id: number | string, body: TermWriteInput) =>
+    send<TermDetail>(`/terms/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  deleteTerm: (id: number | string) =>
+    send<void>(`/terms/${id}`, { method: "DELETE" }),
 };

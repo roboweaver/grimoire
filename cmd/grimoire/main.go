@@ -18,6 +18,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/content"
+	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/web"
@@ -83,6 +84,16 @@ func main() {
 		Prefix: cfg.Database.TablePrefix,
 	}
 
+	// termReadWriter combines the storage factory's separate TermWriter and
+	// TermReader ports (both backed by the same concrete wprepo.TermRepo,
+	// per factory.go's comment) into the single value
+	// content.NewTermWriteService requires, without touching Phase 1's
+	// already-committed factory.go Set shape.
+	termRW := termReadWriter{TermWriter: repos.TermWriter, TermReader: repos.TermReader}
+	postWrite := content.NewPostWriteService(repos.PostWriter)
+	termWrite := content.NewTermWriteService(termRW)
+	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
+
 	handler := web.NewServer(
 		content.NewPostService(repos.Posts),
 		content.NewTermService(repos.Terms, repos.Posts),
@@ -96,7 +107,9 @@ func main() {
 	}).WithAdmin(admin.Handler("/admin"), content.NewAdminService(
 		repos.AdminPosts, repos.PostWriter, repos.PostCounter,
 		repos.UserCounter, repos.TermCounter, repos.Users,
-	)).WithREST(
+	)).WithAdminWrites(
+		postWrite, termWrite, postTermsWrite, repos.PostTerms,
+	).WithREST(
 		restMapper, repos.AdminPosts, repos.PostWriter, repos.Posts, repos.Media, repos.Users,
 		cfg.REST.PerPageMax,
 	).WithApplicationPasswords(
@@ -125,4 +138,14 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("stopped")
+}
+
+// termReadWriter combines domain.TermWriter and domain.TermReader into the
+// single value content.NewTermWriteService requires. Both storage.Set fields
+// are backed by the same concrete wprepo.TermRepo, but Set exposes them as
+// separate interface-typed fields, so main wires them together here rather
+// than widening Set's shape.
+type termReadWriter struct {
+	domain.TermWriter
+	domain.TermReader
 }

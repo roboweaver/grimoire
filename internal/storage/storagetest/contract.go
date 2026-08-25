@@ -303,6 +303,8 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 	runMenusContract(t, newRepos)
 	runPostTermsContract(t, newRepos)
 	runPostMetaContract(t, newRepos)
+	runPostTermsWriterContract(t, newRepos)
+	runTermReaderContract(t, newRepos)
 }
 
 // runUserContract covers UserRepository + UserMetaRepository, including the
@@ -572,15 +574,17 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 	t.Run("PostWriter Create, Update, Delete", func(t *testing.T) {
 		repos, cleanup := newRepos(t)
 		defer cleanup()
+		beforeCreate := time.Now().Add(-time.Minute)
 		id, err := repos.PostWriter.Create(ctx, domain.Post{
-			Author:  1,
-			Date:    time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC),
-			Content: "<p>new</p>",
-			Title:   "Fresh Post",
-			Excerpt: "ex",
-			Status:  "publish",
-			Slug:    "fresh-post",
-			Type:    "post",
+			Author:        1,
+			Date:          time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC),
+			Content:       "<p>new</p>",
+			Title:         "Fresh Post",
+			Excerpt:       "ex",
+			Status:        "publish",
+			Slug:          "fresh-post",
+			Type:          "post",
+			CommentStatus: "open",
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -595,8 +599,33 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		if got.Title != "Fresh Post" {
 			t.Errorf("title = %q, want Fresh Post", got.Title)
 		}
+		// Req 3.4: Create SHALL set Modified/ModifiedGMT to the current time,
+		// not the 0004 migration's 1970-01-01 default.
+		if got.Modified.Before(beforeCreate) {
+			t.Errorf("Create: Modified = %v, want approximately now", got.Modified)
+		}
+		if got.ModifiedGMT.Before(beforeCreate) {
+			t.Errorf("Create: ModifiedGMT = %v, want approximately now", got.ModifiedGMT)
+		}
+		// DateGMT was left zero above, so it SHALL be derived from the
+		// explicit Date (UTC) rather than defaulted to the current time —
+		// otherwise a backdated/future post would get a nonsensical
+		// date_gmt that doesn't correspond to its own post_date.
+		wantDateGMT := time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)
+		if !got.DateGMT.Equal(wantDateGMT) {
+			t.Errorf("Create: DateGMT = %v, want %v (derived from Date)", got.DateGMT, wantDateGMT)
+		}
+		firstModified := got.Modified
+
+		// post_modified has only 1-second resolution (WP's schema, not
+		// microseconds), so sleep past a second boundary to make the
+		// "strictly after" assertion below meaningful rather than flaky.
+		time.Sleep(1100 * time.Millisecond)
+
 		got.Title = "Edited Post"
 		got.Content = "<p>edited</p>"
+		got.CommentStatus = "closed"
+		beforeUpdate := time.Now().Add(-time.Minute)
 		if err := repos.PostWriter.Update(ctx, got); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
@@ -607,6 +636,40 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		if reread.Title != "Edited Post" || reread.Content != "<p>edited</p>" {
 			t.Errorf("update not applied: %+v", reread)
 		}
+		// Req 1.1/1.2/4.1: Update SHALL persist comment_status and bump
+		// Modified/ModifiedGMT to a strictly later value than Create's.
+		if reread.CommentStatus != "closed" {
+			t.Errorf("Update: CommentStatus = %q, want closed", reread.CommentStatus)
+		}
+		if reread.Modified.Before(beforeUpdate) {
+			t.Errorf("Update: Modified = %v, want approximately now", reread.Modified)
+		}
+		if !reread.Modified.After(firstModified) {
+			t.Errorf("Update: Modified = %v, want strictly after Create's %v", reread.Modified, firstModified)
+		}
+		// DateGMT was untouched by this update (Date field unchanged), so it
+		// SHALL remain consistent with the original Date rather than reset.
+		if !reread.DateGMT.Equal(wantDateGMT) {
+			t.Errorf("Update: DateGMT = %v, want unchanged %v", reread.DateGMT, wantDateGMT)
+		}
+
+		// Req: post_date_gmt SHALL be re-derived on every Update from the
+		// (possibly changed) Date, never left stuck at its creation-time
+		// value — a backdated post's date_gmt must move with it.
+		reread.Date = time.Date(2023, 3, 15, 12, 0, 0, 0, time.UTC)
+		reread.DateGMT = time.Time{}
+		if err := repos.PostWriter.Update(ctx, reread); err != nil {
+			t.Fatalf("Update (date change): %v", err)
+		}
+		afterDateChange, err := repos.Posts.BySlug(ctx, "fresh-post")
+		if err != nil {
+			t.Fatalf("BySlug after date-changing update: %v", err)
+		}
+		wantNewDateGMT := time.Date(2023, 3, 15, 12, 0, 0, 0, time.UTC)
+		if !afterDateChange.DateGMT.Equal(wantNewDateGMT) {
+			t.Errorf("Update: DateGMT after date change = %v, want %v", afterDateChange.DateGMT, wantNewDateGMT)
+		}
+
 		if err := repos.PostWriter.Delete(ctx, id); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
@@ -621,7 +684,7 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		}
 	})
 
-	t.Run("TermWriter Create and Delete", func(t *testing.T) {
+	t.Run("TermWriter Create, Update, and Delete", func(t *testing.T) {
 		repos, cleanup := newRepos(t)
 		defer cleanup()
 		id, err := repos.TermWriter.Create(ctx, domain.Term{Name: "Go", Slug: "go", Taxonomy: "post_tag"})
@@ -638,10 +701,47 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		if got.Name != "Go" || got.Taxonomy != "post_tag" {
 			t.Errorf("term mismatch: %+v", got)
 		}
+
+		// 1.1/1.2: TermRepo.Update renames name/slug by term_id, leaving
+		// other terms' rows untouched (e.g. the fixture's "News" category).
+		if err := repos.TermWriter.Update(ctx, domain.Term{ID: id, Name: "Golang", Slug: "golang-lang"}); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		renamed, err := repos.Terms.BySlug(ctx, "post_tag", "golang-lang")
+		if err != nil {
+			t.Fatalf("BySlug after Update: %v", err)
+		}
+		if renamed.Name != "Golang" || renamed.ID != id {
+			t.Errorf("Update: got %+v, want renamed term with same ID", renamed)
+		}
+		if _, err := repos.Terms.BySlug(ctx, "post_tag", "go"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("BySlug for old slug after Update err = %v, want ErrNotFound", err)
+		}
+		untouched, err := repos.Terms.BySlug(ctx, "category", "news")
+		if err != nil {
+			t.Fatalf("BySlug for untouched fixture term: %v", err)
+		}
+		if untouched.Name != "News" {
+			t.Errorf("Update disturbed an unrelated term: %+v", untouched)
+		}
+		if err := repos.TermWriter.Update(ctx, domain.Term{ID: 999999, Name: "X", Slug: "x"}); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("Update missing err = %v, want ErrNotFound", err)
+		}
+
+		// A no-op rename (submitting the term's current name/slug
+		// unchanged) must succeed, not 404. MySQL's default driver
+		// reports RowsAffected=0 for a matched-but-unchanged UPDATE
+		// (unlike SQLite/PostgreSQL), so this specifically catches a
+		// regression that only a MySQL-backed run of this suite would
+		// otherwise surface.
+		if err := repos.TermWriter.Update(ctx, domain.Term{ID: id, Name: "Golang", Slug: "golang-lang"}); err != nil {
+			t.Errorf("no-op Update (unchanged name/slug) err = %v, want nil", err)
+		}
+
 		if err := repos.TermWriter.Delete(ctx, id); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
-		if _, err := repos.Terms.BySlug(ctx, "post_tag", "go"); !errors.Is(err, domain.ErrNotFound) {
+		if _, err := repos.Terms.BySlug(ctx, "post_tag", "golang-lang"); !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("BySlug after delete err = %v, want ErrNotFound", err)
 		}
 		if err := repos.TermWriter.Delete(ctx, 999999); !errors.Is(err, domain.ErrNotFound) {

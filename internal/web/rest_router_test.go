@@ -452,6 +452,10 @@ func TestRESTUserMeAuthenticated(t *testing.T) {
 
 // --- 501 deferred-write coverage (Req 2.5, 3.3, 4.5, 5.5, 7.5) ---
 
+// TestRESTWritesNotImplemented covers every wp/v2 write verb still deferred
+// to a later milestone (Req 7.5). Posts/pages writes are no longer part of
+// this list as of M6 Phase 3 (Req 6) -- see rest_posts_write_test.go for
+// their now-implemented coverage.
 func TestRESTWritesNotImplemented(t *testing.T) {
 	fake := &fakeSessions{authPrincipal: auth.NewPrincipal(7, "editor", []string{"administrator"})}
 	h := newRESTRouter(t, fake)
@@ -459,12 +463,6 @@ func TestRESTWritesNotImplemented(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/wp-json/wp/v2/posts"},
-		{http.MethodPut, "/wp-json/wp/v2/posts/1"},
-		{http.MethodPatch, "/wp-json/wp/v2/posts/1"},
-		{http.MethodDelete, "/wp-json/wp/v2/posts/1"},
-		{http.MethodPost, "/wp-json/wp/v2/pages"},
-		{http.MethodPut, "/wp-json/wp/v2/pages/5"},
 		{http.MethodPost, "/wp-json/wp/v2/media"},
 		{http.MethodPut, "/wp-json/wp/v2/media/201"},
 		{http.MethodPost, "/wp-json/wp/v2/users"},

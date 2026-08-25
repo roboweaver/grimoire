@@ -1,0 +1,15 @@
+.richtext-surface {
+  border: 1px solid var(--spectrum-global-color-gray-300);
+  border-radius: 4px;
+  padding: 8px 12px;
+  min-height: 200px;
+}
+
+.richtext-surface .ProseMirror {
+  outline: none;
+  min-height: 180px;
+}
+
+.richtext-surface img {
+  max-width: 100%;
+}

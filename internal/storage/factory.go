@@ -35,6 +35,10 @@ type Set struct {
 	TermWriter   domain.TermWriter
 	OptionWriter domain.OptionWriter
 
+	// M6 additive write/read ports backing the admin CRUD editor.
+	PostTermsWriter domain.PostTermsWriter
+	TermReader      domain.TermReader
+
 	Comments      domain.CommentRepository
 	CommentWriter domain.CommentWriter
 	CommentMeta   domain.CommentMetaRepository
@@ -134,6 +138,7 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 	commentMeta := wprepo.NewCommentMetaRepo(bunDB, prefix)
 	media := wprepo.NewMediaRepo(bunDB, prefix)
 	menus := wprepo.NewNavMenuRepo(bunDB, prefix)
+	postTerms := wprepo.NewPostTermsRepo(bunDB, prefix)
 	return &Repositories{
 		Set: Set{
 			Posts:   posts,
@@ -148,6 +153,9 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			TermWriter:   terms,
 			OptionWriter: options,
 
+			PostTermsWriter: postTerms,
+			TermReader:      terms,
+
 			Comments:      comments,
 			CommentWriter: comments,
 			CommentMeta:   commentMeta,
@@ -160,7 +168,7 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			UserCounter: users,
 			TermCounter: terms,
 
-			PostTerms: wprepo.NewPostTermsRepo(bunDB, prefix),
+			PostTerms: postTerms,
 			PostMeta:  wprepo.NewPostMetaRepo(bunDB, prefix),
 		},
 		db:    db,

@@ -8,11 +8,17 @@ import {
   Row,
   Cell,
   ActionButton,
+  Button,
+  DialogTrigger,
+  AlertDialog,
   Text,
   StatusLight,
 } from "@adobe/react-spectrum";
 import ChevronLeft from "@spectrum-icons/workflow/ChevronLeft";
 import ChevronRight from "@spectrum-icons/workflow/ChevronRight";
+import Delete from "@spectrum-icons/workflow/Delete";
+import Edit from "@spectrum-icons/workflow/Edit";
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { useAsync } from "../hooks";
@@ -29,18 +35,29 @@ const STATUS_VARIANT: Record<
   future: "info",
 };
 
+interface PostsListProps {
+  type?: "post" | "page";
+}
+
 // PostsList renders the paginated content listing (incl. drafts and pages) from
 // GET /admin/api/posts (Req 5, 8.2). Page state lives in the URL query so SPA
-// navigation and reloads are stable.
-export function PostsList() {
+// navigation and reloads are stable. `type` filters to posts or pages
+// (task 4.12); the "/pages" route passes type="page", "/posts" passes
+// type="post".
+export function PostsList({ type = "post" }: PostsListProps) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const page = Math.max(1, Number(params.get("page") || "1") || 1);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const state = useAsync(
-    (signal) => api.posts({ page, perPage: 10 }, signal),
-    [page],
+    (signal) => api.posts({ page, perPage: 10, type }, signal),
+    [page, type, reloadToken],
   );
+
+  const basePath = type === "page" ? "/pages" : "/posts";
+  const label = type === "page" ? "page" : "post";
 
   function goToPage(next: number) {
     setParams((prev) => {
@@ -50,9 +67,28 @@ export function PostsList() {
     });
   }
 
+  async function handleDelete(id: number) {
+    setDeleteError(null);
+    try {
+      await api.deletePost(id);
+      setReloadToken((t) => t + 1);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Delete failed.");
+    }
+  }
+
   return (
     <Flex direction="column" gap="size-300">
-      <Heading level={1}>Content</Heading>
+      <Flex direction="row" justifyContent="space-between" alignItems="center">
+        <Heading level={1} margin={0}>
+          {type === "page" ? "Pages" : "Content"}
+        </Heading>
+        <Button variant="accent" onPress={() => navigate(`${basePath}/new`)}>
+          New {label}
+        </Button>
+      </Flex>
+
+      {deleteError && <ErrorState message={deleteError} />}
 
       {state.status === "loading" && <Loading label="Loading content" />}
       {state.status === "forbidden" && <Forbidden />}
@@ -60,33 +96,31 @@ export function PostsList() {
       {state.status === "success" &&
         (state.data.items.length === 0 ? (
           <Empty
-            heading="No content"
+            heading={`No ${label}s`}
             message="Nothing has been published or drafted yet."
           />
         ) : (
           <>
             <TableView
-              aria-label="Posts and pages"
-              onAction={(key) => navigate(`/posts/${key}`)}
+              aria-label={type === "page" ? "Pages" : "Posts and pages"}
               density="spacious"
             >
               <TableHeader>
                 <Column key="title">Title</Column>
-                <Column key="type" width={120}>
-                  Type
-                </Column>
                 <Column key="status" width={140}>
                   Status
                 </Column>
                 <Column key="date" width={200}>
                   Date
                 </Column>
+                <Column key="actions" width={140} align="end">
+                  Actions
+                </Column>
               </TableHeader>
               <TableBody>
                 {state.data.items.map((item) => (
                   <Row key={item.id}>
                     <Cell>{item.title || "(untitled)"}</Cell>
-                    <Cell>{item.type}</Cell>
                     <Cell>
                       <StatusLight
                         variant={STATUS_VARIANT[item.status] ?? "neutral"}
@@ -95,6 +129,39 @@ export function PostsList() {
                       </StatusLight>
                     </Cell>
                     <Cell>{formatDate(item.date)}</Cell>
+                    <Cell>
+                      <Flex gap="size-100" justifyContent="end">
+                        <ActionButton
+                          isQuiet
+                          aria-label={`Edit ${item.title || "item"}`}
+                          onPress={() => navigate(`${basePath}/${item.id}`)}
+                        >
+                          <Edit />
+                        </ActionButton>
+                        <DialogTrigger>
+                          <ActionButton
+                            isQuiet
+                            aria-label={`Delete ${item.title || "item"}`}
+                          >
+                            <Delete />
+                          </ActionButton>
+                          {(close) => (
+                            <AlertDialog
+                              title={`Delete this ${label}?`}
+                              variant="destructive"
+                              primaryActionLabel="Delete"
+                              cancelLabel="Cancel"
+                              onPrimaryAction={() => {
+                                void handleDelete(item.id);
+                                close();
+                              }}
+                            >
+                              This cannot be undone.
+                            </AlertDialog>
+                          )}
+                        </DialogTrigger>
+                      </Flex>
+                    </Cell>
                   </Row>
                 ))}
               </TableBody>

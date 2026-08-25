@@ -39,9 +39,21 @@ func (s *Server) jsonHandler(h handlerFunc) http.Handler {
 		if err == nil {
 			return
 		}
+		var conflictErr *content.ConflictError
 		switch {
 		case errors.Is(err, domain.ErrNotFound):
 			writeJSONError(w, http.StatusNotFound, "not_found", "resource not found")
+		case errors.Is(err, content.ErrForbidden):
+			writeJSONError(w, http.StatusForbidden, "forbidden", "insufficient permissions")
+		case errors.As(err, &conflictErr):
+			// Non-standard envelope: the design intentionally departs from
+			// writeJSONError's {"error":{"code":...,"message":...}} shape so
+			// clients can read currentModified directly off the top-level
+			// error object (Req 3/design.md Status-codes table).
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":           "conflict",
+				"currentModified": conflictErr.CurrentModified.UTC().Format("2006-01-02T15:04:05Z07:00"),
+			})
 		case errors.As(err, &badRequestError{}):
 			writeJSONError(w, http.StatusBadRequest, "bad_request", err.Error())
 		default:
@@ -122,16 +134,26 @@ type postsResponse struct {
 	TotalPages int            `json:"totalPages"`
 }
 
+type termSummary struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+}
+
 type postDetailResponse struct {
-	ID      int64  `json:"id"`
-	Title   string `json:"title"`
-	Slug    string `json:"slug"`
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	Author  int64  `json:"author"`
-	Date    string `json:"date"`
-	Excerpt string `json:"excerpt"`
-	Content string `json:"content"`
+	ID            int64                    `json:"id"`
+	Title         string                   `json:"title"`
+	Slug          string                   `json:"slug"`
+	Type          string                   `json:"type"`
+	Status        string                   `json:"status"`
+	Author        int64                    `json:"author"`
+	Date          string                   `json:"date"`
+	Modified      string                   `json:"modified"`
+	Excerpt       string                   `json:"excerpt"`
+	Content       string                   `json:"content"`
+	CommentStatus string                   `json:"commentStatus"`
+	Terms         map[string][]termSummary `json:"terms"`
+	Partial       map[string]string        `json:"partial,omitempty"`
 }
 
 // --- handlers ---
@@ -222,17 +244,11 @@ func (s *Server) adminPost(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return writeJSON(w, http.StatusOK, postDetailResponse{
-		ID:      p.ID,
-		Title:   p.Title,
-		Slug:    p.Slug,
-		Type:    p.Type,
-		Status:  p.Status,
-		Author:  p.Author,
-		Date:    p.Date.UTC().Format("2006-01-02T15:04:05Z07:00"),
-		Excerpt: p.Excerpt,
-		Content: p.Content,
-	})
+	resp, err := s.postDetail(r.Context(), p)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, resp)
 }
 
 // --- helpers ---

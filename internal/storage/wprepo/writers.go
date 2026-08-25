@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/storage/rebind"
@@ -34,30 +35,64 @@ func (r *PostRepo) ByID(ctx context.Context, id int64) (domain.Post, error) {
 
 // Create inserts a new post and returns its generated ID. The autoincrement
 // "ID" column is omitted from the insert, so the unquoted SQL is vendor-safe.
+// Modified/ModifiedGMT are always set to the current time (Req 3.4); DateGMT
+// defaults to the UTC equivalent of Date when the caller left it zero (mirrors
+// WordPress's own post_date/post_date_gmt pairing), falling back to the
+// current time only when Date is also zero.
 func (r *PostRepo) Create(ctx context.Context, p domain.Post) (int64, error) {
+	now := time.Now()
+	dateGMT := p.DateGMT
+	if dateGMT.IsZero() {
+		if !p.Date.IsZero() {
+			dateGMT = p.Date.UTC()
+		} else {
+			dateGMT = now
+		}
+	}
 	cols := []string{
 		"post_author", "post_date", "post_content", "post_title",
-		"post_excerpt", "post_status", "post_name", "post_type",
+		"post_excerpt", "post_status", "post_name", "post_type", "comment_status",
+		"post_date_gmt", "post_modified", "post_modified_gmt",
 	}
 	args := []any{
 		p.Author, formatTS(p.Date), p.Content, p.Title,
-		p.Excerpt, p.Status, p.Slug, p.Type,
+		p.Excerpt, p.Status, p.Slug, p.Type, p.CommentStatus,
+		formatTS(dateGMT), formatTS(now), formatTS(now),
 	}
 	return insertReturningID(ctx, r.db, vendorOf(r.db), r.prefix+"posts", cols, `"ID"`, args...)
 }
 
 // Update replaces an existing post's mutable fields by ID, or ErrNotFound.
+// Modified/ModifiedGMT are always bumped to the current time (Req 1.1/1.2),
+// overriding whatever the caller passed in p.Modified/p.ModifiedGMT.
+// post_date_gmt is re-derived from p.Date (UTC) on every update, since
+// PostWriteService.Update always passes a fully-merged, non-zero Date (either
+// the caller's new date or the record's own unchanged one) — so date_gmt
+// never goes stale the way it would if it were only ever set on create.
 func (r *PostRepo) Update(ctx context.Context, p domain.Post) error {
+	now := time.Now()
+	dateGMT := p.DateGMT
+	if dateGMT.IsZero() {
+		if !p.Date.IsZero() {
+			dateGMT = p.Date.UTC()
+		} else {
+			dateGMT = now
+		}
+	}
 	res, err := r.db.NewUpdate().
 		TableExpr("?", bun.Ident(r.prefix+"posts")).
 		Set("post_author = ?", p.Author).
 		Set("post_date = ?", formatTS(p.Date)).
+		Set("post_date_gmt = ?", formatTS(dateGMT)).
 		Set("post_content = ?", p.Content).
 		Set("post_title = ?", p.Title).
 		Set("post_excerpt = ?", p.Excerpt).
 		Set("post_status = ?", p.Status).
 		Set("post_name = ?", p.Slug).
 		Set("post_type = ?", p.Type).
+		Set("comment_status = ?", p.CommentStatus).
+		Set("post_modified = ?", formatTS(now)).
+		Set("post_modified_gmt = ?", formatTS(now)).
 		Where("? = ?", bun.Ident("ID"), p.ID).
 		Exec(ctx)
 	if err != nil {
@@ -102,6 +137,33 @@ func (r *TermRepo) Create(ctx context.Context, t domain.Term) (int64, error) {
 		return 0, err
 	}
 	return termID, nil
+}
+
+// Update renames an existing term's name/slug by term_id, or ErrNotFound.
+// Taxonomy is immutable via Update (Req 1.1/1.2 only describe rename); a
+// caller wanting to move a term to a different taxonomy would Delete and
+// re-Create.
+func (r *TermRepo) Update(ctx context.Context, t domain.Term) error {
+	res, err := r.db.NewUpdate().
+		TableExpr("?", bun.Ident(r.prefix+"terms")).
+		Set("name = ?", t.Name).
+		Set("slug = ?", t.Slug).
+		Where("term_id = ?", t.ID).
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	// errNotFoundIfMissing (not errNotFoundIfZero) because MySQL's default
+	// driver reports RowsAffected=0 for a matched-but-unchanged UPDATE (a
+	// no-op rename submitting the term's current name/slug), while
+	// SQLite/PostgreSQL report 1 — using the naive zero-rows check here
+	// would 404 a legitimate no-op rename on MySQL specifically.
+	return errNotFoundIfMissing(ctx, res, func(ctx context.Context) (bool, error) {
+		return r.db.NewSelect().
+			TableExpr("?", bun.Ident(r.prefix+"terms")).
+			Where("term_id = ?", t.ID).
+			Exists(ctx)
+	})
 }
 
 // Delete removes a term, its taxonomy rows, and any term relationships pointing
@@ -169,5 +231,6 @@ func (r *OptionRepo) Delete(ctx context.Context, name string) error {
 var (
 	_ domain.PostWriter   = (*PostRepo)(nil)
 	_ domain.TermWriter   = (*TermRepo)(nil)
+	_ domain.TermReader   = (*TermRepo)(nil)
 	_ domain.OptionWriter = (*OptionRepo)(nil)
 )

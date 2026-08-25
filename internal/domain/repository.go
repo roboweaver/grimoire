@@ -233,13 +233,41 @@ type PostWriter interface {
 	Delete(ctx context.Context, id int64) error
 }
 
-// TermWriter creates and deletes taxonomy terms ({prefix}terms +
+// TermWriter creates, updates, and deletes taxonomy terms ({prefix}terms +
 // {prefix}term_taxonomy).
 type TermWriter interface {
 	// Create inserts a term and its taxonomy row, returning the term_id.
 	Create(ctx context.Context, t Term) (int64, error)
+	// Update renames an existing term's name/slug by term_id, or ErrNotFound.
+	Update(ctx context.Context, t Term) error
 	// Delete removes a term and its taxonomy rows by term_id, or ErrNotFound.
 	Delete(ctx context.Context, id int64) error
+}
+
+// TermReader lists and bulk-resolves taxonomy terms. It is additive and
+// read-only, added by M6 to serve the admin editor's term picker (Req 2.4)
+// and post-detail term resolution (Req 4.1) — neither of which
+// TermRepository.BySlug (single term by slug) can serve.
+type TermReader interface {
+	// ListByTaxonomy returns every term of the given taxonomy (e.g.
+	// "category", "post_tag"), ordered by name.
+	ListByTaxonomy(ctx context.Context, taxonomy string) ([]Term, error)
+	// TermsByIDs bulk-resolves term IDs to full {ID, Name, Slug, Taxonomy}
+	// objects. Unknown IDs are silently omitted from the result, not an
+	// error. An empty ids slice returns an empty result and a nil error.
+	TermsByIDs(ctx context.Context, ids []int64) ([]Term, error)
+}
+
+// PostTermsWriter replaces a post's taxonomy term relationships
+// ({prefix}term_relationships). It is additive: no write path for
+// term_relationships existed before M6 (PostTermsRepository, M5, is
+// read-only).
+type PostTermsWriter interface {
+	// SetPostTerms replaces postID's term relationships for taxonomy with
+	// exactly termIDs (an empty slice clears that taxonomy's terms from the
+	// post), maintaining each affected term_taxonomy.count. Other taxonomies'
+	// relationships for the same post are left untouched.
+	SetPostTerms(ctx context.Context, postID int64, taxonomy string, termIDs []int64) error
 }
 
 // OptionWriter sets and deletes site options ({prefix}options).

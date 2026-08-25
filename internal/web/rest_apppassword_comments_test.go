@@ -296,6 +296,32 @@ func TestApplicationPasswordAuthRequiresTLSOrLoopbackBeforeVerification(t *testi
 	}
 }
 
+// TestApplicationPasswordAuthRequiresTLSOrLoopbackBeforeVerificationForWrites
+// is TestApplicationPasswordAuthRequiresTLSOrLoopbackBeforeVerification's
+// sibling for a write verb (Req 6/8.9, task 3.6): the TLS/loopback gate sits
+// in front of Application Password verification for every wp-json route
+// regardless of HTTP method, so a non-TLS, non-loopback POST must also be
+// rejected before the (M6) write handler is ever reached -- proven here by
+// using newAppPasswordRESTRouter, whose router has no WithAdminWrites
+// wiring at all, so a nil s.postWrite would panic if the request ever
+// reached handleRESTPostCreate.
+func TestApplicationPasswordAuthRequiresTLSOrLoopbackBeforeVerificationForWrites(t *testing.T) {
+	h, _, ap := newAppPasswordRESTRouter(t, &fakeSessions{}, true, "")
+	secret := mintAppPassword(t, context.Background(), ap)
+
+	body := `{"title":"Nope","status":"draft"}`
+	req := httptest.NewRequest(http.MethodPost, "/wp-json/wp/v2/posts", strings.NewReader(body))
+	req.SetBasicAuth("admin", secret)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("non-TLS non-loopback write status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+	}
+	if code := decodeRESTErrCode(t, rec); code != "rest_invalid_credentials" {
+		t.Errorf("error code = %q, want rest_invalid_credentials", code)
+	}
+}
+
 // TestApplicationPasswordAuthLoopbackExceptionIgnoresSpoofedHostHeader
 // verifies the fix for a Host-header-spoofing bypass: r.Host is entirely
 // client-controlled on a plain HTTP request (it's copied from the Host

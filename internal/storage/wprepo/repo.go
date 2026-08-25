@@ -183,7 +183,49 @@ func (r *TermRepo) BySlug(ctx context.Context, taxonomy, slug string) (domain.Te
 	return domain.Term{ID: row.ID, Name: row.Name, Slug: row.Slug, Taxonomy: row.Taxonomy}, nil
 }
 
-// OptionRepo reads site options.
+// ListByTaxonomy returns every term of the given taxonomy, ordered by name.
+func (r *TermRepo) ListByTaxonomy(ctx context.Context, taxonomy string) ([]domain.Term, error) {
+	var rows []termRow
+	err := r.db.NewSelect().
+		TableExpr("? AS t", bun.Ident(r.prefix+"terms")).
+		ColumnExpr("t.term_id, t.name, t.slug, tt.taxonomy").
+		Join("JOIN ? AS tt ON tt.term_id = t.term_id", bun.Ident(r.prefix+"term_taxonomy")).
+		Where("tt.taxonomy = ?", taxonomy).
+		OrderExpr("t.name ASC").
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	terms := make([]domain.Term, len(rows))
+	for i, row := range rows {
+		terms[i] = domain.Term{ID: row.ID, Name: row.Name, Slug: row.Slug, Taxonomy: row.Taxonomy}
+	}
+	return terms, nil
+}
+
+// TermsByIDs bulk-resolves term IDs to full Term objects. Unknown IDs are
+// silently omitted; an empty ids slice returns an empty result.
+func (r *TermRepo) TermsByIDs(ctx context.Context, ids []int64) ([]domain.Term, error) {
+	if len(ids) == 0 {
+		return []domain.Term{}, nil
+	}
+	var rows []termRow
+	err := r.db.NewSelect().
+		TableExpr("? AS t", bun.Ident(r.prefix+"terms")).
+		ColumnExpr("t.term_id, t.name, t.slug, tt.taxonomy").
+		Join("JOIN ? AS tt ON tt.term_id = t.term_id", bun.Ident(r.prefix+"term_taxonomy")).
+		Where("t.term_id IN (?)", bun.In(ids)).
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	terms := make([]domain.Term, len(rows))
+	for i, row := range rows {
+		terms[i] = domain.Term{ID: row.ID, Name: row.Name, Slug: row.Slug, Taxonomy: row.Taxonomy}
+	}
+	return terms, nil
+}
+
 type OptionRepo struct {
 	db     *bun.DB
 	prefix string

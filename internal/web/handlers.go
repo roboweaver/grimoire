@@ -36,7 +36,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	data := render.IndexData{SiteTitle: title, Tagline: tagline, Posts: postViews(posts)}
+	data := render.IndexData{SiteTitle: title, Tagline: tagline, Posts: postViews(posts, s.options.BaseURLs(ctx))}
 	return s.renderHTML(w, r, "index", data)
 }
 
@@ -84,7 +84,7 @@ func (s *Server) single(w http.ResponseWriter, r *http.Request) error {
 		}
 		menu = navMenuView(m)
 	}
-	data := render.SingleData{SiteTitle: title, Tagline: tagline, Post: postView(post), Comments: comments, CommentCount: commentCount, PendingComment: pending, CommentToken: commentToken, Menu: menu}
+	data := render.SingleData{SiteTitle: title, Tagline: tagline, Post: postView(post, s.options.BaseURLs(ctx)), Comments: comments, CommentCount: commentCount, PendingComment: pending, CommentToken: commentToken, Menu: menu}
 	return s.renderHTML(w, r, kind, data)
 }
 
@@ -96,7 +96,7 @@ func (s *Server) category(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	title, tagline := s.options.SiteInfo(ctx)
-	data := render.CategoryData{SiteTitle: title, Tagline: tagline, Term: termView(term), Posts: postViews(posts)}
+	data := render.CategoryData{SiteTitle: title, Tagline: tagline, Term: termView(term), Posts: postViews(posts, s.options.BaseURLs(ctx))}
 	return s.renderHTML(w, r, "category", data)
 }
 

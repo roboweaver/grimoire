@@ -54,3 +54,23 @@ jobs:
             echo "internal/admin/dist is stale; run 'make admin' and commit the result."
             exit 1
           fi
+
+  theme-css-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build theme CSS
+        run: make theme-css
+
+      - name: Verify committed theme CSS matches source
+        run: |
+          if ! git diff --exit-code -- themes/default/static/css; then
+            echo "themes/default/static/css is stale; run 'make theme-css' and commit the result."
+            exit 1
+          fi

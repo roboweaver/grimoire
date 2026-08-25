@@ -27,6 +27,11 @@ type Post struct {
 	PingStatus string
 	Password   string
 	GUID       string
+
+	// ParentID backs post_parent (added by the 0005 migration; default 0).
+	// For post_type='revision' rows this is the owning post's ID; it is also
+	// used generically for WordPress-style hierarchical parenting.
+	ParentID int64
 }
 
 // Term is a taxonomy term (e.g. a category or tag) resolved together with the

@@ -684,6 +684,53 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		}
 	})
 
+	// Req 1.2: post_parent (added by migration 0003, already present on every
+	// grimoire schema) must round-trip through the general PostWriter/Posts
+	// path, not just the media-attachment path -- revisions (task 1.3+) rely
+	// on Create/Update persisting ParentID and ByID/BySlug reading it back.
+	t.Run("PostWriter Create/Update persists ParentID (post_parent)", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		id, err := repos.PostWriter.Create(ctx, domain.Post{
+			Author:        1,
+			Date:          time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC),
+			Content:       "<p>child</p>",
+			Title:         "Child Post",
+			Status:        "publish",
+			Slug:          "child-post",
+			Type:          "post",
+			CommentStatus: "open",
+			ParentID:      5,
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		got, err := repos.Posts.BySlug(ctx, "child-post")
+		if err != nil {
+			t.Fatalf("BySlug after create: %v", err)
+		}
+		if got.ParentID != 5 {
+			t.Errorf("Create: ParentID = %d, want 5", got.ParentID)
+		}
+
+		got.ParentID = 0
+		if err := repos.PostWriter.Update(ctx, got); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		reread, err := repos.Posts.BySlug(ctx, "child-post")
+		if err != nil {
+			t.Fatalf("BySlug after update: %v", err)
+		}
+		if reread.ParentID != 0 {
+			t.Errorf("Update: ParentID = %d, want 0", reread.ParentID)
+		}
+
+		if err := repos.PostWriter.Delete(ctx, id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+	})
+
 	t.Run("TermWriter Create, Update, and Delete", func(t *testing.T) {
 		repos, cleanup := newRepos(t)
 		defer cleanup()

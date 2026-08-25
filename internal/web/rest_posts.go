@@ -1,9 +1,11 @@
 package web
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -11,25 +13,32 @@ import (
 	"github.com/roboweaver/grimoire/internal/domain"
 )
 
+// restWriteDateLayout mirrors content's unexported restDateFormat -- a
+// naive, no-timezone ISO-8601 layout matching WordPress's own REST date
+// rendering -- for parsing the "date" field on write request bodies (Req
+// 6.1). It is redeclared here rather than exported from content because
+// internal/web has no other dependency on that constant.
+const restWriteDateLayout = "2006-01-02T15:04:05"
+
 // registerRESTPosts registers the GET .../posts, .../pages endpoints (Req
-// 2.1, 2.4) and 501 stubs for every write method (Req 2.5). Every write
-// verb is registered on both the collection and single-item route so an
-// unplanned-but-plausible write (e.g. POST on {id}, or PUT/PATCH/DELETE on
-// the bare collection) 501s instead of falling through to chi's
-// MethodNotAllowed 405 (Req 7.5: never silently 404/405 a write planned for
-// a later milestone).
+// 2.1, 2.4), the create/update/delete endpoints (Req 6.1-6.4), and 501
+// stubs for every write method/route combination Req 6 does not implement
+// (POST on a single item, PUT/PATCH/DELETE on the bare collection -- Req
+// 7.5's "never silently 404/405 a write planned for later" carries forward
+// unchanged for these still-deferred combinations).
 func (s *Server) registerRESTPosts(r chi.Router) {
 	for _, typ := range []string{"post", "page"} {
 		path, single := restPostBase(typ)
 		r.Method(http.MethodGet, path, s.handleRESTPostsCollection(typ))
 		r.Method(http.MethodGet, single, s.handleRESTPostSingle(typ))
-		r.Method(http.MethodPost, path, restNotImplemented("rest_cannot_create", "Creating a "+typ))
+		r.Method(http.MethodPost, path, s.handleRESTPostCreate(typ))
+		r.Method(http.MethodPut, single, s.handleRESTPostUpdate(typ))
+		r.Method(http.MethodPatch, single, s.handleRESTPostUpdate(typ))
+		r.Method(http.MethodDelete, single, s.handleRESTPostDelete(typ))
 		for _, m := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
 			r.Method(m, path, restNotImplemented("rest_cannot_edit", "Updating or deleting a "+typ))
 		}
-		for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
-			r.Method(m, single, restNotImplemented("rest_cannot_edit", "Updating or deleting a "+typ))
-		}
+		r.Method(http.MethodPost, single, restNotImplemented("rest_cannot_edit", "Updating or deleting a "+typ))
 	}
 }
 
@@ -175,6 +184,228 @@ func (s *Server) handleRESTPostSingle(typ string) http.HandlerFunc {
 func (s *Server) canEditPosts(r *http.Request) bool {
 	p, ok := PrincipalFrom(r.Context())
 	return ok && p.Can("edit_posts")
+}
+
+// restPostWriteRequest is the JSON body shape POST/PUT/PATCH
+// .../posts, .../pages accept (Req 6.1). Fields use WordPress's own
+// snake_case REST vocabulary -- deliberately different from the admin API's
+// camelCase postWriteRequest -- and there is no categories/tags field:
+// term assignment stays admin-API-only (Req 6.1).
+type restPostWriteRequest struct {
+	Title         string `json:"title"`
+	Content       string `json:"content"`
+	Excerpt       string `json:"excerpt"`
+	Slug          string `json:"slug"`
+	Status        string `json:"status"`
+	Date          string `json:"date"`
+	CommentStatus string `json:"comment_status"`
+}
+
+// parseRESTPostWrite validates body per Req 6.1, reusing the admin API's
+// status vocabulary and title/date rules (Req 5.1/5.2, validPostStatuses is
+// shared with adminapi_posts.go). current, when non-nil, is the post's
+// existing stored record (only supplied for updates) and backs the same
+// unchanged-date exception parsePostWrite implements. typ comes from the
+// route closure, not the body, since REST scopes type by URL
+// (.../posts vs .../pages) rather than a body field.
+func (s *Server) parseRESTPostWrite(body restPostWriteRequest, typ string, current *domain.Post) (domain.Post, string, error) {
+	status := body.Status
+	if status == "" {
+		status = "draft"
+	}
+	if !validPostStatuses[status] {
+		return domain.Post{}, "rest_invalid_param", errors.New("invalid status")
+	}
+	if body.Title == "" && status != "draft" {
+		return domain.Post{}, "rest_invalid_param", errors.New("title is required unless status is draft")
+	}
+	var date time.Time
+	if body.Date != "" {
+		var err error
+		date, err = time.Parse(restWriteDateLayout, body.Date)
+		if err != nil {
+			return domain.Post{}, "rest_invalid_param", errors.New("invalid date")
+		}
+	}
+	if status == "future" && !date.IsZero() && !date.After(time.Now()) {
+		// Same Req 5.2 exception the admin API applies: resubmitting the
+		// post's own currently-stored date unchanged is allowed through
+		// even though that date is no longer in the future.
+		unchanged := current != nil && current.Date.Equal(date)
+		if !unchanged {
+			return domain.Post{}, "rest_invalid_param", errors.New("future status requires a date in the future")
+		}
+	}
+	return domain.Post{
+		Title:         body.Title,
+		Content:       body.Content,
+		Excerpt:       body.Excerpt,
+		Slug:          body.Slug,
+		Status:        status,
+		Type:          typ,
+		Date:          date,
+		CommentStatus: body.CommentStatus,
+	}, "", nil
+}
+
+// handleRESTPostCreate handles POST .../posts, .../pages (Req 6.1).
+func (s *Server) handleRESTPostCreate(typ string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, _ := PrincipalFrom(r.Context())
+		var body restPostWriteRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid request body.")
+			return
+		}
+		p, code, err := s.parseRESTPostWrite(body, typ, nil)
+		if err != nil {
+			writeRESTError(w, http.StatusBadRequest, code, err.Error())
+			return
+		}
+		id, err := s.postWrite.Create(r.Context(), principal, p)
+		if err != nil {
+			if errors.Is(err, content.ErrForbidden) {
+				writeRESTError(w, http.StatusForbidden, "rest_cannot_create", "Sorry, you are not allowed to create "+typ+"s as this user.")
+				return
+			}
+			writeRESTError(w, http.StatusInternalServerError, "rest_create_failed", "Could not create "+typ+".")
+			return
+		}
+		s.writeRESTPostResult(w, r, typ, id, http.StatusCreated)
+	}
+}
+
+// handleRESTPostUpdate handles PUT/PATCH .../posts/{id}, .../pages/{id}
+// (Req 6.2/6.4/6.5/6.8). Existence and type are checked before
+// authorization -- a deliberate REST/admin-API asymmetry documented at Req
+// 6.8 -- and an optional If-Unmodified-Since header supplies the
+// optimistic-concurrency check (Req 6.4); omitting it is last-write-wins
+// (Req 6.5). A present-but-unparseable header is treated the same as an
+// absent one rather than rejected, since Req 6.5 frames the header as
+// strictly optional.
+func (s *Server) handleRESTPostUpdate(typ string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, _ := PrincipalFrom(r.Context())
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
+			return
+		}
+		current, err := s.restPostByID.ByID(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
+				return
+			}
+			writeRESTError(w, http.StatusInternalServerError, "rest_post_invalid_id", "Could not look up "+typ+".")
+			return
+		}
+		if current.Type != typ {
+			writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
+			return
+		}
+		var body restPostWriteRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid request body.")
+			return
+		}
+		p, code, err := s.parseRESTPostWrite(body, typ, &current)
+		if err != nil {
+			writeRESTError(w, http.StatusBadRequest, code, err.Error())
+			return
+		}
+		p.ID = id
+		var expectedModified time.Time
+		if h := r.Header.Get("If-Unmodified-Since"); h != "" {
+			if t, err := http.ParseTime(h); err == nil {
+				expectedModified = t
+			}
+		}
+		if err := s.postWrite.Update(r.Context(), principal, p, expectedModified); err != nil {
+			var conflict *content.ConflictError
+			switch {
+			case errors.Is(err, content.ErrForbidden):
+				writeRESTError(w, http.StatusForbidden, "rest_cannot_edit", "Sorry, you are not allowed to update this "+typ+".")
+			case errors.As(err, &conflict):
+				writeRESTError(w, http.StatusConflict, "rest_conflict", "The "+typ+" has been modified since it was last read.")
+			default:
+				writeRESTError(w, http.StatusInternalServerError, "rest_update_failed", "Could not update "+typ+".")
+			}
+			return
+		}
+		s.writeRESTPostResult(w, r, typ, id, http.StatusOK)
+	}
+}
+
+// handleRESTPostDelete handles DELETE .../posts/{id}, .../pages/{id} (Req
+// 6.3/6.8). Existence and type are checked before authorization, same as
+// update. Unlike the admin API's 204, WP REST parity requires 200 with the
+// deleted item echoed back in "previous" (Req 6.3). There is no distinct
+// "rest_cannot_delete" code in the spec, so a forbidden delete reuses
+// "rest_cannot_edit", matching the same code update's forbidden case uses.
+func (s *Server) handleRESTPostDelete(typ string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, _ := PrincipalFrom(r.Context())
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
+			return
+		}
+		current, err := s.restPostByID.ByID(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
+				return
+			}
+			writeRESTError(w, http.StatusInternalServerError, "rest_post_invalid_id", "Could not look up "+typ+".")
+			return
+		}
+		if current.Type != typ {
+			writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
+			return
+		}
+		item, links, embedded, err := s.mapRESTPost(r, typ, current)
+		if err != nil {
+			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
+			return
+		}
+		previous, err := withEnvelope(item, links, embedded)
+		if err != nil {
+			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not encode "+typ+".")
+			return
+		}
+		if err := s.postWrite.Delete(r.Context(), principal, domain.Post{ID: id}); err != nil {
+			if errors.Is(err, content.ErrForbidden) {
+				writeRESTError(w, http.StatusForbidden, "rest_cannot_edit", "Sorry, you are not allowed to delete this "+typ+".")
+				return
+			}
+			writeRESTError(w, http.StatusInternalServerError, "rest_delete_failed", "Could not delete "+typ+".")
+			return
+		}
+		_ = writeRESTResponse(w, r, http.StatusOK, map[string]any{"deleted": true, "previous": previous})
+	}
+}
+
+// writeRESTPostResult fetches the just-written post/page by id and writes
+// the create/update success response (Req 6.1/6.2), reusing the same
+// mapRESTPost/withEnvelope pipeline GET responses use.
+func (s *Server) writeRESTPostResult(w http.ResponseWriter, r *http.Request, typ string, id int64, status int) {
+	p, err := s.restPostByID.ByID(r.Context(), id)
+	if err != nil {
+		writeRESTError(w, http.StatusInternalServerError, "rest_post_invalid_id", "Could not look up "+typ+" after write.")
+		return
+	}
+	item, links, embedded, err := s.mapRESTPost(r, typ, p)
+	if err != nil {
+		writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
+		return
+	}
+	enveloped, err := withEnvelope(item, links, embedded)
+	if err != nil {
+		writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not encode "+typ+".")
+		return
+	}
+	_ = writeRESTResponse(w, r, status, enveloped)
 }
 
 // mapRESTPost maps a domain.Post through content.RESTMapper.Post/Page and

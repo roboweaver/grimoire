@@ -506,13 +506,15 @@ func TestM5RESTCommentCreateWPShapedResponse(t *testing.T) {
 		t.Fatalf("GET /comments/%d = %d, want 200 (body %q)", created.ID, getResp.StatusCode, string(getBody))
 	}
 
-	// Writes other than POST /comments and the app-password endpoints are
-	// deferred to a later milestone (Req 7.5) -- spot-check one at the e2e
-	// boundary.
-	putResp := env.restJSON(http.MethodPut, "/wp-json/wp/v2/posts/1", nil)
-	putResp.Body.Close()
-	if putResp.StatusCode != http.StatusNotImplemented {
-		t.Errorf("PUT /posts/1 = %d, want 501", putResp.StatusCode)
+	// M6 (Req 6) implemented PUT/PATCH/DELETE .../posts/{id} and POST
+	// .../posts, so PUT /posts/1 is no longer a valid "still deferred"
+	// spot check. POST .../posts/{id} (a single item) and PUT/PATCH/DELETE
+	// on the bare collection remain intentionally unimplemented (Req 7.5) --
+	// spot-check one of those instead.
+	postSingleResp := env.restJSON(http.MethodPost, "/wp-json/wp/v2/posts/1", nil)
+	postSingleResp.Body.Close()
+	if postSingleResp.StatusCode != http.StatusNotImplemented {
+		t.Errorf("POST /posts/1 = %d, want 501", postSingleResp.StatusCode)
 	}
 }
 

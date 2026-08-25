@@ -96,6 +96,7 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	cur.Content = p.Content
 	cur.Excerpt = p.Excerpt
 	cur.Slug = p.Slug
+	cur.CommentStatus = p.CommentStatus
 	if !p.Date.IsZero() {
 		cur.Date = p.Date
 	}

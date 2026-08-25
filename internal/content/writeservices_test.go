@@ -250,6 +250,28 @@ func TestPostWriteUpdateOwnerAppliesMutableFields(t *testing.T) {
 	}
 }
 
+// TestPostWriteUpdateAppliesCommentStatus guards against a regression where
+// CommentStatus was read into the stored record but never merged from the
+// caller's input before writing (Req 1.2's commentStatus field would then be
+// silently dropped on every admin-API update).
+func TestPostWriteUpdateAppliesCommentStatus(t *testing.T) {
+	const self = 5
+	w := &fakePostWriter{store: map[int64]domain.Post{
+		7: {ID: 7, Author: self, Type: "post", Status: "draft", CommentStatus: "open"},
+	}}
+	svc := NewPostWriteService(w)
+	in := domain.Post{ID: 7, Author: self, CommentStatus: "closed"}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in, time.Time{}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if w.updated == nil {
+		t.Fatal("writer.Update not called")
+	}
+	if w.updated.CommentStatus != "closed" {
+		t.Errorf("CommentStatus = %q, want %q", w.updated.CommentStatus, "closed")
+	}
+}
+
 // TestPostWriteUpdateNotFoundIsForbidden ensures a missing record does not leak
 // existence: the service returns the generic ErrForbidden and never writes.
 func TestPostWriteUpdateNotFoundIsForbidden(t *testing.T) {

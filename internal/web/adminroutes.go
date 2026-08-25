@@ -18,6 +18,19 @@ func (s *Server) WithAdmin(spa http.Handler, svc *content.AdminService) *Server 
 	return s
 }
 
+// WithAdminWrites enables the M6 admin write routes: post create/update/delete
+// and term create/update/delete under /admin/api, each gated by the same
+// capability the read routes require plus a CSRF check. It returns the same
+// Server for chaining. When any argument is nil the write routes are not
+// registered (WithAdmin's read-only routes are unaffected either way).
+func (s *Server) WithAdminWrites(postWrite postAdminWriter, termWrite termAdminService, postTermsWrite postTermsAdminWriter, postTermsRead postTermsAdminReader) *Server {
+	s.postWrite = postWrite
+	s.termWrite = termWrite
+	s.postTermsWrite = postTermsWrite
+	s.postTermsRead = postTermsRead
+	return s
+}
+
 // registerAdmin mounts the /admin group onto r. It MUST be called before the
 // public catch-all /{slug} route so admin paths are never shadowed by content
 // resolution (Req 1.2). The JSON API is a nested subrouter registered ahead of
@@ -63,6 +76,20 @@ func (s *Server) adminAPIRouter() http.Handler {
 		gr.Method(http.MethodGet, "/posts/{id}", s.jsonHandler(s.adminPost))
 		gr.Method(http.MethodGet, "/menus", s.jsonHandler(s.adminMenus))
 		gr.Method(http.MethodGet, "/menus/{id}", s.jsonHandler(s.adminMenu))
+		gr.Method(http.MethodGet, "/terms", s.jsonHandler(s.adminTerms))
+		gr.Group(func(wgr chi.Router) {
+			wgr.Use(s.csrfJSONMiddleware) // adapter around the existing M4 helper
+			wgr.Method(http.MethodPost, "/posts", s.jsonHandler(s.adminPostCreate))
+			wgr.Method(http.MethodPut, "/posts/{id}", s.jsonHandler(s.adminPostUpdate))
+			wgr.Method(http.MethodDelete, "/posts/{id}", s.jsonHandler(s.adminPostDelete))
+		})
+	})
+	r.Group(func(gr chi.Router) {
+		gr.Use(s.requireCapabilityJSON("manage_categories"))
+		gr.Use(s.csrfJSONMiddleware)
+		gr.Method(http.MethodPost, "/terms", s.jsonHandler(s.adminTermCreate))
+		gr.Method(http.MethodPut, "/terms/{id}", s.jsonHandler(s.adminTermUpdate))
+		gr.Method(http.MethodDelete, "/terms/{id}", s.jsonHandler(s.adminTermDelete))
 	})
 	r.Group(func(gr chi.Router) {
 		gr.Use(s.requireCapabilityJSON("moderate_comments"))

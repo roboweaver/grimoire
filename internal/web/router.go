@@ -31,6 +31,17 @@ type Server struct {
 	// spa serves the embedded React Spectrum admin under /admin; nil until WithAdmin.
 	spa http.Handler
 
+	// Admin write dependencies (M6); all nil until WithAdminWrites. The
+	// /admin/api write routes are always registered (matching the existing
+	// comments/media groups' pattern below, which likewise assume their
+	// service is set once reached) — WithAdminWrites is expected to be
+	// called whenever WithAdmin is, so these are only ever nil in tests that
+	// don't exercise the write routes.
+	postWrite      postAdminWriter
+	termWrite      termAdminService
+	postTermsWrite postTermsAdminWriter
+	postTermsRead  postTermsAdminReader
+
 	// REST API dependencies; restMapper nil until WithREST, in which case the
 	// /wp-json/* routes are not registered at all.
 	restMapper     *content.RESTMapper

@@ -123,6 +123,21 @@ func (s *Server) requireSessionCSRFJSON(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// csrfJSONMiddleware is a route-group-level chi middleware adapter around
+// requireSessionCSRFJSON (unchanged since M4). M6 is the first milestone with
+// two separate capability-gated groups (posts, terms) that each need the same
+// CSRF gate, so it is applied via .Use() here rather than the per-handler
+// inline call adminapi_comments.go/adminapi_media.go still use — a pure
+// code-organization change, not a new CSRF mechanism (Req 8.4).
+func (s *Server) csrfJSONMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.requireSessionCSRFJSON(w, r) { // existing M4 helper, unchanged
+			return // requireSessionCSRFJSON already wrote the 403 response
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // checkSessionCSRF is the shared validation core for requireSessionCSRF and
 // requireSessionCSRFJSON: it looks up the session, accepts either the
 // X-CSRF-Token header or a csrf_token form field, and invokes fail with the

@@ -233,6 +233,44 @@ type PostWriter interface {
 	Delete(ctx context.Context, id int64) error
 }
 
+// RevisionWriter is the storage port used by content.RevisionWriteService and
+// content.AutosaveService. Revisions and autosave rows are ordinary rows in
+// the same {prefix}posts table PostWriter already owns (post_type
+// "revision"), so no separate repository type exists for them.
+type RevisionWriter interface {
+	// CreateRevision inserts a snapshot of a post as a new revision row
+	// (post_type='revision', post_parent=parentID, post_status='inherit'),
+	// attributed to authorID, and returns its generated ID. When autosave is
+	// true the row is named/marked so AutosaveFor can find it later.
+	CreateRevision(ctx context.Context, parentID, authorID int64, snapshot Post, autosave bool) (int64, error)
+	// ListRevisions returns newest-first summaries (no content body) of every
+	// non-autosave revision belonging to parentID.
+	ListRevisions(ctx context.Context, parentID int64) ([]RevisionMeta, error)
+	// RevisionByID returns the full content/title/excerpt for a single
+	// revision (or autosave) row by its own ID, or ErrNotFound.
+	RevisionByID(ctx context.Context, id int64) (Post, error)
+	// AutosaveFor returns the single autosave row for (parentID, authorID),
+	// or (Post{}, false, nil) when none exists yet.
+	AutosaveFor(ctx context.Context, parentID, authorID int64) (Post, bool, error)
+	// UpdateAutosave overwrites an existing autosave row's snapshot fields in
+	// place by its revision ID, or ErrNotFound.
+	UpdateAutosave(ctx context.Context, revisionID int64, snapshot Post) error
+	// PruneRevisions deletes the oldest non-autosave revisions for parentID
+	// beyond the newest `keep`, never touching the autosave row.
+	PruneRevisions(ctx context.Context, parentID int64, keep int) error
+	// DeleteRevisionsOf deletes every revision row (including the autosave,
+	// if present) for parentID. Used on post delete (Req 1.6).
+	DeleteRevisionsOf(ctx context.Context, parentID int64) error
+}
+
+// ScheduledPostFinder is the read port the scheduler polls for due
+// scheduled posts.
+type ScheduledPostFinder interface {
+	// DueScheduled returns every post with status="future" whose post_date
+	// has already passed asOf.
+	DueScheduled(ctx context.Context, asOf time.Time) ([]Post, error)
+}
+
 // TermWriter creates, updates, and deletes taxonomy terms ({prefix}terms +
 // {prefix}term_taxonomy).
 type TermWriter interface {

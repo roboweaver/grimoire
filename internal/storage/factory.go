@@ -55,6 +55,10 @@ type Set struct {
 	// M5 additive read ports backing REST responses.
 	PostTerms domain.PostTermsRepository
 	PostMeta  domain.PostMetaRepository
+
+	// M7 additive ports backing revisions/autosave and the scheduler poll.
+	Revisions domain.RevisionWriter
+	Scheduled domain.ScheduledPostFinder
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -170,6 +174,9 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 
 			PostTerms: postTerms,
 			PostMeta:  wprepo.NewPostMetaRepo(bunDB, prefix),
+
+			Revisions: posts,
+			Scheduled: posts,
 		},
 		db:    db,
 		bunDB: bunDB,

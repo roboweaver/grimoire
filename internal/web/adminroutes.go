@@ -77,20 +77,24 @@ func (s *Server) adminAPIRouter() http.Handler {
 		gr.Method(http.MethodGet, "/menus", s.jsonHandler(s.adminMenus))
 		gr.Method(http.MethodGet, "/menus/{id}", s.jsonHandler(s.adminMenu))
 		gr.Method(http.MethodGet, "/terms", s.jsonHandler(s.adminTerms))
-		gr.Group(func(wgr chi.Router) {
-			wgr.Use(s.csrfJSONMiddleware) // adapter around the existing M4 helper
-			wgr.Method(http.MethodPost, "/posts", s.jsonHandler(s.adminPostCreate))
-			wgr.Method(http.MethodPut, "/posts/{id}", s.jsonHandler(s.adminPostUpdate))
-			wgr.Method(http.MethodDelete, "/posts/{id}", s.jsonHandler(s.adminPostDelete))
+		if s.postWrite != nil {
+			gr.Group(func(wgr chi.Router) {
+				wgr.Use(s.csrfJSONMiddleware) // adapter around the existing M4 helper
+				wgr.Method(http.MethodPost, "/posts", s.jsonHandler(s.adminPostCreate))
+				wgr.Method(http.MethodPut, "/posts/{id}", s.jsonHandler(s.adminPostUpdate))
+				wgr.Method(http.MethodDelete, "/posts/{id}", s.jsonHandler(s.adminPostDelete))
+			})
+		}
+	})
+	if s.termWrite != nil {
+		r.Group(func(gr chi.Router) {
+			gr.Use(s.requireCapabilityJSON("manage_categories"))
+			gr.Use(s.csrfJSONMiddleware)
+			gr.Method(http.MethodPost, "/terms", s.jsonHandler(s.adminTermCreate))
+			gr.Method(http.MethodPut, "/terms/{id}", s.jsonHandler(s.adminTermUpdate))
+			gr.Method(http.MethodDelete, "/terms/{id}", s.jsonHandler(s.adminTermDelete))
 		})
-	})
-	r.Group(func(gr chi.Router) {
-		gr.Use(s.requireCapabilityJSON("manage_categories"))
-		gr.Use(s.csrfJSONMiddleware)
-		gr.Method(http.MethodPost, "/terms", s.jsonHandler(s.adminTermCreate))
-		gr.Method(http.MethodPut, "/terms/{id}", s.jsonHandler(s.adminTermUpdate))
-		gr.Method(http.MethodDelete, "/terms/{id}", s.jsonHandler(s.adminTermDelete))
-	})
+	}
 	r.Group(func(gr chi.Router) {
 		gr.Use(s.requireCapabilityJSON("moderate_comments"))
 		gr.Method(http.MethodGet, "/comments", s.jsonHandler(s.adminComments))

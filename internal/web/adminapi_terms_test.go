@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/roboweaver/grimoire/internal/auth"
+	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 )
 
@@ -19,6 +20,17 @@ func testTermServer(tw termAdminService) *Server {
 func TestAdminTermsListRequiresTaxonomy(t *testing.T) {
 	s := testTermServer(&fakeTermWrite{})
 	req := httptest.NewRequest(http.MethodGet, "/admin/api/terms", nil).WithContext(principalCtx("edit_posts"))
+	rec := httptest.NewRecorder()
+	s.jsonHandler(s.adminTerms).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+	assertJSONError(t, rec, "bad_request")
+}
+
+func TestAdminTermsListRejectsUnknownTaxonomy(t *testing.T) {
+	s := testTermServer(&fakeTermWrite{})
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/terms?taxonomy=nav_menu", nil).WithContext(principalCtx("edit_posts"))
 	rec := httptest.NewRecorder()
 	s.jsonHandler(s.adminTerms).ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -247,5 +259,52 @@ func TestAdminTermsWriteRoutesRequireCapability(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAdminAPIRouterOmitsWriteRoutesWhenDepsNil proves adminAPIRouter itself
+// gates the M6 write-route groups on their dependency being non-nil, rather
+// than registering them unconditionally: an embedder that calls WithAdmin
+// without WithAdminWrites (postWrite/termWrite left nil) must get a plain 404
+// on the write paths, not a nil-dereference panic recovered to 500.
+func TestAdminAPIRouterOmitsWriteRoutesWhenDepsNil(t *testing.T) {
+	srv := NewServer(nil, nil, nil, nil, nil)
+	srv.admin = &fakeAdmin{list: func(int, int, string, string) (content.AdminList, error) {
+		return content.AdminList{}, nil
+	}}
+	srv.auth = fakeSessions{p: auth.NewPrincipal(1, "admin", []string{auth.RoleAdministrator}), s: domain.Session{CSRFToken: "token"}}
+	r := srv.SessionMiddleware(srv.adminAPIRouter())
+
+	for _, req := range []*http.Request{
+		httptest.NewRequest(http.MethodPost, "/posts", strings.NewReader(`{}`)),
+		httptest.NewRequest(http.MethodPut, "/posts/1", strings.NewReader(`{}`)),
+		httptest.NewRequest(http.MethodDelete, "/posts/1", nil),
+		httptest.NewRequest(http.MethodPost, "/terms", strings.NewReader(`{}`)),
+		httptest.NewRequest(http.MethodPut, "/terms/1", strings.NewReader(`{}`)),
+		httptest.NewRequest(http.MethodDelete, "/terms/1", nil),
+	} {
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-CSRF-Token", "token")
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "x"})
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		// Since the read-only GET routes for /posts and /terms remain
+		// registered even when postWrite/termWrite are nil, chi reports an
+		// unmatched method on a known path as 405 rather than 404; either
+		// way the important thing is that it's a clean HTTP error, not a
+		// nil-pointer panic recovered to 500.
+		if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s %s: status=%d, want 404 or 405, body=%s", req.Method, req.URL.Path, rec.Code, rec.Body.String())
+		}
+	}
+
+	// A read-only route that does not depend on postWrite/termWrite (GET
+	// /posts, backed by s.admin) must remain registered and unaffected.
+	getReq := httptest.NewRequest(http.MethodGet, "/posts", nil)
+	getReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "x"})
+	getRec := httptest.NewRecorder()
+	r.ServeHTTP(getRec, getReq)
+	if getRec.Code == http.StatusNotFound {
+		t.Errorf("GET /posts unexpectedly 404 when postWrite/termWrite are nil (read route should remain registered)")
 	}
 }

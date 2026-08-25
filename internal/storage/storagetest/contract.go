@@ -599,17 +599,21 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		if got.Title != "Fresh Post" {
 			t.Errorf("title = %q, want Fresh Post", got.Title)
 		}
-		// Req 3.4: Create SHALL set Modified/ModifiedGMT (and DateGMT when not
-		// separately supplied) to the current time, not the 0004 migration's
-		// 1970-01-01 default.
+		// Req 3.4: Create SHALL set Modified/ModifiedGMT to the current time,
+		// not the 0004 migration's 1970-01-01 default.
 		if got.Modified.Before(beforeCreate) {
 			t.Errorf("Create: Modified = %v, want approximately now", got.Modified)
 		}
 		if got.ModifiedGMT.Before(beforeCreate) {
 			t.Errorf("Create: ModifiedGMT = %v, want approximately now", got.ModifiedGMT)
 		}
-		if got.DateGMT.Before(beforeCreate) {
-			t.Errorf("Create: DateGMT = %v, want approximately now (defaulted from current time)", got.DateGMT)
+		// DateGMT was left zero above, so it SHALL be derived from the
+		// explicit Date (UTC) rather than defaulted to the current time —
+		// otherwise a backdated/future post would get a nonsensical
+		// date_gmt that doesn't correspond to its own post_date.
+		wantDateGMT := time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)
+		if !got.DateGMT.Equal(wantDateGMT) {
+			t.Errorf("Create: DateGMT = %v, want %v (derived from Date)", got.DateGMT, wantDateGMT)
 		}
 		firstModified := got.Modified
 
@@ -643,6 +647,29 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		if !reread.Modified.After(firstModified) {
 			t.Errorf("Update: Modified = %v, want strictly after Create's %v", reread.Modified, firstModified)
 		}
+		// DateGMT was untouched by this update (Date field unchanged), so it
+		// SHALL remain consistent with the original Date rather than reset.
+		if !reread.DateGMT.Equal(wantDateGMT) {
+			t.Errorf("Update: DateGMT = %v, want unchanged %v", reread.DateGMT, wantDateGMT)
+		}
+
+		// Req: post_date_gmt SHALL be re-derived on every Update from the
+		// (possibly changed) Date, never left stuck at its creation-time
+		// value — a backdated post's date_gmt must move with it.
+		reread.Date = time.Date(2023, 3, 15, 12, 0, 0, 0, time.UTC)
+		reread.DateGMT = time.Time{}
+		if err := repos.PostWriter.Update(ctx, reread); err != nil {
+			t.Fatalf("Update (date change): %v", err)
+		}
+		afterDateChange, err := repos.Posts.BySlug(ctx, "fresh-post")
+		if err != nil {
+			t.Fatalf("BySlug after date-changing update: %v", err)
+		}
+		wantNewDateGMT := time.Date(2023, 3, 15, 12, 0, 0, 0, time.UTC)
+		if !afterDateChange.DateGMT.Equal(wantNewDateGMT) {
+			t.Errorf("Update: DateGMT after date change = %v, want %v", afterDateChange.DateGMT, wantNewDateGMT)
+		}
+
 		if err := repos.PostWriter.Delete(ctx, id); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
@@ -699,6 +726,16 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		}
 		if err := repos.TermWriter.Update(ctx, domain.Term{ID: 999999, Name: "X", Slug: "x"}); !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("Update missing err = %v, want ErrNotFound", err)
+		}
+
+		// A no-op rename (submitting the term's current name/slug
+		// unchanged) must succeed, not 404. MySQL's default driver
+		// reports RowsAffected=0 for a matched-but-unchanged UPDATE
+		// (unlike SQLite/PostgreSQL), so this specifically catches a
+		// regression that only a MySQL-backed run of this suite would
+		// otherwise surface.
+		if err := repos.TermWriter.Update(ctx, domain.Term{ID: id, Name: "Golang", Slug: "golang-lang"}); err != nil {
+			t.Errorf("no-op Update (unchanged name/slug) err = %v, want nil", err)
 		}
 
 		if err := repos.TermWriter.Delete(ctx, id); err != nil {

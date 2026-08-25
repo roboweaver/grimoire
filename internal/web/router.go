@@ -32,11 +32,10 @@ type Server struct {
 	spa http.Handler
 
 	// Admin write dependencies (M6); all nil until WithAdminWrites. The
-	// /admin/api write routes are always registered (matching the existing
-	// comments/media groups' pattern below, which likewise assume their
-	// service is set once reached) — WithAdminWrites is expected to be
-	// called whenever WithAdmin is, so these are only ever nil in tests that
-	// don't exercise the write routes.
+	// /admin/api write routes are only registered when their corresponding
+	// dependency is non-nil (see adminAPIRouter) — WithAdminWrites is
+	// expected to be called whenever WithAdmin is, so these are only ever
+	// nil in tests/embedders that intentionally omit the write routes.
 	postWrite      postAdminWriter
 	termWrite      termAdminService
 	postTermsWrite postTermsAdminWriter

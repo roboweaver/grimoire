@@ -3,6 +3,7 @@ import {
   AlertDialog,
   Button,
   ButtonGroup,
+  DatePicker,
   DialogTrigger,
   Flex,
   Heading,
@@ -14,6 +15,7 @@ import {
   TextField,
   View,
 } from "@adobe/react-spectrum";
+import { parseAbsoluteToLocal, type ZonedDateTime } from "@internationalized/date";
 import ChevronLeft from "@spectrum-icons/workflow/ChevronLeft";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -34,13 +36,17 @@ interface PostEditorProps {
 // PageEditor.tsx is a thin wrapper passing type="page" and hiding the
 // category/tag picker (Req 2's taxonomies apply to posts only).
 //
-// Req 9.2's field list — title, rich-text body, excerpt, status picker,
-// slug, comment-status toggle, category/tag picker (posts only),
-// Save/Delete — deliberately has no schedule/date input, so this view
-// cannot set a "future" post's `date`; the admin/REST APIs still accept it
-// (Req 5), just not through this milestone's SPA. Omitting `date` from the
-// write body preserves the post's existing stored date unchanged
-// (content.PostWriteService.Update only overwrites it when non-zero).
+// Req 9.2's field list is title, rich-text body, excerpt, status picker,
+// slug, comment-status toggle, category/tag picker (posts only), Save/
+// Delete. Requirement 1's "M6 is the first milestone to expose all five
+// [statuses] from the editor" means `future` must be selectable here, which
+// in turn means the editor needs a schedule date field: the admin API
+// rejects a `future`-status write with no (or a non-future) date (Req 5.2).
+// The scheduleDate field below is therefore only shown/sent when status is
+// "future"; for every other status, `date` is omitted from the write body
+// entirely, which preserves the post's existing stored date unchanged
+// (content.PostWriteService.Update only overwrites Date when non-zero) and
+// lets Create default it to "now" (matching WordPress's own behavior).
 export function PostEditor({ type }: PostEditorProps) {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -61,6 +67,10 @@ export function PostEditor({ type }: PostEditorProps) {
   const [categories, setCategories] = useState<TermSummary[]>([]);
   const [tags, setTags] = useState<TermSummary[]>([]);
   const [modified, setModified] = useState<string | undefined>(undefined);
+  // scheduleDate only matters (and is only rendered) for status:"future";
+  // it starts undefined so an unmodified existing future post's date is
+  // sent through unchanged (Req 5.2's exemption), not clobbered with "now".
+  const [scheduleDate, setScheduleDate] = useState<ZonedDateTime | null>(null);
 
   const [isSaving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -76,6 +86,7 @@ export function PostEditor({ type }: PostEditorProps) {
     setCategories(detail.terms?.category ?? []);
     setTags(detail.terms?.post_tag ?? []);
     setModified(detail.modified);
+    setScheduleDate(detail.date ? parseAbsoluteToLocal(detail.date) : null);
   }
 
   function load(signal?: AbortSignal) {
@@ -116,6 +127,10 @@ export function PostEditor({ type }: PostEditorProps) {
       status,
       type,
       commentStatus: commentsOpen ? "open" : "closed",
+      // Only send date for a scheduled ("future") post that actually has a
+      // schedule date set; every other status omits it so the backend's
+      // unchanged-on-update / defaulted-on-create semantics apply.
+      ...(status === "future" && scheduleDate ? { date: scheduleDate.toDate().toISOString() } : {}),
       ...(isNew ? {} : { modified }),
       ...(type === "post" ? { termIds: { category: categories.map((c) => c.id), post_tag: tags.map((t) => t.id) } } : {}),
     };
@@ -189,6 +204,15 @@ export function PostEditor({ type }: PostEditorProps) {
             <Item key={value}>{value}</Item>
           ))}
         </Picker>
+        {status === "future" ? (
+          <DatePicker
+            label="Publish date"
+            granularity="minute"
+            value={scheduleDate}
+            onChange={setScheduleDate}
+            placeholderValue={parseAbsoluteToLocal(new Date().toISOString()).set({ hour: 0, minute: 0, second: 0 })}
+          />
+        ) : null}
         <Switch isSelected={commentsOpen} onChange={setCommentsOpen}>
           Allow comments
         </Switch>

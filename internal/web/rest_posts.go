@@ -191,66 +191,111 @@ func (s *Server) canEditPosts(r *http.Request) bool {
 // snake_case REST vocabulary -- deliberately different from the admin API's
 // camelCase postWriteRequest -- and there is no categories/tags field:
 // term assignment stays admin-API-only (Req 6.1).
+//
+// Every field is a pointer so parseRESTPostWrite can distinguish "the
+// request omitted this field" (nil -- leave the stored value untouched on
+// an update) from "the request explicitly set this field to its zero value"
+// (non-nil pointer to ""). This is what makes PATCH/PUT a real partial
+// update rather than a full-value overwrite (Req 6's WP REST client
+// compatibility goal): a sparse {"title":"New"} body must not wipe
+// content/excerpt/slug/comment_status or silently demote the post's status.
+// The admin API's postWriteRequest intentionally keeps plain (non-pointer)
+// string fields instead -- its full-replacement contract is a deliberate,
+// reviewer-endorsed design choice (Req 1.8), not a bug shared with REST.
 type restPostWriteRequest struct {
-	Title         string `json:"title"`
-	Content       string `json:"content"`
-	Excerpt       string `json:"excerpt"`
-	Slug          string `json:"slug"`
-	Status        string `json:"status"`
-	Date          string `json:"date"`
-	CommentStatus string `json:"comment_status"`
+	Title         *string `json:"title"`
+	Content       *string `json:"content"`
+	Excerpt       *string `json:"excerpt"`
+	Slug          *string `json:"slug"`
+	Status        *string `json:"status"`
+	Date          *string `json:"date"`
+	CommentStatus *string `json:"comment_status"`
 }
 
 // parseRESTPostWrite validates body per Req 6.1, reusing the admin API's
 // status vocabulary and title/date rules (Req 5.1/5.2, validPostStatuses is
 // shared with adminapi_posts.go). current, when non-nil, is the post's
-// existing stored record (only supplied for updates) and backs the same
-// unchanged-date exception parsePostWrite implements. typ comes from the
-// route closure, not the body, since REST scopes type by URL
+// existing stored record and is both the base a PATCH/PUT partial update
+// merges onto (only fields the request actually set are overwritten -- see
+// restPostWriteRequest's doc comment) and the source of the same
+// unchanged-date exception parsePostWrite implements. current is nil only
+// for a create, in which case the merge base is a zero domain.Post. typ
+// comes from the route closure, not the body, since REST scopes type by URL
 // (.../posts vs .../pages) rather than a body field.
 func (s *Server) parseRESTPostWrite(body restPostWriteRequest, typ string, current *domain.Post) (domain.Post, string, error) {
-	status := body.Status
-	if status == "" {
-		status = "draft"
+	var p domain.Post
+	if current != nil {
+		p = *current
 	}
-	if !validPostStatuses[status] {
+	p.ID = 0 // caller sets ID explicitly after; never leak it from current here
+	p.Type = typ
+
+	if body.Title != nil {
+		p.Title = *body.Title
+	}
+	if body.Content != nil {
+		p.Content = *body.Content
+	}
+	if body.Excerpt != nil {
+		p.Excerpt = *body.Excerpt
+	}
+	if body.Slug != nil {
+		p.Slug = *body.Slug
+	}
+	if body.CommentStatus != nil {
+		p.CommentStatus = *body.CommentStatus
+	}
+	if body.Status != nil {
+		p.Status = *body.Status
+	}
+	if p.Status == "" {
+		p.Status = "draft"
+	}
+	if !validPostStatuses[p.Status] {
 		return domain.Post{}, "rest_invalid_param", errors.New("invalid status")
 	}
-	if body.Title == "" && status != "draft" {
+	if p.Title == "" && p.Status != "draft" {
 		return domain.Post{}, "rest_invalid_param", errors.New("title is required unless status is draft")
 	}
-	var date time.Time
-	if body.Date != "" {
-		var err error
-		date, err = time.Parse(restWriteDateLayout, body.Date)
-		if err != nil {
-			return domain.Post{}, "rest_invalid_param", errors.New("invalid date")
+	if body.Date != nil {
+		if *body.Date == "" {
+			p.Date = time.Time{}
+		} else {
+			d, err := time.Parse(restWriteDateLayout, *body.Date)
+			if err != nil {
+				return domain.Post{}, "rest_invalid_param", errors.New("invalid date")
+			}
+			p.Date = d
 		}
 	}
-	if status == "future" && !date.IsZero() && !date.After(time.Now()) {
-		// Same Req 5.2 exception the admin API applies: resubmitting the
-		// post's own currently-stored date unchanged is allowed through
-		// even though that date is no longer in the future.
-		unchanged := current != nil && current.Date.Equal(date)
-		if !unchanged {
+	if p.Status == "future" {
+		// Same Req 5.2 exception the admin API applies: resubmitting (or,
+		// for a PATCH, simply not touching) the post's own currently-stored
+		// date is allowed through even though that date is no longer in the
+		// future. Omitting the date entirely on a create (current == nil,
+		// p.Date left zero) never qualifies as "unchanged", so a
+		// future-status post always needs an explicit future date there.
+		unchanged := current != nil && !current.Date.IsZero() && current.Date.Equal(p.Date)
+		if !unchanged && !p.Date.After(time.Now()) {
 			return domain.Post{}, "rest_invalid_param", errors.New("future status requires a date in the future")
 		}
 	}
-	return domain.Post{
-		Title:         body.Title,
-		Content:       body.Content,
-		Excerpt:       body.Excerpt,
-		Slug:          body.Slug,
-		Status:        status,
-		Type:          typ,
-		Date:          date,
-		CommentStatus: body.CommentStatus,
-	}, "", nil
+	return p, "", nil
 }
 
-// handleRESTPostCreate handles POST .../posts, .../pages (Req 6.1).
+// handleRESTPostCreate handles POST .../posts, .../pages (Req 6.1). Auth
+// follows the same pattern as comment writes (Req 7.4/8.7): an Application
+// Password skips the CSRF check entirely; a session-cookie-authenticated
+// request enforces the M4 X-CSRF-Token contract.
 func (s *Server) handleRESTPostCreate(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !isAppPasswordAuth(r.Context()) {
+			if _, hasSession := sessionFrom(r.Context()); hasSession {
+				if !s.requireSessionCSRFREST(w, r) {
+					return
+				}
+			}
+		}
 		principal, _ := PrincipalFrom(r.Context())
 		var body restPostWriteRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -282,9 +327,17 @@ func (s *Server) handleRESTPostCreate(typ string) http.HandlerFunc {
 // optimistic-concurrency check (Req 6.4); omitting it is last-write-wins
 // (Req 6.5). A present-but-unparseable header is treated the same as an
 // absent one rather than rejected, since Req 6.5 frames the header as
-// strictly optional.
+// strictly optional. Auth follows the same CSRF pattern as create/comment
+// writes (Req 7.4/8.7).
 func (s *Server) handleRESTPostUpdate(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !isAppPasswordAuth(r.Context()) {
+			if _, hasSession := sessionFrom(r.Context()); hasSession {
+				if !s.requireSessionCSRFREST(w, r) {
+					return
+				}
+			}
+		}
 		principal, _ := PrincipalFrom(r.Context())
 		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 		if err != nil || id <= 0 {
@@ -343,8 +396,16 @@ func (s *Server) handleRESTPostUpdate(typ string) http.HandlerFunc {
 // deleted item echoed back in "previous" (Req 6.3). There is no distinct
 // "rest_cannot_delete" code in the spec, so a forbidden delete reuses
 // "rest_cannot_edit", matching the same code update's forbidden case uses.
+// Auth follows the same CSRF pattern as create/update (Req 7.4/8.7).
 func (s *Server) handleRESTPostDelete(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !isAppPasswordAuth(r.Context()) {
+			if _, hasSession := sessionFrom(r.Context()); hasSession {
+				if !s.requireSessionCSRFREST(w, r) {
+					return
+				}
+			}
+		}
 		principal, _ := PrincipalFrom(r.Context())
 		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 		if err != nil || id <= 0 {

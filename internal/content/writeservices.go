@@ -42,14 +42,20 @@ func NewPostWriteService(w domain.PostWriter) *PostWriteService {
 }
 
 // Create authorizes and inserts a new post. When p.Author is zero it defaults to
-// the actor; when p.Type is empty it defaults to "post". Returns ErrForbidden
-// (and does not call the writer) if the actor may not create the post.
+// the actor; when p.Type is empty it defaults to "post"; when p.Date is zero it
+// defaults to the current time (matching WordPress's own new-post behavior),
+// so a caller that omits date never gets an unsorted, epoch-dated post out of
+// the writer. Returns ErrForbidden (and does not call the writer) if the actor
+// may not create the post.
 func (s *PostWriteService) Create(ctx context.Context, actor auth.Principal, p domain.Post) (int64, error) {
 	if p.Author == 0 {
 		p.Author = actor.UserID
 	}
 	if p.Type == "" {
 		p.Type = "post"
+	}
+	if p.Date.IsZero() {
+		p.Date = time.Now()
 	}
 	if !auth.CanCreatePost(actor, p.Type, p.Status, p.Author) {
 		return 0, ErrForbidden

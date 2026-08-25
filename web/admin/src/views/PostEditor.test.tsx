@@ -142,4 +142,46 @@ describe("PostEditor", () => {
     expect(screen.getByDisplayValue("Existing title")).toBeInTheDocument();
     expect(deletePost).not.toHaveBeenCalled();
   });
+
+  it("omits date from the save body for every non-future status", async () => {
+    apiPost.mockResolvedValue(detail({ id: 7, status: "draft" }));
+    updatePost.mockResolvedValue(detail({ id: 7, status: "draft" }));
+    renderEditor("/posts/7");
+
+    await screen.findByDisplayValue("Existing title");
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(updatePost).toHaveBeenCalled());
+    const [, body] = updatePost.mock.calls[0];
+    expect(body.date).toBeUndefined();
+  });
+
+  it("shows a schedule date picker only when status is future, preloaded from the loaded post's date", async () => {
+    apiPost.mockResolvedValue(detail({ id: 7, status: "future", date: "2099-06-01T12:00:00Z" }));
+    renderEditor("/posts/7");
+
+    await screen.findByDisplayValue("Existing title");
+    expect(screen.getAllByLabelText(/publish date/i).length).toBeGreaterThan(0);
+  });
+
+  it("does not render the schedule date picker for a draft post", async () => {
+    apiPost.mockResolvedValue(detail({ id: 7, status: "draft" }));
+    renderEditor("/posts/7");
+
+    await screen.findByDisplayValue("Existing title");
+    expect(screen.queryAllByLabelText(/publish date/i).length).toBe(0);
+  });
+
+  it("includes date in the save body when status is future and a schedule date is set", async () => {
+    apiPost.mockResolvedValue(detail({ id: 7, status: "future", date: "2099-06-01T12:00:00Z" }));
+    updatePost.mockResolvedValue(detail({ id: 7, status: "future", date: "2099-06-01T12:00:00Z" }));
+    renderEditor("/posts/7");
+
+    await screen.findByDisplayValue("Existing title");
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(updatePost).toHaveBeenCalled());
+    const [, body] = updatePost.mock.calls[0];
+    expect(body.date).toBe("2099-06-01T12:00:00.000Z");
+  });
 });

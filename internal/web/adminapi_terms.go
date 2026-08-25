@@ -54,6 +54,9 @@ func (s *Server) adminTerms(w http.ResponseWriter, r *http.Request) error {
 	if taxonomy == "" {
 		return badRequestError{msg: "taxonomy query parameter is required"}
 	}
+	if !isKnownAdminTaxonomy(taxonomy) {
+		return badRequestError{msg: "unknown taxonomy"}
+	}
 	terms, err := s.termWrite.ListByTaxonomy(r.Context(), taxonomy)
 	if err != nil {
 		return err

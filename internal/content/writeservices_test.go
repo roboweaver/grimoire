@@ -138,6 +138,43 @@ func TestPostWriteCreateAllowedDefaultsAuthorAndType(t *testing.T) {
 	}
 }
 
+// TestPostWriteCreateDefaultsDateWhenOmitted guards finding #1 from the PR
+// #16 review: a caller (the admin API's PostEditor, notably) that omits
+// date entirely must not get a post silently stored with a zero/epoch
+// Date -- Create must default it to "now", matching WordPress's own
+// new-post behavior, so posts sort correctly by post_date DESC.
+func TestPostWriteCreateDefaultsDateWhenOmitted(t *testing.T) {
+	w := &fakePostWriter{}
+	svc := NewPostWriteService(w)
+	before := time.Now()
+	_, err := svc.Create(context.Background(), actor(auth.RoleAuthor, 5),
+		domain.Post{Title: "Hi", Status: "draft"})
+	after := time.Now()
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if w.created.Date.Before(before) || w.created.Date.After(after) {
+		t.Fatalf("created.Date = %v, want between %v and %v", w.created.Date, before, after)
+	}
+}
+
+// TestPostWriteCreatePreservesExplicitDate guards the flip side: when the
+// caller does supply a date (e.g. a future-status scheduled post, or an
+// explicit backdated import), Create must not clobber it with "now".
+func TestPostWriteCreatePreservesExplicitDate(t *testing.T) {
+	w := &fakePostWriter{}
+	svc := NewPostWriteService(w)
+	explicit := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, err := svc.Create(context.Background(), actor(auth.RoleAuthor, 5),
+		domain.Post{Title: "Hi", Status: "future", Date: explicit})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !w.created.Date.Equal(explicit) {
+		t.Fatalf("created.Date = %v, want unchanged %v", w.created.Date, explicit)
+	}
+}
+
 func TestPostWriteCreateDeniedReturnsForbiddenAndSkipsWriter(t *testing.T) {
 	w := &fakePostWriter{}
 	svc := NewPostWriteService(w)

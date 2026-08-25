@@ -223,6 +223,45 @@ func TestAdminPostCreateRejectsFutureStatusWithPastDate(t *testing.T) {
 	}
 }
 
+// TestAdminPostCreateRejectsFutureStatusWithNoDate guards finding #1 from
+// the PR #16 review: a future-status post created with no date at all must
+// be rejected, not silently stored with today's date (which would make it
+// immediately "published" despite the future status label).
+func TestAdminPostCreateRejectsFutureStatusWithNoDate(t *testing.T) {
+	s := testWriteServer(&fakeAdmin{}, &fakePostWrite{}, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/posts", strings.NewReader(`{"title":"x","status":"future"}`)).WithContext(principalCtx("edit_posts"))
+	rec := httptest.NewRecorder()
+	s.jsonHandler(s.adminPostCreate).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAdminPostCreateDefaultsDateWhenOmitted guards finding #1: a draft/
+// publish post created with no date must be stored with something close to
+// "now" (via PostWriteService.Create's defaulting), not the epoch. The
+// admin API layer doesn't do the defaulting itself (that's the write
+// service's job per its doc comment), so this only asserts parsePostWrite
+// hands through a zero Date unmolested for the service to default.
+func TestAdminPostCreateDefaultsDateWhenOmitted(t *testing.T) {
+	var captured domain.Post
+	pw := &fakePostWrite{create: func(p domain.Post) (int64, error) {
+		captured = p
+		return 5, nil
+	}}
+	a := &fakeAdmin{detail: func(id int64) (domain.Post, error) { return domain.Post{ID: id}, nil }}
+	s := testWriteServer(a, pw, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/posts", strings.NewReader(`{"title":"x","status":"draft"}`)).WithContext(principalCtx("edit_posts"))
+	rec := httptest.NewRecorder()
+	s.jsonHandler(s.adminPostCreate).ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body=%s", rec.Code, rec.Body.String())
+	}
+	if !captured.Date.IsZero() {
+		t.Fatalf("parsePostWrite should hand a zero Date to the write service when omitted, got %v", captured.Date)
+	}
+}
+
 func TestAdminPostCreateAppliesTermIDsAndReportsPartial(t *testing.T) {
 	pw := &fakePostWrite{create: func(domain.Post) (int64, error) { return 5, nil }}
 	ptw := &fakePostTermsWrite{setPostTerms: func(_ int64, taxonomy string, _ []int64) error {
@@ -354,8 +393,16 @@ func TestAdminPostUpdateRejectsChangedPastFutureDate(t *testing.T) {
 	}
 }
 
-func TestAdminPostUpdateNotFound(t *testing.T) {
-	pw := &fakePostWrite{update: func(domain.Post, time.Time) error { return domain.ErrNotFound }}
+// TestAdminPostUpdateMissingRecordIsForbidden guards finding #9 from the PR
+// #16 review: production's PostWriteService.Update never returns the raw
+// domain.ErrNotFound for a missing record -- per its own doc comment it maps
+// a missing record to the generic ErrForbidden (existence is not leaked,
+// Req 1.6). The previous version of this test stubbed the write service to
+// return domain.ErrNotFound directly and asserted 404, which exercised a
+// path production never hits and would have kept passing even if the real
+// 403-for-missing behavior regressed. It now stubs the real contract.
+func TestAdminPostUpdateMissingRecordIsForbidden(t *testing.T) {
+	pw := &fakePostWrite{update: func(domain.Post, time.Time) error { return content.ErrForbidden }}
 	a := &fakeAdmin{detail: func(int64) (domain.Post, error) { return domain.Post{}, domain.ErrNotFound }}
 	s := testWriteServer(a, pw, nil, nil, nil)
 	body := `{"title":"x","status":"draft","modified":"2020-01-01T00:00:00Z"}`
@@ -363,8 +410,8 @@ func TestAdminPostUpdateNotFound(t *testing.T) {
 	req = withURLParam(req, "id", "999")
 	rec := httptest.NewRecorder()
 	s.jsonHandler(s.adminPostUpdate).ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (missing record maps to ErrForbidden, not ErrNotFound), body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -397,15 +444,19 @@ func TestAdminPostDeleteHappyPath(t *testing.T) {
 	}
 }
 
-func TestAdminPostDeleteNotFound(t *testing.T) {
-	pw := &fakePostWrite{del: func(domain.Post) error { return domain.ErrNotFound }}
+// TestAdminPostDeleteMissingRecordIsForbidden guards finding #9 the same way
+// as TestAdminPostUpdateMissingRecordIsForbidden: production's
+// PostWriteService.Delete maps a missing record to ErrForbidden, never the
+// raw domain.ErrNotFound, so the test must stub and assert that contract.
+func TestAdminPostDeleteMissingRecordIsForbidden(t *testing.T) {
+	pw := &fakePostWrite{del: func(domain.Post) error { return content.ErrForbidden }}
 	s := testWriteServer(&fakeAdmin{}, pw, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodDelete, "/admin/api/posts/999", nil).WithContext(principalCtx("edit_posts"))
 	req = withURLParam(req, "id", "999")
 	rec := httptest.NewRecorder()
 	s.jsonHandler(s.adminPostDelete).ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (missing record maps to ErrForbidden, not ErrNotFound)", rec.Code)
 	}
 }
 

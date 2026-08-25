@@ -36,13 +36,18 @@ func (r *PostRepo) ByID(ctx context.Context, id int64) (domain.Post, error) {
 // Create inserts a new post and returns its generated ID. The autoincrement
 // "ID" column is omitted from the insert, so the unquoted SQL is vendor-safe.
 // Modified/ModifiedGMT are always set to the current time (Req 3.4); DateGMT
-// defaults to the current time only when the caller left it zero, mirroring
-// post_date's own zero-value default handling via formatTS.
+// defaults to the UTC equivalent of Date when the caller left it zero (mirrors
+// WordPress's own post_date/post_date_gmt pairing), falling back to the
+// current time only when Date is also zero.
 func (r *PostRepo) Create(ctx context.Context, p domain.Post) (int64, error) {
 	now := time.Now()
 	dateGMT := p.DateGMT
 	if dateGMT.IsZero() {
-		dateGMT = now
+		if !p.Date.IsZero() {
+			dateGMT = p.Date.UTC()
+		} else {
+			dateGMT = now
+		}
 	}
 	cols := []string{
 		"post_author", "post_date", "post_content", "post_title",
@@ -60,12 +65,25 @@ func (r *PostRepo) Create(ctx context.Context, p domain.Post) (int64, error) {
 // Update replaces an existing post's mutable fields by ID, or ErrNotFound.
 // Modified/ModifiedGMT are always bumped to the current time (Req 1.1/1.2),
 // overriding whatever the caller passed in p.Modified/p.ModifiedGMT.
+// post_date_gmt is re-derived from p.Date (UTC) on every update, since
+// PostWriteService.Update always passes a fully-merged, non-zero Date (either
+// the caller's new date or the record's own unchanged one) — so date_gmt
+// never goes stale the way it would if it were only ever set on create.
 func (r *PostRepo) Update(ctx context.Context, p domain.Post) error {
 	now := time.Now()
+	dateGMT := p.DateGMT
+	if dateGMT.IsZero() {
+		if !p.Date.IsZero() {
+			dateGMT = p.Date.UTC()
+		} else {
+			dateGMT = now
+		}
+	}
 	res, err := r.db.NewUpdate().
 		TableExpr("?", bun.Ident(r.prefix+"posts")).
 		Set("post_author = ?", p.Author).
 		Set("post_date = ?", formatTS(p.Date)).
+		Set("post_date_gmt = ?", formatTS(dateGMT)).
 		Set("post_content = ?", p.Content).
 		Set("post_title = ?", p.Title).
 		Set("post_excerpt = ?", p.Excerpt).
@@ -135,7 +153,17 @@ func (r *TermRepo) Update(ctx context.Context, t domain.Term) error {
 	if err != nil {
 		return err
 	}
-	return errNotFoundIfZero(res)
+	// errNotFoundIfMissing (not errNotFoundIfZero) because MySQL's default
+	// driver reports RowsAffected=0 for a matched-but-unchanged UPDATE (a
+	// no-op rename submitting the term's current name/slug), while
+	// SQLite/PostgreSQL report 1 — using the naive zero-rows check here
+	// would 404 a legitimate no-op rename on MySQL specifically.
+	return errNotFoundIfMissing(ctx, res, func(ctx context.Context) (bool, error) {
+		return r.db.NewSelect().
+			TableExpr("?", bun.Ident(r.prefix+"terms")).
+			Where("term_id = ?", t.ID).
+			Exists(ctx)
+	})
 }
 
 // Delete removes a term, its taxonomy rows, and any term relationships pointing

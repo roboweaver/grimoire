@@ -2,6 +2,7 @@ package wprepo
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/storage/rebind"
@@ -57,20 +58,60 @@ func (r *PostTermsRepo) TermsForPost(ctx context.Context, postID int64, taxonomy
 // and any row the post was previously related to (which may have lost its
 // only relationship without being replaced).
 //
-// Neither requirements.md's Req 2 acceptance criteria nor design.md's SQL
-// description specify an error path for a nonexistent postID or a termID
-// that doesn't resolve to this taxonomy: this mirrors Req 2.6's storage-layer
-// non-enforcement of taxonomy/post-type mismatches, so an unknown postID is a
-// silent no-op (steps 1-2 delete/insert zero rows) and an unresolvable termID
-// is silently skipped from step 2 (the same convention as TermReader.TermsByIDs).
+// Per tasks.md 1.3, a nonexistent postID or an unresolvable termID returns a
+// clear error rather than a silent no-op: both are validated up front, before
+// any mutation runs, so a rejected call never partially clears a post's
+// existing term relationships.
 func (r *PostTermsRepo) SetPostTerms(ctx context.Context, postID int64, taxonomy string, termIDs []int64) error {
 	vendor := vendorOf(r.db)
 	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		exists, err := tx.NewSelect().
+			TableExpr("?", bun.Ident(r.prefix+"posts")).
+			Where("? = ?", bun.Ident("ID"), postID).
+			Exists(ctx)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return domain.ErrNotFound
+		}
+
+		// Resolve term_taxonomy_ids for the requested termIDs under this
+		// taxonomy before mutating anything, so an unresolvable termID
+		// aborts the whole call instead of silently dropping it.
+		var newTTIDs []int64
+		if len(termIDs) > 0 {
+			var resolved []struct {
+				TermID         int64 `bun:"term_id"`
+				TermTaxonomyID int64 `bun:"term_taxonomy_id"`
+			}
+			err := tx.NewSelect().
+				TableExpr("?", bun.Ident(r.prefix+"term_taxonomy")).
+				Column("term_id", "term_taxonomy_id").
+				Where("taxonomy = ?", taxonomy).
+				Where("term_id IN (?)", bun.In(termIDs)).
+				Scan(ctx, &resolved)
+			if err != nil {
+				return err
+			}
+			resolvedIDs := make(map[int64]bool, len(resolved))
+			newTTIDs = make([]int64, 0, len(resolved))
+			for _, row := range resolved {
+				resolvedIDs[row.TermID] = true
+				newTTIDs = append(newTTIDs, row.TermTaxonomyID)
+			}
+			for _, id := range termIDs {
+				if !resolvedIDs[id] {
+					return fmt.Errorf("term %d does not exist under taxonomy %q: %w", id, taxonomy, domain.ErrNotFound)
+				}
+			}
+		}
+
 		// Capture the term_taxonomy_ids currently related to postID under
 		// this taxonomy before clearing them, so their counts still get
 		// recomputed even if the new set no longer includes them.
 		var priorTTIDs []int64
-		err := tx.NewSelect().
+		err = tx.NewSelect().
 			TableExpr("? AS tt", bun.Ident(r.prefix+"term_taxonomy")).
 			ColumnExpr("tt.term_taxonomy_id").
 			Join("JOIN ? AS tr ON tr.term_taxonomy_id = tt.term_taxonomy_id", bun.Ident(r.prefix+"term_relationships")).
@@ -86,21 +127,6 @@ func (r *PostTermsRepo) SetPostTerms(ctx context.Context, postID int64, taxonomy
 			"(SELECT term_taxonomy_id FROM " + r.prefix + "term_taxonomy WHERE taxonomy = ?)"
 		if _, err := tx.ExecContext(ctx, rebind.Rebind(vendor, delQ), postID, taxonomy); err != nil {
 			return err
-		}
-
-		// Resolve term_taxonomy_ids for the requested termIDs under this
-		// taxonomy; unresolvable IDs are silently skipped.
-		var newTTIDs []int64
-		if len(termIDs) > 0 {
-			err := tx.NewSelect().
-				TableExpr("?", bun.Ident(r.prefix+"term_taxonomy")).
-				Column("term_taxonomy_id").
-				Where("taxonomy = ?", taxonomy).
-				Where("term_id IN (?)", bun.In(termIDs)).
-				Scan(ctx, &newTTIDs)
-			if err != nil {
-				return err
-			}
 		}
 
 		// Step 2: insert a fresh relationship row per resolved taxonomy ID.

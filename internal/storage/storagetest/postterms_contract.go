@@ -2,7 +2,10 @@ package storagetest
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/roboweaver/grimoire/internal/domain"
 )
 
 // runPostTermsContract covers PostTermsRepository.TermsForPost: empty result
@@ -71,12 +74,9 @@ func runPostTermsContract(t *testing.T, newRepos NewReposFunc) {
 // runPostTermsWriterContract covers PostTermsWriter.SetPostTerms: assignment,
 // reassignment, clearing, taxonomy isolation on the same post, cross-post
 // isolation (assigning a term already used by another post must not disturb
-// that other post's relationships), and silent omission of a termID that has
-// no term_taxonomy row for the requested taxonomy (mirroring TermsByIDs'
-// documented silent-omission-of-unknown-IDs behavior, since neither
-// requirements.md nor design.md specifies an error for this case — see Req
-// 2.6, which establishes the sibling principle that SetPostTerms does not
-// reject taxonomy/post-type mismatches at the storage layer).
+// that other post's relationships), and error handling for a nonexistent
+// postID or a termID with no term_taxonomy row for the requested taxonomy
+// (tasks.md 1.3: both must return a clear error, not a silent no-op).
 func runPostTermsWriterContract(t *testing.T, newRepos NewReposFunc) {
 	t.Helper()
 	ctx := context.Background()
@@ -188,21 +188,46 @@ func runPostTermsWriterContract(t *testing.T, newRepos NewReposFunc) {
 		}
 	})
 
-	t.Run("SetPostTerms silently skips a termID with no term_taxonomy row for the taxonomy", func(t *testing.T) {
+	t.Run("SetPostTerms rejects a termID with no term_taxonomy row for the taxonomy", func(t *testing.T) {
 		repos, cleanup := newRepos(t)
 		defer cleanup()
 		// Term 13 (Golang) exists but only as post_tag, not category; term
-		// 999999 does not exist at all. Neither should error nor be
-		// reflected in the resulting category relations.
-		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", []int64{12, 13, 999999}); err != nil {
-			t.Fatalf("SetPostTerms with unresolvable termIDs: %v", err)
+		// 999999 does not exist at all. Either must return a clear error
+		// (tasks.md 1.3), and the post's existing category relations must be
+		// left untouched (validation runs before any mutation).
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", []int64{12}); err != nil {
+			t.Fatalf("SetPostTerms seed: %v", err)
 		}
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", []int64{12, 13}); err == nil {
+			t.Fatalf("SetPostTerms with termID valid for a different taxonomy: want error, got nil")
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("SetPostTerms with termID valid for a different taxonomy: err = %v, want wraps domain.ErrNotFound", err)
+		}
+		if err := repos.PostTermsWriter.SetPostTerms(ctx, 5, "category", []int64{12, 999999}); err == nil {
+			t.Fatalf("SetPostTerms with nonexistent termID: want error, got nil")
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("SetPostTerms with nonexistent termID: err = %v, want wraps domain.ErrNotFound", err)
+		}
+
+		// The rejected calls must not have mutated anything.
 		ids, err := repos.PostTerms.TermsForPost(ctx, 5, "category")
 		if err != nil {
 			t.Fatalf("TermsForPost: %v", err)
 		}
 		if len(ids) != 1 || ids[0] != 12 {
-			t.Errorf("TermsForPost(5, category) = %v, want [12] (13 and 999999 silently skipped)", ids)
+			t.Errorf("TermsForPost(5, category) = %v, want [12] unchanged (rejected calls must not mutate)", ids)
+		}
+	})
+
+	t.Run("SetPostTerms rejects a nonexistent postID", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		err := repos.PostTermsWriter.SetPostTerms(ctx, 999999, "category", []int64{12})
+		if err == nil {
+			t.Fatalf("SetPostTerms with nonexistent postID: want error, got nil")
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("SetPostTerms with nonexistent postID: err = %v, want wraps domain.ErrNotFound", err)
 		}
 	})
 }

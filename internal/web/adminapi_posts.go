@@ -31,6 +31,18 @@ const taxonomyPostTag = "post_tag"
 // anywhere else either.
 var adminKnownTaxonomies = []string{content.TaxonomyCategory, taxonomyPostTag}
 
+// isKnownAdminTaxonomy reports whether taxonomy is one of adminKnownTaxonomies
+// (tasks.md 2.7: GET /admin/api/terms?taxonomy= 400s on an unrecognized value
+// such as "nav_menu" rather than silently returning an empty list).
+func isKnownAdminTaxonomy(taxonomy string) bool {
+	for _, known := range adminKnownTaxonomies {
+		if taxonomy == known {
+			return true
+		}
+	}
+	return false
+}
+
 // postAdminWriter is the narrow write surface adminPostCreate/Update/Delete
 // depend on; *content.PostWriteService satisfies it.
 type postAdminWriter interface {
@@ -107,13 +119,19 @@ func (s *Server) parsePostWrite(body postWriteRequest, current *domain.Post) (do
 			return domain.Post{}, badRequestError{msg: "invalid date"}
 		}
 	}
-	if status == "future" && !date.IsZero() && !date.After(time.Now()) {
+	if status == "future" {
 		// Req 5.2 exception: an update that resubmits the post's own
 		// currently-stored date unchanged is allowed through even though
 		// that date is no longer in the future, so fixing an unrelated
 		// field on a stale future post never forces resolving its schedule.
-		unchanged := current != nil && current.Date.Equal(date)
-		if !unchanged {
+		// Omitting the date entirely (the zero value) never qualifies as
+		// "unchanged" here, so a future-status post always needs an
+		// explicit future date — whether on create or on a status
+		// transition into "future" — closing the gap where a future post
+		// could previously be created with no date at all and silently
+		// stored with today's date instead.
+		unchanged := current != nil && !current.Date.IsZero() && current.Date.Equal(date)
+		if !unchanged && !date.After(time.Now()) {
 			return domain.Post{}, badRequestError{msg: "future status requires a date in the future"}
 		}
 	}

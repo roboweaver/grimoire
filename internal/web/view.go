@@ -2,6 +2,7 @@ package web
 
 import (
 	"html/template"
+	"strings"
 
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
@@ -19,24 +20,46 @@ import (
 // future write/admin path (or ingestion of untrusted content) MUST sanitize
 // post_content and post_excerpt (e.g. bluemonday) before they reach these casts.
 // See docs/compatibility.md.
-func postView(p domain.Post) render.PostView {
+//
+// baseURLs (from OptionService.BaseURLs) are the site's own configured
+// siteurl/home option values, absolute self-references to which are rewritten
+// to relative paths — see rewriteSelfURLs.
+func postView(p domain.Post, baseURLs []string) render.PostView {
 	return render.PostView{
 		ID:      p.ID,
 		Slug:    p.Slug,
 		Title:   p.Title,
-		Excerpt: template.HTML(content.Excerpt(p)), // trusted excerpt HTML — see trust boundary note above
-		Content: template.HTML(p.Content),          // trusted DB HTML — see trust boundary note above
+		Excerpt: template.HTML(rewriteSelfURLs(content.Excerpt(p), baseURLs)), // trusted excerpt HTML — see trust boundary note above
+		Content: template.HTML(rewriteSelfURLs(p.Content, baseURLs)),          // trusted DB HTML — see trust boundary note above
 		Date:    p.Date,
 		Author:  p.Author,
 	}
 }
 
-func postViews(ps []domain.Post) []render.PostView {
+func postViews(ps []domain.Post, baseURLs []string) []render.PostView {
 	out := make([]render.PostView, 0, len(ps))
 	for _, p := range ps {
-		out = append(out, postView(p))
+		out = append(out, postView(p, baseURLs))
 	}
 	return out
+}
+
+// rewriteSelfURLs strips any occurrence of the site's own absolute base URLs
+// (siteurl/home, in both http/https form) from html, leaving a relative path
+// in their place. WordPress commonly bakes an absolute self-referential URL
+// into post_content (e.g. media URLs, internal links) at authoring/import
+// time; left as-is, every page load would depend on that exact host:port
+// being reachable even when grimoire itself already serves the same paths
+// (e.g. /wp-content/uploads/*) standalone. This mirrors the search-replace
+// step any WordPress migration performs, applied on read instead of at rest.
+func rewriteSelfURLs(html string, baseURLs []string) string {
+	for _, base := range baseURLs {
+		if base == "" {
+			continue
+		}
+		html = strings.ReplaceAll(html, base, "")
+	}
+	return html
 }
 
 func termView(t domain.Term) render.TermView {

@@ -47,3 +47,34 @@ func TestOptionServiceSiteInfo(t *testing.T) {
 		t.Fatalf("SiteInfo = %q / %q", title, tagline)
 	}
 }
+
+// TestOptionServiceBaseURLs verifies siteurl/home are trimmed, deduped, and
+// each expanded to both http/https variants so content authored under either
+// scheme can be rewritten.
+func TestOptionServiceBaseURLs(t *testing.T) {
+	repo := &fakeOptionRepo{values: map[string]string{
+		"siteurl": "http://127.0.0.1:8080/",
+		"home":    "http://127.0.0.1:8080",
+	}}
+	svc := NewOptionService(repo)
+
+	got := svc.BaseURLs(context.Background())
+	want := []string{"http://127.0.0.1:8080", "https://127.0.0.1:8080"}
+	if len(got) != len(want) {
+		t.Fatalf("BaseURLs = %v, want %v", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("BaseURLs[%d] = %q, want %q", i, got[i], w)
+		}
+	}
+}
+
+// TestOptionServiceBaseURLsEmptyWhenUnset confirms a missing siteurl/home
+// yields an empty (not nil-panicking) slice.
+func TestOptionServiceBaseURLsEmptyWhenUnset(t *testing.T) {
+	svc := NewOptionService(&fakeOptionRepo{values: map[string]string{}})
+	if got := svc.BaseURLs(context.Background()); len(got) != 0 {
+		t.Fatalf("BaseURLs = %v, want empty", got)
+	}
+}

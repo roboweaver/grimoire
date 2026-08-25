@@ -3,6 +3,7 @@ package content
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/roboweaver/grimoire/internal/domain"
 )
@@ -11,6 +12,8 @@ import (
 const (
 	OptionBlogName        = "blogname"
 	OptionBlogDescription = "blogdescription"
+	OptionSiteURL         = "siteurl"
+	OptionHome            = "home"
 )
 
 // OptionService reads site options with absent-as-empty semantics so a missing
@@ -51,6 +54,43 @@ func (s *OptionService) GetErr(ctx context.Context, name string) (string, error)
 // each empty when unset.
 func (s *OptionService) SiteInfo(ctx context.Context) (title, tagline string) {
 	return s.Get(ctx, OptionBlogName), s.Get(ctx, OptionBlogDescription)
+}
+
+// BaseURLs returns the distinct, trailing-slash-trimmed "siteurl" and "home"
+// option values, each expanded to both http and https variants. WordPress
+// post content commonly embeds these absolute URLs (e.g. pasted media links,
+// or content imported/migrated without a search-replace pass), which would
+// otherwise force every page load to depend on the original WordPress
+// instance being reachable at that address. Callers use this to rewrite such
+// absolute self-references to relative paths so grimoire can serve content
+// (including its own /wp-content/uploads/* media route) fully standalone.
+// Empty/unset options are omitted; the result has no duplicates.
+func (s *OptionService) BaseURLs(ctx context.Context) []string {
+	seen := make(map[string]struct{}, 4)
+	var out []string
+	add := func(raw string) {
+		raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+		if raw == "" {
+			return
+		}
+		variants := []string{raw}
+		switch {
+		case strings.HasPrefix(raw, "http://"):
+			variants = append(variants, "https://"+strings.TrimPrefix(raw, "http://"))
+		case strings.HasPrefix(raw, "https://"):
+			variants = append(variants, "http://"+strings.TrimPrefix(raw, "https://"))
+		}
+		for _, v := range variants {
+			if _, ok := seen[v]; ok {
+				continue
+			}
+			seen[v] = struct{}{}
+			out = append(out, v)
+		}
+	}
+	add(s.Get(ctx, OptionSiteURL))
+	add(s.Get(ctx, OptionHome))
+	return out
 }
 
 // isNotFound reports whether err is the domain not-found sentinel.

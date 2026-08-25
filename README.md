@@ -1,6 +1,8 @@
-# grimoire
+# <img src="./assets/icons/icon-64.png" alt="" width="68"> grimoire
 
-**A Go-native, WordPress-schema-compatible CMS — no PHP, a swappable database backend, and (soon) an Adobe React Spectrum admin.**
+**A Go-native, WordPress-schema-compatible CMS with a working embedded Adobe React Spectrum admin — no PHP, a swappable database backend, and WordPress-compatible content, auth, and REST surfaces.**
+
+> **Current state:** M1-M7 are implemented. The public site, embedded Adobe React Spectrum admin, WordPress-compatible content/auth/REST surfaces, revisions/autosave, and scheduled publishing all work today. REST write coverage includes posts/pages, comments, and taxonomy terms; media and user writes are not exposed.
 
 > ## What's a grimoire?
 > A *grimoire* is a wizard's book of spells and knowledge — a single authoritative
@@ -23,7 +25,8 @@
   vendor means adding one adapter package, nothing else.
 - **SEO-friendly public rendering.** Go `html/template` implementing a subset of
   the WordPress template hierarchy.
-- **Adobe React Spectrum admin** (later milestone) as a client-side SPA.
+- **Embedded Adobe React Spectrum admin.** The admin is working today as an
+  embedded first-class UI for managing content and site operations.
 
 ## Architecture (ports & adapters)
 
@@ -47,7 +50,7 @@ See [`plans/`](./plans) for the full, Kiro-format specifications.
 | Path | Purpose |
 |------|---------|
 | `cmd/grimoire` | HTTP server entrypoint |
-| `cmd/grimoire-cli` | migrations, seeding, admin bootstrap |
+| `cmd/grimoire-cli` | migrations, seeding, admin bootstrap, session GC |
 | `internal/domain` | entities + repository interfaces (ports) |
 | `internal/content` | Post / Term / Option services |
 | `internal/storage/{mysql,postgres,sqlite}` | database adapters |
@@ -55,16 +58,17 @@ See [`plans/`](./plans) for the full, Kiro-format specifications.
 | `internal/web` | router, handlers, middleware |
 | `internal/render` | template engine + WP template hierarchy |
 | `themes/default` | default theme |
-| `web/admin` | (M3) React Spectrum SPA |
+| `web/admin` | embedded Adobe React Spectrum admin |
 | `plans/` | Kiro specs (requirements / design / tasks) |
 
-## Running (M1)
+## Running
 
 grimoire ships two binaries: `grimoire` (the HTTP server) and `grimoire-cli`
-(`migrate` / `seed`). Configuration is a YAML file (see [`configs/`](./configs));
-every field can be overridden by an environment variable
-(`GRIMOIRE_SERVER_ADDR`, `GRIMOIRE_THEME`, `GRIMOIRE_DATABASE_VENDOR`,
-`GRIMOIRE_DATABASE_DSN`, `GRIMOIRE_DATABASE_TABLE_PREFIX`).
+(`migrate`, `seed`, `createadmin`, `sessions gc`). Configuration is a YAML file
+(see [`configs/`](./configs)); every field can be overridden by an environment
+variable (`GRIMOIRE_SERVER_ADDR`, `GRIMOIRE_THEME`,
+`GRIMOIRE_DATABASE_VENDOR`, `GRIMOIRE_DATABASE_DSN`,
+`GRIMOIRE_DATABASE_TABLE_PREFIX`).
 
 ### SQLite (zero external services)
 
@@ -80,6 +84,8 @@ Or without make:
 ```bash
 go run ./cmd/grimoire-cli migrate -config configs/grimoire.sqlite.yaml
 go run ./cmd/grimoire-cli seed    -config configs/grimoire.sqlite.yaml
+GRIMOIRE_ADMIN_PASSWORD=... go run ./cmd/grimoire-cli createadmin -config configs/grimoire.sqlite.yaml -login admin -email admin@example.com
+go run ./cmd/grimoire-cli sessions gc -config configs/grimoire.sqlite.yaml
 go run ./cmd/grimoire            -config configs/grimoire.sqlite.yaml
 ```
 
@@ -95,6 +101,8 @@ user:pass@tcp(127.0.0.1:3306)/wordpress?parseTime=true&charset=utf8mb4
 ```bash
 go run ./cmd/grimoire-cli migrate -config configs/grimoire.mysql.yaml
 go run ./cmd/grimoire-cli seed    -config configs/grimoire.mysql.yaml
+GRIMOIRE_ADMIN_PASSWORD=... go run ./cmd/grimoire-cli createadmin -config configs/grimoire.mysql.yaml -login admin -email admin@example.com
+go run ./cmd/grimoire-cli sessions gc -config configs/grimoire.mysql.yaml
 go run ./cmd/grimoire            -config configs/grimoire.mysql.yaml
 ```
 
@@ -113,7 +121,7 @@ even though the database rows resolve fine.
 
 Edit `configs/grimoire.postgres.yaml` (DSN form
 `postgres://user:pass@127.0.0.1:5432/wordpress?sslmode=disable`), then run the
-same `migrate` / `seed` / server commands with that config.
+same `migrate` / `seed` / `createadmin` / `sessions gc` / server commands with that config.
 
 ### Testing
 
@@ -130,19 +138,16 @@ GRIMOIRE_TEST_POSTGRES_DSN='postgres://user:pass@127.0.0.1:5432/grimoire_test?ss
   go test ./internal/storage/storagetest/... -v
 ```
 
-## REST API & extensions (M5, write parity from M6-M7)
+## REST API & extensions
 
 grimoire also exposes a WordPress-compatible REST API at `/wp-json/wp/v2/*`
 (read parity for posts/pages/comments/media/users, real WP response shape:
 `_links`, `?_embed`, `X-WP-Total*` pagination headers) plus write endpoints
-for comments (M4/M5), posts/pages (M6: create/update/delete, Basic
-auth over Application Passwords, optional `If-Unmodified-Since` optimistic
-concurrency), and categories/tags (M7: create/update/delete, with delete
-detaching the term from any posts rather than deleting them); media and
-user writes still return `501` (deferred to a later milestone). Authentication
-for non-anonymous REST requests is via WordPress **Application Passwords**
-(HTTP Basic, `wp_fast_hash`/`$generic$`, phpass/`$wp$`/bcrypt fallback);
-self-service management lives at `/wp-json/wp/v2/users/me/application-passwords`.
+for comments, posts/pages, and categories/tags; media and user writes still
+return `501`. Authentication for non-anonymous REST requests is via WordPress
+**Application Passwords** (HTTP Basic, `wp_fast_hash`/`$generic$`,
+phpass/`$wp$`/bcrypt fallback); self-service management lives at
+`/wp-json/wp/v2/users/me/application-passwords`.
 
 A small, first-class Go package, [`pkg/extensions`](./pkg/extensions),
 provides a compiled action/filter hook registry (no PHP, no dynamic
@@ -153,26 +158,21 @@ full specification.
 
 ## Milestones
 
-- **M1 (current spec):** content core + switchable DB + WP-compatible schema + public read rendering + default theme.
-- **M2:** users / auth / roles + internal content API.
-- **M3:** React Spectrum admin SPA (CRUD posts / pages / media).
-- **M4:** comments, media library, nav menus.
-- **M5:** extension/plugin system + REST API parity.
-- **M6:** admin CRUD editor — full post/page create/update/delete (rich-text
-  editor, inline category/tag management, status lifecycle, optimistic
-  concurrency) wired through both `/admin/api` and REST parity.
-- **M7:** revision history (auto-snapshotted on every update, browsable and
-  restorable from the editor), per-author autosave of in-progress edits,
-  a background scheduler that publishes `future`-status posts once their
-  scheduled date passes, and REST write parity for categories/tags
-  (create/update/delete via Application Passwords).
+- ✅ **M1:** [Content core + switchable DB + WP-compatible schema + public read rendering](./plans/01-content-core-read-rendering) — delivers the domain core, vendor adapters, default theme, and public rendering path.
+- ✅ **M2:** [Users, authentication, and roles](./plans/02-users-auth-roles) — delivers user accounts, application-password auth, and role-aware access control.
+- ✅ **M3:** [Adobe React Spectrum admin](./plans/03-spectrum-admin) — delivers the embedded working admin shell for managing site content.
+- ✅ **M4:** [Comments, media, and menus](./plans/04-comments-media-menus) — delivers comment workflows, media handling, and navigation menus.
+- ✅ **M5:** [Extensions and REST API](./plans/05-extensions-rest-api) — delivers the compiled hook system and WordPress-compatible REST surface.
+- ✅ **M6:** [Admin CRUD editor](./plans/06-admin-crud-editor) — delivers full content editing, status transitions, and optimistic concurrency in admin.
+- ✅ **M7:** [Revisions and scheduler](./plans/07-revisions-scheduler) — delivers revision history, autosave, and scheduled publishing.
 
 ## Status
 
-🚧 Early scaffold. M1 is specified in [`plans/01-content-core-read-rendering`](./plans/01-content-core-read-rendering).
+✅ M1-M7 are implemented.
 
 ## Licensing note
 
-grimoire replicates WordPress's **schema and behavior**, not its GPL PHP source, so
-the project is free to choose its own license. License selection is an open
-decision tracked in the plans index.
+grimoire is licensed under Apache-2.0. That choice supports broad commercial and
+open-source adoption, includes an explicit patent grant, avoids incorporating
+GPLv2-only WordPress PHP source, and keeps the project focused on schema/API
+interoperability rather than source-code reuse. This is not legal advice.

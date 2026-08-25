@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="spectrum spectrum--light spectrum--medium">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,25 +9,12 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/icons/apple-touch-icon.png">
   <link rel="manifest" href="/assets/icons/site.webmanifest">
-  <style>
-    footer {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      margin-top: 3rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid #e0e0e0;
-      color: #666;
-    }
-    footer img {
-      width: 28px;
-      height: 28px;
-    }
-  </style>
+  <link rel="stylesheet" href="/theme/static/css/spectrum.css">
+  <link rel="stylesheet" href="/theme/static/css/theme.css">
 </head>
-<body>
-  <header><a href="/">grimoire</a></header>
-  <main>
+<body class="theme-body">
+  <header class="theme-header"><a class="spectrum-Link spectrum-Link--quiet theme-header-link" href="/">grimoire</a></header>
+  <main class="theme-main">
 <h1>grimoire</h1>
 
   <article>
@@ -41,9 +28,6 @@
   </article>
 
 </main>
-  <footer>
-    <img src="/assets/icons/icon-64.png" width="28" height="28" alt="grimoire logo">
-    <small>Powered by grimoire</small>
-  </footer>
+  <footer class="theme-footer"><small class="spectrum-Body spectrum-Body--sizeS">Powered by grimoire</small></footer>
 </body>
 </html>

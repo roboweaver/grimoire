@@ -1,0 +1,35 @@
+/* Grimoire public theme composition rules (Direction A: Faithful).
+ * Adapted from the plan's illustrative pre-v16 Spectrum token names to the
+ * installed @spectrum-css/tokens@16.0.2 names verified in dist/css/*.css.
+ * Use only token names confirmed in web/theme/node_modules/@spectrum-css/tokens/dist/css.
+ */
+
+.theme-body {
+	margin: 0;
+	background: var(--spectrum-gray-100);
+	color: var(--spectrum-gray-900);
+}
+
+.theme-header {
+	display: flex;
+	align-items: center;
+	padding: var(--spectrum-spacing-300) var(--spectrum-spacing-400);
+	background: var(--spectrum-gray-50);
+	border-bottom: var(--spectrum-border-width-100) solid var(--spectrum-gray-300);
+}
+
+.theme-header-link {
+	font-size: var(--spectrum-font-size-400);
+}
+
+.theme-main {
+	max-width: 960px;
+	margin: 0 auto;
+	padding: var(--spectrum-spacing-400);
+}
+
+.theme-footer {
+	padding: var(--spectrum-spacing-300);
+	color: var(--spectrum-gray-700);
+	text-align: center;
+}

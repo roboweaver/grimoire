@@ -1,36 +1,82 @@
-# WordPress Compatibility (M1)
+# WordPress Compatibility (M1-M7)
 
-grimoire replicates the WordPress **database schema and data model** — not its
-GPL PHP source — so it can read and render an existing WordPress site's content.
-M1 is strictly **read-only**: grimoire issues only `SELECT` statements against the
-content tables and never writes to or migrates a database it did not create.
+grimoire replicates the WordPress **database schema, authentication model,
+and REST API surface** — not its GPL PHP source — so it can read, render,
+and (for supported content types) manage an existing WordPress site through
+a WordPress-compatible admin and API. See
+[`./wordpress-compatibility-tour.md`](./wordpress-compatibility-tour.md) for
+a visual, side-by-side comparison.
 
-## Tables replicated in M1
+## WordPress tables used
 
 With the configured `table_prefix` (default `wp_`):
 
 | Table | Used for |
 |-------|----------|
-| `posts` | posts + pages (`post_type` in `post`,`page`; `post_status='publish'`) |
-| `postmeta` | reserved (schema present; not read in M1) |
+| `posts` | posts + pages (public read: `post_status='publish'`; admin/REST: full CRUD across statuses, revisions, and scheduling) |
+| `postmeta` | read + one narrow write — featured-image (`_thumbnail_id`) and attachment metadata (`_wp_attachment_metadata`) are read only; the single `_wp_attached_file` key is the only key ever written, and only when a new attachment is created |
 | `options` | `blogname`, `blogdescription`, … site settings |
-| `terms` | category names + slugs |
-| `term_taxonomy` | taxonomy rows (`category`) + counts |
-| `term_relationships` | post ↔ taxonomy links |
-| `users` | author display (schema present) |
+| `terms` | category and tag names + slugs (read + write: create, rename, delete) |
+| `term_taxonomy` | taxonomy rows (`category`, `post_tag`) + counts (read + write; counts are recomputed whenever a post's term assignments change) |
+| `term_relationships` | post ↔ taxonomy links (read + write, via category/tag assignment) |
+| `users` | read for authentication (`user_login` is looked up and `user_pass` verified — login is never by email) and profile display (`user_email` is display/profile data, not part of login); writes: new-user creation (`create_users`-authorized calls and CLI bootstrap) and password-hash upgrades on successful login against a legacy hash |
+| `usermeta` | read + written — role/capability assignment (`{prefix}capabilities`, legacy `{prefix}user_level`) and other single-valued user meta |
+| `comments` | comment storage and moderation workflow (read + write) |
+| `commentmeta` | comment metadata (read + write) |
+
+grimoire also has its own additive `sessions` table (not part of the native
+WordPress schema) for its own session/CSRF-token management. Unlike the
+read-only verification recipe below, this table **is** created (via
+`grimoire-cli migrate`, `IF NOT EXISTS`) and written to on every login —
+inside whatever database grimoire is configured against, under that
+database's own `table_prefix`. If grimoire is pointed at a real WordPress
+database, this additive table is created and written there too; it has no
+WordPress-native counterpart and does not overlap with any WordPress core
+table's columns or rows.
 
 Type mappings from the WordPress MySQL schema are translated per vendor
 (`BIGINT(20) UNSIGNED`→`BIGSERIAL`/`INTEGER`, `LONGTEXT`→`TEXT`,
 `DATETIME`→`TIMESTAMP`/ISO-8601 `TEXT`, prefix-length keys→plain indexes). See
 `internal/storage/migrations/<vendor>/0001_init.up.sql`.
 
-## Read-only guarantees
+## What's implemented (M1-M7)
 
-- Repository SQL filters to `post_status='publish'`, so drafts, private, trashed,
-  and auto-draft rows (including WordPress's zero-date `0000-00-00` non-published
-  rows) are never rendered.
-- No `INSERT`/`UPDATE`/`DELETE` is issued against content tables by the server.
-  `grimoire-cli migrate`/`seed` are opt-in operator commands, not part of serving.
+- **M1 — Content core:** switchable database vendor (MySQL/PostgreSQL/
+  SQLite), WordPress-compatible schema, public read rendering of posts,
+  pages, categories, and archives.
+- **M2 — Users, auth, roles:** WordPress-compatible user accounts, sessions,
+  and role-aware access control.
+- **M3 — Embedded admin:** the Adobe React Spectrum admin shell for managing
+  site content.
+- **M4 — Comments, media, menus:** comment workflows, media handling (the
+  embedded admin UI supports uploading new attachments and reassigning their
+  parent post, in addition to reading rows from the database; see
+  `media.uploads_dir` in the README), and navigation menus.
+- **M5 — Extensions and REST API:** the compiled `pkg/extensions` hook
+  registry and a WordPress-compatible REST API at `/wp-json/wp/v2/*` — read
+  parity for posts/pages/comments/media/users, plus write endpoints for
+  comments, posts/pages, and categories/tags. The REST media and user
+  endpoints specifically still return `501` for every write verb — that
+  501 is scoped to the REST API surface only; media uploads and user
+  creation both have working, authorized write paths elsewhere (M4's admin
+  UI for media, and `create_users`-gated calls / CLI bootstrap for users).
+  Non-anonymous REST auth uses WordPress Application Passwords.
+- **M6 — Admin CRUD editor:** full content editing, status transitions, and
+  optimistic concurrency in the admin UI.
+- **M7 — Revisions and scheduler:** revision history, autosave, and
+  scheduled publishing.
+
+## Public read guarantees
+
+- The **public** rendering path (unauthenticated `GET` routes) filters to
+  `post_status='publish'`, so drafts, private, trashed, and auto-draft rows
+  (including WordPress's zero-date `0000-00-00` non-published rows) are
+  never rendered to anonymous visitors.
+- Write access is gated behind authentication: the admin UI and REST write
+  endpoints require a valid session or Application Password, and role-aware
+  access control (from M2) governs which authenticated actions are allowed.
+- `grimoire-cli migrate`/`seed` remain opt-in operator commands, not part of
+  serving.
 
 ## Trusted-content boundary
 
@@ -44,16 +90,21 @@ auto-derived by `internal/content.Excerpt`, which strips tags, shortcodes and
 Gutenberg block comments before wrapping the plain text — so the auto path emits
 no untrusted markup. Both fields therefore sit inside the same trust boundary.
 
-This is safe **only** because M1/M2 are read-only readers of a *trusted* WordPress
-database whose content was authored and sanitized upstream by WordPress. grimoire
-accepts no user input on the serving path.
+This was safe by construction in M1/M2, when grimoire only read a *trusted*
+WordPress database whose content was authored and sanitized upstream by
+WordPress and accepted no user input on the serving path.
 
-The moment that assumption changes — a future write/admin path, comment
-ingestion, or importing content from an untrusted source — `post_content`,
-`post_excerpt`, and any other stored HTML MUST be sanitized (e.g. with
-`bluemonday`) before they are cast to `template.HTML`. The cast sites carry a
-matching `TRUST BOUNDARY` comment so they are not copied blindly into a write
-path.
+As of M5-M7, write paths exist: the REST API accepts writes for posts/pages,
+comments, and categories/tags, and the admin UI supports full content CRUD.
+Content submitted through these paths is rendered through the same
+`template.HTML` cast described above, with no additional HTML sanitization
+at the render layer today. Operators exposing these write paths to
+less-trusted users (in particular the public comment-submission endpoint)
+should evaluate their own moderation/sanitization needs — the same
+operator-trust assumption WordPress itself relies on. The cast sites still
+carry a `TRUST BOUNDARY` comment; adding sanitization (e.g. `bluemonday`) at
+those sites remains the recommended hardening path if this assumption does
+not hold for a given deployment.
 
 ## Excerpts (`the_excerpt`)
 
@@ -102,3 +153,9 @@ an unmodified WordPress content database read-only. Publishing state, taxonomy
 relationships, and site options resolve identically across SQLite, MySQL, and
 PostgreSQL (proven by the cross-vendor contract suite in
 `internal/storage/storagetest`).
+
+## See also
+
+[`./wordpress-compatibility-tour.md`](./wordpress-compatibility-tour.md) —
+a visual, side-by-side comparison of WordPress and grimoire against the same
+content.

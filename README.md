@@ -43,7 +43,11 @@ web (net/http + chi) → content services → domain (entities + repository port
 - `internal/storage/<vendor>` provides adapters; vendor SQL never leaks upward.
 - `internal/render` turns domain data into HTML via themes (folders of templates).
 
-See [`plans/`](./plans) for the full, Kiro-format specifications.
+See [`plans/`](./plans) for the full, Kiro-format specifications. For a
+deeper look at WordPress interoperability, see
+[`docs/compatibility.md`](./docs/compatibility.md) (the compatibility guide)
+and [`docs/wordpress-compatibility-tour.md`](./docs/wordpress-compatibility-tour.md)
+(a visual, side-by-side tour).
 
 ## Repository layout
 

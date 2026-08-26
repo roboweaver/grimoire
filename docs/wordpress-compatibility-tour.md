@@ -22,12 +22,17 @@ compatibility guide.
 | ![WordPress public home showing published posts](./images/compatibility/public-home-wordpress.png) | ![grimoire public home showing the same published posts](./images/compatibility/public-home-grimoire.png) |
 
 **What matches:** Both list the same published posts, in the same order,
-with the same titles, links, and excerpt text.
+with the same titles and links, from the same source post data.
 
 **Intentional differences:** The products use different themes and page
-chrome. Excerpt truncation (word count, ellipsis placement) is approximated
-per product and may not be byte-identical even when the underlying source
-excerpt is the same.
+chrome. When a post has an explicit custom excerpt, both products render
+that same stored text verbatim (the first post's excerpt above is
+byte-identical on both sides). When a post has no custom excerpt, each
+product derives one from the post body using its own truncation rule —
+WordPress's theme truncates to a shorter length than grimoire's ~55-word
+auto-excerpt, so the second post's auto-generated excerpt above is visibly
+longer on the grimoire side even though both are derived from the same
+source content.
 
 **Current limits:** This pair does not claim plugin or theme-rendering
 parity.
@@ -79,31 +84,45 @@ Spectrum admin use different navigation, widgets, and visual design.
 name replaced with the placeholder "Admin User" before capture, and the
 WordPress screenshot has its "Recent Comments" activity widget removed —
 both are in-browser redactions to avoid showing real names, not product
-differences. The WordPress dashboard's other widgets (At a Glance, Quick
-Draft, site health) are otherwise shown unmodified.
+differences. In this specific capture, WordPress's "At a Glance" and "Quick
+Draft" widget bodies render empty/collapsed — this is the actual state of
+this WordPress installation at capture time, not something suppressed for
+the screenshot; only "Site Health Status" and "WordPress Events and News"
+show populated widget content.
 
 ## Posts list/editor
 
 | WordPress | grimoire |
 | --- | --- |
-| ![WordPress posts list filtered to published posts (145 items)](./images/compatibility/posts-list-editor-wordpress.png) | ![grimoire posts list, unfiltered, page 1 of 15 (148 items across all statuses)](./images/compatibility/posts-list-editor-grimoire.png) |
+| ![WordPress posts list filtered to published posts (145 items)](./images/compatibility/posts-list-editor-wordpress.png) | ![grimoire posts list capture-redacted to its 7 published rows only, with unpublished rows removed before capture](./images/compatibility/posts-list-editor-grimoire.png) |
 
 **What matches:** Both are the admin list view with entry points to edit the
-same underlying posts, backed by the same database.
+same underlying posts, backed by the same database, showing published posts
+only.
 
 **Intentional differences:** Editing controls and layout differ; this
 capture does not demonstrate saving, autosave, or Gutenberg block-editor
-parity.
+parity. grimoire's admin list also has no separate Author column, unlike
+WordPress's.
 
-**Current limits:** These two screenshots show different scopes and are
-**not** an apples-to-apples count comparison. The WordPress screenshot uses
-its native `?post_status=publish` filter (145 published posts). grimoire's
-admin posts list has no equivalent status filter today, so its screenshot
-shows the real, unfiltered first page of the list as the product actually
-renders it: page 1 of 15, 148 total items, mixing `publish`, `draft`, and
-`auto-draft` rows. The logged-in user's display name is replaced with
-"Admin User" in both screenshots (redaction only, not a product
-difference).
+**Current limits:** WordPress's screenshot uses its native
+`?post_status=publish` filter — a real, working product control — to show
+145 published posts across the product's own real pagination. grimoire's
+admin posts list has no equivalent published-only filter today, so its
+published-only view here is **not** a product control: every non-`publish`
+row was removed from the live DOM before capture, and the on-screen "7
+published item(s) shown (capture-redacted; unpublished rows removed)"
+caption is disclosure text substituted for grimoire's real pagination/count
+footer. The two visible counts are therefore not comparable — WordPress's
+145 reflects an actual published-post total; grimoire's 7 reflects only
+what a capture-time DOM redaction left on this one page, not the site's
+real published-post count. The logged-in user's display name is replaced
+with "Admin User" in both screenshots (redaction only, not a product
+difference); WordPress's Author column, which also reads "Admin User" per
+row here, received that same admin-identity redaction. This is distinct
+from the public byline shown on the single-post page above ("Rob Weaver"),
+which is left unredacted because a post's author byline is already public,
+published information rather than an admin-only credential.
 
 ## Media library
 
@@ -132,6 +151,15 @@ to remove every attachment card except `git_user`'s — it is not a working
 product filter and is disclosed here as a capture-time adjustment, not a
 grimoire feature.
 
+The `git_user` attachment's own artwork depicts a fictional git-configuration
+screenshot (a mock repository page and mock terminal session) that includes
+placeholder names and gmail-style addresses for a persona called "Sarah
+Coder." This artwork is already public: it's embedded in the selected
+post's own published body (see "Single published post" above, alt text "Git
+user woes"), and that post's text explicitly states its "org, user, and key
+names" are placeholders. No additional redaction was applied to this
+already-public, already-fictional illustration.
+
 ## Representative REST response
 
 | WordPress | grimoire |
@@ -142,11 +170,19 @@ grimoire feature.
 and return the same post's fields.
 
 **Intentional differences:** Key order and some optional fields may differ.
-Both responses have their local capture hostname replaced in-page with a
-placeholder domain (`wordpress.example.test` / `grimoire.example.test`)
-before capture so no local network detail is shown; only the URL host was
-changed, all other JSON structure and values are exactly as returned by each
-server.
+The `content.rendered` field itself differs semantically between the two
+responses: WordPress's `content.rendered` is fully processed HTML with its
+Gutenberg block-comment delimiters (for example `<!-- wp:paragraph -->`)
+stripped, and its internal image URLs resolved to absolute paths on
+WordPress's own host. grimoire's `content.rendered` retains the raw
+Gutenberg block-comment delimiters un-stripped, and renders internal image
+URLs as root-relative paths (no host). Both represent the same underlying
+post content, but a consumer parsing `content.rendered` as final,
+fully-processed HTML should account for this difference. Both responses
+also have their local capture hostname replaced in-page with a placeholder
+domain (`wordpress.example.test` / `grimoire.example.test`) before capture
+so no local network detail is shown; only the URL host was changed, all
+other JSON structure and values are exactly as returned by each server.
 
 **Current limits:** One `GET` request is not a claim of total REST API
 parity; see [`./compatibility.md`](./compatibility.md) for the full

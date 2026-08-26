@@ -70,18 +70,18 @@ M8 and must use a separate pull request.
 
 ## Phase 3 — Validate and commit the implementation
 
-- [ ] 3.1 Validate artifacts and links.
+- [x] 3.1 Validate artifacts and links.
   - _Action:_ Run the manifest, dimension, and local-link commands in
     `design.md`.
   - _Acceptance:_ Exactly 14 expected PNGs exist at approved dimensions and all
     links resolve. _(Req 5, 8)_
-- [ ] 3.2 Validate privacy and current documentation.
+- [x] 3.2 Validate privacy and current documentation.
   - _Action:_ Run the privacy and stale-language scans, render GitHub Markdown,
     and complete the manual image review.
   - _Acceptance:_ No sensitive/capture-only value, unpublished content, stale
     M1 claim, broken layout, or unsupported parity claim remains. _(Req 1, 4, 7,
     8)_
-- [ ] 3.3 Validate scope and commit.
+- [x] 3.3 Validate scope and commit.
   - _Action:_ Run `git diff HEAD --check`, inspect `git status --short` and
     `git diff HEAD --name-only`, then stage only the approved files.
   - _Acceptance:_ No code, dependency, configuration, data, generated asset,

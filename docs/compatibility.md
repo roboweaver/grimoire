@@ -14,19 +14,25 @@ With the configured `table_prefix` (default `wp_`):
 | Table | Used for |
 |-------|----------|
 | `posts` | posts + pages (public read: `post_status='publish'`; admin/REST: full CRUD across statuses, revisions, and scheduling) |
-| `postmeta` | read and written — featured-image and attachment metadata, and other post/page meta |
+| `postmeta` | read only — featured-image (`_thumbnail_id`) and attachment metadata (`_wp_attachment_metadata`); the single `_wp_attached_file` key is written when a new attachment is created, but no other post/page meta is written |
 | `options` | `blogname`, `blogdescription`, … site settings |
-| `terms` | category names + slugs |
-| `term_taxonomy` | taxonomy rows (`category`) + counts |
-| `term_relationships` | post ↔ taxonomy links |
-| `users` | full WordPress-compatible auth: `user_pass`, `user_email`, and related columns are read and checked for login, not just displayed |
-| `usermeta` | user metadata (schema present, WordPress-compatible) |
+| `terms` | category and tag names + slugs (read + write: create, rename, delete) |
+| `term_taxonomy` | taxonomy rows (`category`, `post_tag`) + counts (read + write; counts are recomputed whenever a post's term assignments change) |
+| `term_relationships` | post ↔ taxonomy links (read + write, via category/tag assignment) |
+| `users` | read for authentication (`user_login` is looked up and `user_pass` verified — login is never by email) and profile display (`user_email` is display/profile data, not part of login); writes: new-user creation (`create_users`-authorized calls and CLI bootstrap) and password-hash upgrades on successful login against a legacy hash |
+| `usermeta` | read + written — role/capability assignment (`{prefix}capabilities`, legacy `{prefix}user_level`) and other single-valued user meta |
 | `comments` | comment storage and moderation workflow (read + write) |
 | `commentmeta` | comment metadata (read + write) |
 
-grimoire also has its own native `sessions` table (not part of the WordPress
-schema) for its own session/CSRF-token management; it is never read from or
-written to an existing WordPress database.
+grimoire also has its own additive `sessions` table (not part of the native
+WordPress schema) for its own session/CSRF-token management. Unlike the
+read-only verification recipe below, this table **is** created (via
+`grimoire-cli migrate`, `IF NOT EXISTS`) and written to on every login —
+inside whatever database grimoire is configured against, under that
+database's own `table_prefix`. If grimoire is pointed at a real WordPress
+database, this additive table is created and written there too; it has no
+WordPress-native counterpart and does not overlap with any WordPress core
+table's columns or rows.
 
 Type mappings from the WordPress MySQL schema are translated per vendor
 (`BIGINT(20) UNSIGNED`→`BIGSERIAL`/`INTEGER`, `LONGTEXT`→`TEXT`,
@@ -42,15 +48,19 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   and role-aware access control.
 - **M3 — Embedded admin:** the Adobe React Spectrum admin shell for managing
   site content.
-- **M4 — Comments, media, menus:** comment workflows, media handling
-  (reading rows from the database; see `media.uploads_dir` in the README),
-  and navigation menus.
+- **M4 — Comments, media, menus:** comment workflows, media handling (the
+  embedded admin UI supports uploading new attachments and reassigning their
+  parent post, in addition to reading rows from the database; see
+  `media.uploads_dir` in the README), and navigation menus.
 - **M5 — Extensions and REST API:** the compiled `pkg/extensions` hook
   registry and a WordPress-compatible REST API at `/wp-json/wp/v2/*` — read
   parity for posts/pages/comments/media/users, plus write endpoints for
-  comments, posts/pages, and categories/tags. Media and user writes still
-  return `501`. Non-anonymous REST auth uses WordPress Application
-  Passwords.
+  comments, posts/pages, and categories/tags. The REST media and user
+  endpoints specifically still return `501` for every write verb — that
+  501 is scoped to the REST API surface only; media uploads and user
+  creation both have working, authorized write paths elsewhere (M4's admin
+  UI for media, and `create_users`-gated calls / CLI bootstrap for users).
+  Non-anonymous REST auth uses WordPress Application Passwords.
 - **M6 — Admin CRUD editor:** full content editing, status transitions, and
   optimistic concurrency in the admin UI.
 - **M7 — Revisions and scheduler:** revision history, autosave, and

@@ -147,18 +147,19 @@ accepted by the backend API but is not read by the admin page, so its
 unfiltered media library (well over a thousand attachments in this database)
 cannot be narrowed by URL alone. To make a legible, single-attachment
 comparison possible, the grimoire screenshot's DOM was edited before capture
-to remove every attachment card except `git_user`'s — it is not a working
-product filter and is disclosed here as a capture-time adjustment, not a
-grimoire feature.
+to remove every attachment card and row except `git_user`'s — it is not a
+working product filter and is disclosed here as a capture-time adjustment,
+not a grimoire feature.
 
 The `git_user` attachment's own artwork depicts a fictional git-configuration
 screenshot (a mock repository page and mock terminal session) that includes
-placeholder names and gmail-style addresses for a persona called "Sarah
+placeholder names and fictional email addresses for a persona called "Sarah
 Coder." This artwork is already public: it's embedded in the selected
-post's own published body (see "Single published post" above, alt text "Git
-user woes"), and that post's text explicitly states its "org, user, and key
-names" are placeholders. No additional redaction was applied to this
-already-public, already-fictional illustration.
+post's own published body, visible directly in the raw `content.rendered`
+HTML in the "Representative REST response" section below (post id 400774,
+`alt="Git user woes"`), and that post's text explicitly states its "org,
+user, and key names" are placeholders. No additional redaction was applied
+to this already-public, already-fictional illustration.
 
 ## Representative REST response
 
@@ -167,22 +168,30 @@ already-public, already-fictional illustration.
 | ![WordPress REST API response for the selected post](./images/compatibility/rest-response-wordpress.png) | ![grimoire REST API response for the same post](./images/compatibility/rest-response-grimoire.png) |
 
 **What matches:** Both serve `GET /wp-json/wp/v2/posts?slug=how-to-painlessly-run-multiple-github-accounts-on-one-machine&status=publish`
-and return the same post's fields.
+and return the same post's fields — both responses are for post `id: 400774`.
 
 **Intentional differences:** Key order and some optional fields may differ.
 The `content.rendered` field itself differs semantically between the two
-responses: WordPress's `content.rendered` is fully processed HTML with its
-Gutenberg block-comment delimiters (for example `<!-- wp:paragraph -->`)
-stripped, and its internal image URLs resolved to absolute paths on
-WordPress's own host. grimoire's `content.rendered` retains the raw
-Gutenberg block-comment delimiters un-stripped, and renders internal image
-URLs as root-relative paths (no host). Both represent the same underlying
-post content, but a consumer parsing `content.rendered` as final,
-fully-processed HTML should account for this difference. Both responses
-also have their local capture hostname replaced in-page with a placeholder
-domain (`wordpress.example.test` / `grimoire.example.test`) before capture
-so no local network detail is shown; only the URL host was changed, all
-other JSON structure and values are exactly as returned by each server.
+responses in two ways. First, WordPress strips Gutenberg block-comment
+delimiters (for example `<!-- wp:paragraph -->`) from the rendered HTML;
+grimoire retains them un-stripped. Second, for the embedded `<img>` tag both
+responses emit the *same* root-relative `src` (no host), but WordPress
+additionally injects responsive-image attributes — `srcset` (with
+width-keyed URLs that *are* absolute, on WordPress's own host), `sizes`,
+`loading`, and `decoding` — that grimoire's rendering does not add. Both
+represent the same underlying post content, but a consumer parsing
+`content.rendered` as final, fully-processed HTML should account for both
+differences. Both responses also have their local capture hostname replaced
+in-page with a placeholder domain (`wordpress.example.test` /
+`grimoire.example.test`) before capture so no local network detail is shown
+in most fields; the one exception is the WordPress response's stored
+`guid.rendered` value, which is emitted verbatim as originally recorded in
+the database and was not part of the capture-time substitution, so it still
+shows the original database host (`accuweaver.com`) rather than the
+placeholder domain — disclosed here rather than silently edited, to keep
+the displayed JSON faithful to what the server actually returns. Aside from
+that one field, all other JSON structure and values are exactly as returned
+by each server.
 
 **Current limits:** One `GET` request is not a claim of total REST API
 parity; see [`./compatibility.md`](./compatibility.md) for the full

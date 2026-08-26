@@ -14,7 +14,7 @@ With the configured `table_prefix` (default `wp_`):
 | Table | Used for |
 |-------|----------|
 | `posts` | posts + pages (public read: `post_status='publish'`; admin/REST: full CRUD across statuses, revisions, and scheduling) |
-| `postmeta` | read only — featured-image (`_thumbnail_id`) and attachment metadata (`_wp_attachment_metadata`); the single `_wp_attached_file` key is written when a new attachment is created, but no other post/page meta is written |
+| `postmeta` | read + one narrow write — featured-image (`_thumbnail_id`) and attachment metadata (`_wp_attachment_metadata`) are read only; the single `_wp_attached_file` key is the only key ever written, and only when a new attachment is created |
 | `options` | `blogname`, `blogdescription`, … site settings |
 | `terms` | category and tag names + slugs (read + write: create, rename, delete) |
 | `term_taxonomy` | taxonomy rows (`category`, `post_tag`) + counts (read + write; counts are recomputed whenever a post's term assignments change) |

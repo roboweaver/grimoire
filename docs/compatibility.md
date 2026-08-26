@@ -7,19 +7,26 @@ a WordPress-compatible admin and API. See
 [`./wordpress-compatibility-tour.md`](./wordpress-compatibility-tour.md) for
 a visual, side-by-side comparison.
 
-## Tables replicated in M1
+## WordPress tables used
 
 With the configured `table_prefix` (default `wp_`):
 
 | Table | Used for |
 |-------|----------|
-| `posts` | posts + pages (`post_type` in `post`,`page`; `post_status='publish'`) |
-| `postmeta` | reserved (schema present; not read in M1) |
+| `posts` | posts + pages (public read: `post_status='publish'`; admin/REST: full CRUD across statuses, revisions, and scheduling) |
+| `postmeta` | read and written — featured-image and attachment metadata, and other post/page meta |
 | `options` | `blogname`, `blogdescription`, … site settings |
 | `terms` | category names + slugs |
 | `term_taxonomy` | taxonomy rows (`category`) + counts |
 | `term_relationships` | post ↔ taxonomy links |
-| `users` | author display (schema present) |
+| `users` | full WordPress-compatible auth: `user_pass`, `user_email`, and related columns are read and checked for login, not just displayed |
+| `usermeta` | user metadata (schema present, WordPress-compatible) |
+| `comments` | comment storage and moderation workflow (read + write) |
+| `commentmeta` | comment metadata (read + write) |
+
+grimoire also has its own native `sessions` table (not part of the WordPress
+schema) for its own session/CSRF-token management; it is never read from or
+written to an existing WordPress database.
 
 Type mappings from the WordPress MySQL schema are translated per vendor
 (`BIGINT(20) UNSIGNED`→`BIGSERIAL`/`INTEGER`, `LONGTEXT`→`TEXT`,

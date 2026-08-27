@@ -13,7 +13,10 @@
   <link rel="stylesheet" href="/theme/static/css/theme.css">
 </head>
 <body class="theme-body">
-  <header class="theme-header"><a class="spectrum-Link spectrum-Link--quiet theme-header-link" href="/">{{.SiteTitle}}</a></header>
+  <header class="theme-header">
+    <a class="spectrum-Link spectrum-Link--quiet theme-header-link" href="/">{{.SiteTitle}}</a>
+    {{if .Tagline}}<p class="spectrum-Body spectrum-Body--sizeM theme-tagline theme-header-tagline">{{.Tagline}}</p>{{end}}
+  </header>
   <main class="theme-main">{{block "content" .}}{{end}}</main>
   <footer class="theme-footer"><small class="spectrum-Body spectrum-Body--sizeS">Powered by grimoire</small></footer>
 </body>

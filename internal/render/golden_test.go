@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,4 +94,82 @@ func TestGoldenCategory(t *testing.T) {
 		t.Fatalf("render category: %v", err)
 	}
 	goldenCompare(t, "category.html", buf.Bytes())
+}
+
+// TestSiteIdentityRendersOnce guards against regressing to two competing
+// site-identity elements on a single page (e.g. a persistent header link
+// plus a duplicate heading in the page content). Every page template must
+// render the site title exactly once in the visible body; the <title>
+// element in <head> is intentionally excluded since it legitimately repeats
+// the site title for the browser tab/window.
+func TestSiteIdentityRendersOnce(t *testing.T) {
+	e := defaultEngine(t)
+	cases := []struct {
+		name     string
+		template string
+		data     any
+	}{
+		{
+			name:     "index",
+			template: "index",
+			data: IndexData{
+				SiteTitle: "grimoire",
+				Tagline:   "A Go-native CMS",
+				Posts: []PostView{
+					{Slug: "hello-world", Title: "Hello World", Excerpt: "First post.", Date: fixedDate},
+				},
+			},
+		},
+		{
+			name:     "single",
+			template: "single",
+			data: SingleData{
+				SiteTitle: "grimoire",
+				Post:      PostView{ID: 1, Slug: "hello-world", Title: "Hello World", Content: "<p>Body.</p>", Date: fixedDate},
+			},
+		},
+		{
+			name:     "category",
+			template: "category",
+			data: CategoryData{
+				SiteTitle: "grimoire",
+				Term:      TermView{Name: "News", Slug: "news", Taxonomy: "category"},
+				Posts: []PostView{
+					{Slug: "hello-world", Title: "Hello World", Excerpt: "First post.", Date: fixedDate},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := e.Render(&buf, tc.template, tc.data); err != nil {
+				t.Fatalf("render %s: %v", tc.name, err)
+			}
+			body := bodyOnly(t, buf.String())
+			if n := strings.Count(body, "grimoire"); n != 1 {
+				t.Fatalf("expected site title %q to appear exactly once in <body> for %s, got %d occurrences:\n%s", "grimoire", tc.name, n, body)
+			}
+		})
+	}
+}
+
+// bodyOnly returns the header+main region of the rendered page: everything
+// after the closing </head> tag and before the opening <footer> tag. This
+// excludes both the <title> element (which legitimately repeats the site
+// title for the browser tab/window) and the footer's "Powered by grimoire"
+// attribution (which legitimately repeats the site name outside of any
+// site-identity/branding element).
+func bodyOnly(t *testing.T, html string) string {
+	t.Helper()
+	start := strings.Index(html, "</head>")
+	if start == -1 {
+		t.Fatalf("rendered HTML has no </head>:\n%s", html)
+	}
+	start += len("</head>")
+	end := strings.Index(html, "<footer")
+	if end == -1 {
+		t.Fatalf("rendered HTML has no <footer>:\n%s", html)
+	}
+	return html[start:end]
 }

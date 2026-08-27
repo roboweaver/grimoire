@@ -62,9 +62,12 @@ type CategoryData struct {
 // LoginData backs the login template. CSRFToken is embedded as a hidden form
 // field for the double-submit check; Error is set (without detail) after a
 // failed attempt so the form shows a generic message without enumerating users;
-// Redirect carries the post-login destination.
+// Redirect carries the post-login destination. Tagline mirrors the other page
+// data types so the shared base.tmpl masthead can render it uniformly across
+// every page (it is left empty here; the login page has no tagline of its own).
 type LoginData struct {
 	SiteTitle string
+	Tagline   string
 	CSRFToken string
 	Error     bool
 	Redirect  string

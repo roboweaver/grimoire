@@ -213,6 +213,45 @@ database:
 	}
 }
 
+func TestCheckUploadsDirExists(t *testing.T) {
+	dir := t.TempDir()
+	if err := CheckUploadsDir(dir); err != nil {
+		t.Fatalf("CheckUploadsDir(%q) = %v, want nil", dir, err)
+	}
+}
+
+func TestCheckUploadsDirMissing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "does-not-exist")
+	err := CheckUploadsDir(dir)
+	if err == nil {
+		t.Fatal("CheckUploadsDir on a missing directory: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("error = %q, want mention of 'does not exist'", err.Error())
+	}
+}
+
+func TestCheckUploadsDirEmpty(t *testing.T) {
+	if err := CheckUploadsDir(""); err == nil {
+		t.Fatal("CheckUploadsDir(\"\"): want error, got nil")
+	}
+}
+
+func TestCheckUploadsDirNotADirectory(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	err := CheckUploadsDir(file)
+	if err == nil {
+		t.Fatal("CheckUploadsDir on a file path: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("error = %q, want mention of 'not a directory'", err.Error())
+	}
+}
+
 func TestLoadRESTDefaults(t *testing.T) {
 	path := writeTempConfig(t, `
 database:

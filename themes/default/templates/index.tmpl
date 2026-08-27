@@ -1,8 +1,4 @@
 {{define "content"}}
-<div class="theme-page-head">
-<h1 class="spectrum-Heading spectrum-Heading--sizeXL">{{.SiteTitle}}</h1>
-{{if .Tagline}}<p class="spectrum-Body spectrum-Body--sizeL theme-tagline">{{.Tagline}}</p>{{end}}
-</div>
 <div class="theme-card-grid">
 {{range .Posts}}
 {{template "post-card" .}}

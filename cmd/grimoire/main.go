@@ -53,6 +53,13 @@ func main() {
 		"dsn", config.RedactDSN(cfg.Database.Vendor, cfg.Database.DSN),
 	)
 
+	// Non-fatal: a fresh install may not have any uploads yet, but this
+	// gives operators pointing grimoire at an existing external WordPress
+	// database a clear diagnostic instead of silent 404s on every image.
+	if err := config.CheckUploadsDir(cfg.Media.UploadsDir); err != nil {
+		log.Warn("media uploads dir may be misconfigured", "err", err)
+	}
+
 	repos, err := storage.New(cfg.Database)
 	if err != nil {
 		log.Error("open storage", "err", err)

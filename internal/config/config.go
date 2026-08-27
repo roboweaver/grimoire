@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -225,6 +226,37 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Database.DSN) == "" {
 		return fmt.Errorf("config: database.dsn is required for vendor %q", c.Database.Vendor)
+	}
+	return nil
+}
+
+// CheckUploadsDir reports whether dir exists and is a directory. Relative
+// paths are resolved against the process's current working directory,
+// matching how internal/content.MediaService and the /wp-content/uploads/*
+// static handler (internal/web/uploads.go) resolve MediaConfig.UploadsDir.
+//
+// A non-nil result is intentionally not treated as fatal by callers: a
+// fresh install may not have any uploads yet. It exists so operators
+// pointing grimoire at an existing external WordPress database (where
+// media.uploads_dir must be set explicitly, see MediaConfig.UploadsDir) get
+// a clear startup diagnostic instead of silent 404s on every image.
+func CheckUploadsDir(dir string) error {
+	if strings.TrimSpace(dir) == "" {
+		return fmt.Errorf("uploads_dir is empty")
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			abs, absErr := filepath.Abs(dir)
+			if absErr != nil {
+				abs = dir
+			}
+			return fmt.Errorf("uploads_dir %q does not exist (resolved to %q); set media.uploads_dir to the site's real WordPress uploads directory or /wp-content/uploads/* requests will 404", dir, abs)
+		}
+		return fmt.Errorf("uploads_dir %q: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("uploads_dir %q is not a directory", dir)
 	}
 	return nil
 }

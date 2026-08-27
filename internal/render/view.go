@@ -52,10 +52,11 @@ type SingleData struct {
 
 // CategoryData backs the category/archive templates.
 type CategoryData struct {
-	SiteTitle string
-	Tagline   string
-	Term      TermView
-	Posts     []PostView
+	SiteTitle  string
+	Tagline    string
+	Term       TermView
+	Posts      []PostView
+	Pagination content.Page
 }
 
 // LoginData backs the login template. CSRFToken is embedded as a hidden form

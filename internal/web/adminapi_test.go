@@ -285,20 +285,29 @@ func TestAdminAuthorsEndpoint(t *testing.T) {
 }
 
 func TestAdminPostsInvalidAuthorReturns400(t *testing.T) {
-	admin := &fakeAdmin{list: func(_, _ int, _ content.AdminListFilter) (content.AdminList, error) {
-		t.Fatal("list should not be called for an invalid author param")
-		return content.AdminList{}, nil
-	}}
-	srv := testAdminServer(admin)
-	req := httptest.NewRequest(http.MethodGet, "/admin/api/posts?author=not-a-number", nil)
-	req = req.WithContext(principalCtx("edit_posts"))
-	rec := httptest.NewRecorder()
-	srv.jsonHandler(srv.adminPosts).ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"code"`) {
-		t.Fatalf("expected {\"error\":{\"code\":...}} envelope, got %s", rec.Body.String())
+	// Requirement 4 AC2 requires 400 for any author value that is not a
+	// positive integer: non-numeric, zero, and negative all qualify. Zero in
+	// particular must be rejected rather than silently accepted, since it
+	// collides with the domain's own "0 means unfiltered" sentinel and would
+	// otherwise make a literal `author=0` typo return an unfiltered list.
+	for _, raw := range []string{"not-a-number", "0", "-5"} {
+		t.Run(raw, func(t *testing.T) {
+			admin := &fakeAdmin{list: func(_, _ int, _ content.AdminListFilter) (content.AdminList, error) {
+				t.Fatal("list should not be called for an invalid author param")
+				return content.AdminList{}, nil
+			}}
+			srv := testAdminServer(admin)
+			req := httptest.NewRequest(http.MethodGet, "/admin/api/posts?author="+raw, nil)
+			req = req.WithContext(principalCtx("edit_posts"))
+			rec := httptest.NewRecorder()
+			srv.jsonHandler(srv.adminPosts).ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), `"code"`) {
+				t.Fatalf("expected {\"error\":{\"code\":...}} envelope, got %s", rec.Body.String())
+			}
+		})
 	}
 }
 

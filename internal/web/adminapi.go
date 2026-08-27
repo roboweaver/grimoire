@@ -226,8 +226,8 @@ func (s *Server) adminPosts(w http.ResponseWriter, r *http.Request) error {
 	f := content.AdminListFilter{Type: q.Get("type"), Status: status, Search: q.Get("search")}
 	if raw := q.Get("author"); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid_author", "author must be a numeric user ID")
+		if err != nil || id <= 0 {
+			writeJSONError(w, http.StatusBadRequest, "invalid_author", "author must be a positive numeric user ID")
 			return nil
 		}
 		f.Author = id

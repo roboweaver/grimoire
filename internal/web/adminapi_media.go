@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/roboweaver/grimoire/internal/content"
@@ -63,13 +64,49 @@ func (s *Server) adminMedia(w http.ResponseWriter, r *http.Request) error {
 }
 
 // adminMediaList returns a paginated, capability-gated media list (Req 3,
-// Req 11). Query params: page, perPage, parentId — mirroring adminPosts.
+// Req 11). Query params: page, perPage, parentId, search, type, after,
+// before.
 func (s *Server) adminMediaList(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	page, perPage, offset := clampPage(atoiDefault(q.Get("page"), 1), atoiDefault(q.Get("perPage"), 0))
 	filter := domain.MediaFilter{Limit: perPage, Offset: offset}
-	if parentID := atoiDefault(q.Get("parentId"), 0); parentID > 0 {
-		filter.ParentID = int64(parentID)
+
+	if raw := q.Get("parentId"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id < 0 {
+			writeJSONError(w, http.StatusBadRequest, "invalid_parent_id", "parentId must be a non-negative integer")
+			return nil
+		}
+		filter.ParentID = id
+	}
+
+	filter.Search = q.Get("search")
+
+	if typ := q.Get("type"); typ != "" {
+		switch typ {
+		case "image", "video", "audio", "document":
+			filter.Type = typ
+		default:
+			writeJSONError(w, http.StatusBadRequest, "invalid_type", "type must be one of image, video, audio, document")
+			return nil
+		}
+	}
+
+	if raw := q.Get("after"); raw != "" {
+		ts, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_after", "after must be an ISO-8601 date (YYYY-MM-DD)")
+			return nil
+		}
+		filter.After = ts
+	}
+	if raw := q.Get("before"); raw != "" {
+		ts, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_before", "before must be an ISO-8601 date (YYYY-MM-DD)")
+			return nil
+		}
+		filter.Before = ts
 	}
 	items, total, err := s.media.List(r.Context(), filter)
 	if err != nil {
@@ -79,10 +116,7 @@ func (s *Server) adminMediaList(w http.ResponseWriter, r *http.Request) error {
 	for _, m := range items {
 		out = append(out, mediaItemDTO(m))
 	}
-	totalPages := (total + perPage - 1) / perPage
-	if totalPages < 1 {
-		totalPages = 1
-	}
+	totalPages := content.TotalPages(total, perPage)
 	return writeJSON(w, http.StatusOK, mediaListResponse{
 		Items:      out,
 		Page:       page,

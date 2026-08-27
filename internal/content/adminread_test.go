@@ -60,7 +60,7 @@ func TestAdminServiceListClampsAndPaginates(t *testing.T) {
 	svc := newAdminService(data, &fakeUserReader{})
 
 	// perPage over the max is clamped to MaxPerPage; page below 1 becomes 1.
-	got, err := svc.List(context.Background(), 0, 1000, "", "")
+	got, err := svc.List(context.Background(), 0, 1000, AdminListFilter{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestAdminServiceListTotalPagesRoundsUp(t *testing.T) {
 	}
 	svc := newAdminService(data, &fakeUserReader{})
 
-	got, err := svc.List(context.Background(), 2, 10, "post", "draft")
+	got, err := svc.List(context.Background(), 2, 10, AdminListFilter{Type: "post", Status: "draft"})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestAdminServiceListEmptyFiltersLeaveTypesUnset(t *testing.T) {
 		count: func(domain.AdminPostFilter) (int, error) { return 0, nil },
 	}
 	svc := newAdminService(data, &fakeUserReader{})
-	if _, err := svc.List(context.Background(), 1, 10, "", ""); err != nil {
+	if _, err := svc.List(context.Background(), 1, 10, AdminListFilter{}); err != nil {
 		t.Fatalf("List: %v", err)
 	}
 	if gotFilter.Types != nil {
@@ -209,5 +209,69 @@ func TestAdminServiceDisplayName(t *testing.T) {
 	}
 	if name != "Ada Admin" {
 		t.Errorf("name = %q, want Ada Admin", name)
+	}
+}
+
+func TestAdminServiceListForwardsSearchToCount(t *testing.T) {
+	var gotListFilter, gotCountFilter domain.AdminPostFilter
+	data := &fakeAdminData{
+		list: func(f domain.AdminPostFilter) ([]domain.Post, error) {
+			gotListFilter = f
+			if f.Search == "hello" {
+				return []domain.Post{{ID: 1, Title: "hello"}}, nil
+			}
+			return []domain.Post{{ID: 1, Title: "hello"}, {ID: 2, Title: "other"}}, nil
+		},
+		count: func(f domain.AdminPostFilter) (int, error) {
+			gotCountFilter = f
+			if f.Search == "hello" {
+				return 1, nil
+			}
+			return 2, nil
+		},
+	}
+	svc := newAdminService(data, &fakeUserReader{})
+
+	all, err := svc.List(context.Background(), 1, 10, AdminListFilter{})
+	if err != nil {
+		t.Fatalf("List (unfiltered): %v", err)
+	}
+	if all.Total != 2 || all.TotalPages != 1 {
+		t.Fatalf("unfiltered Total/TotalPages = %d/%d, want 2/1", all.Total, all.TotalPages)
+	}
+
+	filtered, err := svc.List(context.Background(), 1, 10, AdminListFilter{Search: "hello"})
+	if err != nil {
+		t.Fatalf("List (Search=hello): %v", err)
+	}
+	if len(filtered.Items) != 1 {
+		t.Fatalf("filtered Items = %d, want 1", len(filtered.Items))
+	}
+	// The regression this test guards: before the fix, List rebuilt the count
+	// filter from only Types/Statuses, so a Search-filtered CountForAdmin call
+	// never saw Search and Total stayed 2 (the unfiltered count) instead of 1.
+	if filtered.Total != 1 || filtered.TotalPages != 1 {
+		t.Fatalf("Search-filtered Total/TotalPages = %d/%d, want 1/1 (Search must reach CountForAdmin)", filtered.Total, filtered.TotalPages)
+	}
+	if gotCountFilter.Search != "hello" {
+		t.Fatalf("CountForAdmin did not receive Search: %+v", gotCountFilter)
+	}
+	if gotListFilter.Search != "hello" {
+		t.Fatalf("ListForAdmin did not receive Search: %+v", gotListFilter)
+	}
+}
+
+func TestAdminServiceListMissingFilterFieldsMeansUnfiltered(t *testing.T) {
+	data := &fakeAdminData{
+		list:  func(domain.AdminPostFilter) ([]domain.Post, error) { return []domain.Post{{ID: 1}, {ID: 2}}, nil },
+		count: func(domain.AdminPostFilter) (int, error) { return 2, nil },
+	}
+	svc := newAdminService(data, &fakeUserReader{})
+	got, err := svc.List(context.Background(), 1, 10, AdminListFilter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got.Items) != 2 || got.Total != 2 {
+		t.Fatalf("zero-value AdminListFilter should return all posts, got %d items / total %d", len(got.Items), got.Total)
 	}
 }

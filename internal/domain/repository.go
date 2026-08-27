@@ -22,6 +22,10 @@ type PostRepository interface {
 type TermRepository interface {
 	// BySlug returns the term for a taxonomy/slug pair, or ErrNotFound.
 	BySlug(ctx context.Context, taxonomy, slug string) (Term, error)
+	// CountPublishedByTermSlug returns the number of published posts related
+	// to a taxonomy term (Req 8.1's Total for the category page). Pure
+	// COUNT(*); no writes.
+	CountPublishedByTermSlug(ctx context.Context, taxonomy, termSlug string) (int, error)
 }
 
 // PostTermsRepository resolves the taxonomy terms related to a post. It is

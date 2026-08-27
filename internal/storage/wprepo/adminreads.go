@@ -12,6 +12,7 @@ import (
 var (
 	_ domain.AdminPostRepository = (*PostRepo)(nil)
 	_ domain.PostCounter         = (*PostRepo)(nil)
+	_ domain.TermRepository      = (*TermRepo)(nil)
 	_ domain.UserCounter         = (*UserRepo)(nil)
 	_ domain.TermCounter         = (*TermRepo)(nil)
 )

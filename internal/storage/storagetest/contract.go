@@ -23,7 +23,8 @@ type NewReposFunc func(t *testing.T) (*storage.Repositories, func())
 //   - 3 published posts (newest first: hello-3, hello-2, hello-1)
 //   - 1 draft post (excluded from reads)
 //   - 1 published page (slug "about")
-//   - category term "news" related to hello-3 and hello-2
+//   - category term "news" related to hello-3, hello-2, and the draft post
+//     (excluded by publish-status filters)
 //   - hello-1 related to 2 category terms ("Zeta","Alpha") and 1 post_tag
 //     term ("Golang"), inserted out of alphabetical order
 //   - hello-3 has a featured image (attachment 201, via "_thumbnail_id");
@@ -76,6 +77,8 @@ func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error 
 			[]any{3, 20, 0}},
 		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
 			[]any{2, 20, 0}},
+		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
+			[]any{4, 20, 0}},
 		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
 			[]any{301, 40, 0}},
 		{`INSERT INTO ` + prefix + `term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`,
@@ -276,6 +279,25 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 		}
 		if _, err := repos.Terms.BySlug(ctx, "category", "nope"); !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("unknown term err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("CountPublishedByTermSlug counts only published posts in the taxonomy", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		n, err := repos.Terms.CountPublishedByTermSlug(ctx, "category", "news")
+		if err != nil {
+			t.Fatalf("CountPublishedByTermSlug: %v", err)
+		}
+		if n != 2 {
+			t.Fatalf("want 2 published posts in the news category fixture, got %d", n)
+		}
+		unknownCount, err := repos.Terms.CountPublishedByTermSlug(ctx, "category", "no-such-slug")
+		if err != nil {
+			t.Fatalf("unknown slug should return (0, nil), got err: %v", err)
+		}
+		if unknownCount != 0 {
+			t.Fatalf("unknown slug count = %d, want 0", unknownCount)
 		}
 	})
 

@@ -18,7 +18,7 @@ import (
 // adminReader is the read-only surface the admin JSON API depends on.
 // *content.AdminService satisfies it; tests inject a fake.
 type adminReader interface {
-	List(ctx context.Context, page, perPage int, typ, status string) (content.AdminList, error)
+	List(ctx context.Context, page, perPage int, f content.AdminListFilter) (content.AdminList, error)
 	Detail(ctx context.Context, id int64) (domain.Post, error)
 	Stats(ctx context.Context) (content.Stats, error)
 	DisplayName(ctx context.Context, userID int64) (string, error)
@@ -208,7 +208,17 @@ func (s *Server) adminPosts(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 1)
 	perPage := atoiDefault(q.Get("perPage"), 0)
-	list, err := s.admin.List(r.Context(), page, perPage, q.Get("type"), q.Get("status"))
+	status := q.Get("status")
+	if status != "" {
+		switch status {
+		case "publish", "draft", "pending", "private", "future":
+		default:
+			writeJSONError(w, http.StatusBadRequest, "invalid_status", "status must be one of publish, draft, pending, private, future")
+			return nil
+		}
+	}
+	f := content.AdminListFilter{Type: q.Get("type"), Status: status, Search: q.Get("search")}
+	list, err := s.admin.List(r.Context(), page, perPage, f)
 	if err != nil {
 		return err
 	}

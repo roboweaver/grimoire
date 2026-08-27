@@ -269,7 +269,7 @@ func TestAdminTermsWriteRoutesRequireCapability(t *testing.T) {
 // on the write paths, not a nil-dereference panic recovered to 500.
 func TestAdminAPIRouterOmitsWriteRoutesWhenDepsNil(t *testing.T) {
 	srv := NewServer(nil, nil, nil, nil, nil)
-	srv.admin = &fakeAdmin{list: func(int, int, string, string) (content.AdminList, error) {
+	srv.admin = &fakeAdmin{list: func(int, int, content.AdminListFilter) (content.AdminList, error) {
 		return content.AdminList{}, nil
 	}}
 	srv.auth = fakeSessions{p: auth.NewPrincipal(1, "admin", []string{auth.RoleAdministrator}), s: domain.Session{CSRFToken: "token"}}

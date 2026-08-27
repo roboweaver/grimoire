@@ -1,8 +1,5 @@
+{{define "masthead-title"}}<h1 class="theme-header-title"><a class="spectrum-Link spectrum-Link--quiet theme-header-link" href="/">{{.SiteTitle}}</a></h1>{{end}}
 {{define "content"}}
-<div class="theme-page-head">
-<h1 class="spectrum-Heading spectrum-Heading--sizeXL">{{.SiteTitle}}</h1>
-{{if .Tagline}}<p class="spectrum-Body spectrum-Body--sizeL theme-tagline">{{.Tagline}}</p>{{end}}
-</div>
 <div class="theme-card-grid">
 {{range .Posts}}
 {{template "post-card" .}}
@@ -10,4 +7,11 @@
 <p class="spectrum-Body spectrum-Body--sizeM">No posts yet.</p>
 {{end}}
 </div>
+{{if gt .Pagination.TotalPages 1}}
+<nav class="theme-pagination" aria-label="Posts pagination">
+<p class="spectrum-Body spectrum-Body--sizeS">Page {{.Pagination.Page}} of {{.Pagination.TotalPages}}</p>
+{{if gt .Pagination.Page 1}}<a href="/?page={{sub .Pagination.Page 1}}" class="spectrum-Link">Previous</a>{{end}}
+{{if lt .Pagination.Page .Pagination.TotalPages}}<a href="/?page={{add .Pagination.Page 1}}" class="spectrum-Link">Next</a>{{end}}
+</nav>
+{{end}}
 {{end}}

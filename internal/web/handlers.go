@@ -32,11 +32,20 @@ func pageParam(r *http.Request) int {
 func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	title, tagline := s.options.SiteInfo(ctx)
-	posts, err := s.posts.Recent(ctx, pageParam(r), content.DefaultPerPage)
+	page := pageParam(r)
+	posts, pg, err := s.posts.RecentPage(ctx, page, content.DefaultPerPage)
 	if err != nil {
 		return err
 	}
-	data := render.IndexData{SiteTitle: title, Tagline: tagline, Posts: postViews(ctx, posts, s.options.BaseURLs(ctx), s.featured)}
+	if page > 1 && pg.Total > 0 && page > pg.TotalPages {
+		return domain.ErrNotFound
+	}
+	data := render.IndexData{
+		SiteTitle:  title,
+		Tagline:    tagline,
+		Posts:      postViews(ctx, posts, s.options.BaseURLs(ctx), s.featured),
+		Pagination: pg,
+	}
 	return s.renderHTML(w, r, "index", data)
 }
 
@@ -91,12 +100,16 @@ func (s *Server) single(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) category(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	slug := chi.URLParam(r, "slug")
-	term, posts, err := s.terms.Category(ctx, slug, pageParam(r), content.DefaultPerPage)
+	page := pageParam(r)
+	term, posts, pg, err := s.terms.CategoryPage(ctx, slug, page, content.DefaultPerPage)
 	if err != nil {
 		return err
 	}
+	if page > 1 && pg.Total > 0 && page > pg.TotalPages {
+		return domain.ErrNotFound
+	}
 	title, tagline := s.options.SiteInfo(ctx)
-	data := render.CategoryData{SiteTitle: title, Tagline: tagline, Term: termView(term), Posts: postViews(ctx, posts, s.options.BaseURLs(ctx), s.featured)}
+	data := render.CategoryData{SiteTitle: title, Tagline: tagline, Term: termView(term), Posts: postViews(ctx, posts, s.options.BaseURLs(ctx), s.featured), Pagination: pg}
 	return s.renderHTML(w, r, "category", data)
 }
 

@@ -80,3 +80,50 @@ func TestPostServiceBySlugForwardsTypesAndError(t *testing.T) {
 		t.Fatalf("types=%v, want [post page]", repo.bySlugTypes)
 	}
 }
+
+type fakePostCounter struct {
+	typ, status string
+	count       int
+	err         error
+}
+
+func (f *fakePostCounter) CountByStatus(ctx context.Context, typ, status string) (int, error) {
+	f.typ, f.status = typ, status
+	return f.count, f.err
+}
+
+func TestPostServiceRecentPageReturnsPageWithTotal(t *testing.T) {
+	repo := &fakePostRepo{recentPosts: []domain.Post{{ID: 1}, {ID: 2}}}
+	counter := &fakePostCounter{count: 25}
+	svc := NewPostService(repo).WithCounter(counter)
+
+	posts, page, err := svc.RecentPage(context.Background(), 2, 10)
+	if err != nil {
+		t.Fatalf("RecentPage: %v", err)
+	}
+	if len(posts) != 2 {
+		t.Fatalf("posts = %d, want 2", len(posts))
+	}
+	if page.Page != 2 || page.PerPage != 10 || page.Total != 25 || page.TotalPages != 3 {
+		t.Fatalf("page = %+v, want {2 10 25 3}", page)
+	}
+	if repo.recentLimit != 10 || repo.recentOffset != 10 {
+		t.Fatalf("repo called with limit=%d offset=%d, want 10,10", repo.recentLimit, repo.recentOffset)
+	}
+	if counter.typ != "post" || counter.status != "publish" {
+		t.Fatalf("counter called with typ=%q status=%q, want post/publish", counter.typ, counter.status)
+	}
+}
+
+func TestPostServiceRecentPageZeroTotal(t *testing.T) {
+	repo := &fakePostRepo{}
+	counter := &fakePostCounter{count: 0}
+	svc := NewPostService(repo).WithCounter(counter)
+	_, page, err := svc.RecentPage(context.Background(), 1, 10)
+	if err != nil {
+		t.Fatalf("RecentPage: %v", err)
+	}
+	if page.TotalPages != 0 {
+		t.Fatalf("TotalPages = %d, want 0", page.TotalPages)
+	}
+}

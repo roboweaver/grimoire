@@ -29,6 +29,16 @@ type Stats struct {
 	Users          int
 }
 
+// AdminListFilter narrows the admin content list (Req 4.1-4.4). All fields are
+// optional; the zero value matches every post/page regardless of type,
+// status, or search term (Req 4.5).
+type AdminListFilter struct {
+	Type   string
+	Status string
+	Search string
+	Author int64
+}
+
 // AdminList is a page of admin content plus pagination metadata.
 type AdminList struct {
 	Items      []domain.Post
@@ -64,42 +74,42 @@ func NewAdminService(
 	return &AdminService{posts: posts, detail: detail, pc: pc, uc: uc, tc: tc, users: users}
 }
 
-// List returns a page of content (posts and pages, including drafts) with
-// pagination metadata. page is 1-based; perPage is clamped to [1, MaxPerPage]
-// with DefaultPerPage when unset. Non-empty typ/status become single-element
-// filters; empty values are left unset so the repository applies its defaults
-// (both post and page; all statuses). The total ignores paging.
-func (s *AdminService) List(ctx context.Context, page, perPage int, typ, status string) (AdminList, error) {
-	limit, offset := clamp(page, perPage)
-	if page < 1 {
-		page = 1
+// List returns a page of content (posts and pages, including drafts) matching
+// f, with pagination metadata. page is 1-based; perPage is clamped to
+// [1, MaxPerPage] with DefaultPerPage when unset. f's Type/Status become
+// single-element domain filters; a zero-value f matches everything (Req
+// 4.5). The same filter (minus paging) is forwarded to CountForAdmin so
+// Total/TotalPages always reflect the filtered result set, never the
+// unfiltered count (this is the bug this task exists to fix: an earlier
+// version rebuilt a fresh, narrower filter for the count call).
+func (s *AdminService) List(ctx context.Context, page, perPage int, f AdminListFilter) (AdminList, error) {
+	limit, offset, page := clamp(page, perPage)
+	af := domain.AdminPostFilter{Limit: limit, Offset: offset, Search: f.Search, Author: f.Author}
+	if f.Type != "" {
+		af.Types = []string{f.Type}
 	}
-	f := domain.AdminPostFilter{Limit: limit, Offset: offset}
-	if typ != "" {
-		f.Types = []string{typ}
+	if f.Status != "" {
+		af.Statuses = []string{f.Status}
 	}
-	if status != "" {
-		f.Statuses = []string{status}
-	}
-	items, err := s.posts.ListForAdmin(ctx, f)
+	items, err := s.posts.ListForAdmin(ctx, af)
 	if err != nil {
 		return AdminList{}, err
 	}
-	total, err := s.posts.CountForAdmin(ctx, domain.AdminPostFilter{Types: f.Types, Statuses: f.Statuses})
+	countFilter := af
+	countFilter.Limit, countFilter.Offset = 0, 0
+	total, err := s.posts.CountForAdmin(ctx, countFilter)
 	if err != nil {
 		return AdminList{}, err
 	}
-	totalPages := 0
-	if limit > 0 {
-		totalPages = (total + limit - 1) / limit
-	}
-	return AdminList{
-		Items:      items,
-		Page:       page,
-		PerPage:    limit,
-		Total:      total,
-		TotalPages: totalPages,
-	}, nil
+	p := newPage(page, limit, total)
+	return AdminList{Items: items, Page: p.Page, PerPage: p.PerPage, Total: p.Total, TotalPages: p.TotalPages}, nil
+}
+
+// Authors returns every user who has authored at least one post or page,
+// for admin filter UIs (Req 4.3). See domain.AuthorOption's doc comment for
+// the privacy rationale.
+func (s *AdminService) Authors(ctx context.Context) ([]domain.AuthorOption, error) {
+	return s.posts.Authors(ctx)
 }
 
 // Detail returns a single post/page by ID regardless of status or type.

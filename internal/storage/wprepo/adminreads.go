@@ -12,6 +12,7 @@ import (
 var (
 	_ domain.AdminPostRepository = (*PostRepo)(nil)
 	_ domain.PostCounter         = (*PostRepo)(nil)
+	_ domain.TermRepository      = (*TermRepo)(nil)
 	_ domain.UserCounter         = (*UserRepo)(nil)
 	_ domain.TermCounter         = (*TermRepo)(nil)
 )
@@ -38,6 +39,9 @@ func (r *PostRepo) ListForAdmin(ctx context.Context, f domain.AdminPostFilter) (
 		Where("post_type IN (?)", bun.In(adminTypes(f)))
 	if len(f.Statuses) > 0 {
 		q = q.Where("post_status IN (?)", bun.In(f.Statuses))
+	}
+	if f.Author != 0 {
+		q = q.Where("post_author = ?", f.Author)
 	}
 	q = applyAdminSearch(q, f.Search)
 	q = applyAdminOrder(q, f.OrderBy, f.Order)
@@ -91,8 +95,37 @@ func (r *PostRepo) CountForAdmin(ctx context.Context, f domain.AdminPostFilter) 
 	if len(f.Statuses) > 0 {
 		q = q.Where("post_status IN (?)", bun.In(f.Statuses))
 	}
+	if f.Author != 0 {
+		q = q.Where("post_author = ?", f.Author)
+	}
 	q = applyAdminSearch(q, f.Search)
 	return q.Count(ctx)
+}
+
+// Authors returns the distinct set of users who have authored at least one
+// post or page (post_type IN ('post','page')), ordered by display name. A
+// user with no authored posts never appears, so this cannot enumerate the
+// full user table.
+func (r *PostRepo) Authors(ctx context.Context) ([]domain.AuthorOption, error) {
+	var rows []struct {
+		ID          int64  `bun:"ID"`
+		DisplayName string `bun:"display_name"`
+	}
+	err := r.db.NewSelect().
+		TableExpr("? AS p", bun.Ident(r.prefix+"posts")).
+		ColumnExpr("DISTINCT u.?, u.display_name", bun.Ident("ID")).
+		Join("JOIN ? AS u ON u.? = p.post_author", bun.Ident(r.prefix+"users"), bun.Ident("ID")).
+		Where("p.post_type IN (?)", bun.In([]string{"post", "page"})).
+		OrderExpr("u.display_name ASC").
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.AuthorOption, len(rows))
+	for i, row := range rows {
+		out[i] = domain.AuthorOption{ID: row.ID, DisplayName: row.DisplayName}
+	}
+	return out, nil
 }
 
 // CountByStatus counts posts of the given post_type and post_status. An empty

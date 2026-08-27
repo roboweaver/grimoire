@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/storage/rebind"
@@ -52,6 +53,43 @@ type MediaRepo struct {
 
 func NewMediaRepo(db *bun.DB, prefix string) *MediaRepo { return &MediaRepo{db: db, prefix: prefix} }
 
+// mediaWhere applies every domain.MediaFilter predicate identically to both
+// listQuery and Count, so filtered item and count results can never diverge
+// (Requirement 8, Requirement 5 ACs 1-4). Search matches the attachment
+// title (p.post_title) or its WordPress-standard stored filename
+// (_wp_attached_file postmeta), both case-insensitively, so a search for a
+// file extension or generated filename works the same as a title search
+// (Requirement 5.1). Type maps to a post_mime_type prefix family; "document"
+// is defined as "not image/video/audio" since WordPress has no reserved
+// document/* MIME prefix. After/Before compare against post_date using the
+// same formatTS format already used by post/term reads in this package.
+func mediaWhere(q *bun.SelectQuery, f domain.MediaFilter) *bun.SelectQuery {
+	if f.ParentID != 0 {
+		q = q.Where("p.post_parent = ?", f.ParentID)
+	}
+	if f.Search != "" {
+		like := "%" + strings.ToLower(f.Search) + "%"
+		q = q.Where("(LOWER(p.post_title) LIKE ? OR LOWER(pm.meta_value) LIKE ?)", like, like)
+	}
+	switch f.Type {
+	case "image", "video", "audio":
+		q = q.Where("LOWER(p.post_mime_type) LIKE ?", f.Type+"/%")
+	case "document":
+		q = q.Where("LOWER(p.post_mime_type) NOT LIKE ? AND LOWER(p.post_mime_type) NOT LIKE ? AND LOWER(p.post_mime_type) NOT LIKE ?",
+			"image/%", "video/%", "audio/%")
+	}
+	if !f.After.IsZero() {
+		q = q.Where("p.post_date >= ?", formatTS(f.After))
+	}
+	if !f.Before.IsZero() {
+		// Before is the inclusive end of a calendar day (Requirement 5.3
+		// treats after/before as ISO-8601 dates), so compare against the
+		// start of the following day rather than excluding same-day rows.
+		q = q.Where("p.post_date < ?", formatTS(f.Before.AddDate(0, 0, 1)))
+	}
+	return q
+}
+
 func (r *MediaRepo) listQuery(ctx context.Context, f domain.MediaFilter) *bun.SelectQuery {
 	q := r.db.NewSelect().
 		TableExpr("? AS p", bun.Ident(r.prefix+"posts")).
@@ -60,9 +98,7 @@ func (r *MediaRepo) listQuery(ctx context.Context, f domain.MediaFilter) *bun.Se
 		Join("JOIN ? AS pm ON pm.post_id = p.? AND pm.meta_key = ?", bun.Ident(r.prefix+"postmeta"), bun.Ident("ID"), "_wp_attached_file").
 		Where("p.post_type = ?", "attachment").
 		OrderExpr("p.post_date DESC, p.? DESC", bun.Ident("ID"))
-	if f.ParentID != 0 {
-		q = q.Where("p.post_parent = ?", f.ParentID)
-	}
+	q = mediaWhere(q, f)
 	if f.Limit > 0 {
 		q = q.Limit(f.Limit)
 	}
@@ -90,9 +126,7 @@ func (r *MediaRepo) Count(ctx context.Context, f domain.MediaFilter) (int, error
 		TableExpr("? AS p", bun.Ident(r.prefix+"posts")).
 		Join("JOIN ? AS pm ON pm.post_id = p.? AND pm.meta_key = ?", bun.Ident(r.prefix+"postmeta"), bun.Ident("ID"), "_wp_attached_file").
 		Where("p.post_type = ?", "attachment")
-	if f.ParentID != 0 {
-		q = q.Where("p.post_parent = ?", f.ParentID)
-	}
+	q = mediaWhere(q, f)
 	return q.Count(ctx)
 }
 

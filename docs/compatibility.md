@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M7)
+# WordPress Compatibility (M1-M8)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -39,7 +39,7 @@ Type mappings from the WordPress MySQL schema are translated per vendor
 `DATETIME`→`TIMESTAMP`/ISO-8601 `TEXT`, prefix-length keys→plain indexes). See
 `internal/storage/migrations/<vendor>/0001_init.up.sql`.
 
-## What's implemented (M1-M7)
+## What's implemented (M1-M8)
 
 - **M1 — Content core:** switchable database vendor (MySQL/PostgreSQL/
   SQLite), WordPress-compatible schema, public read rendering of posts,
@@ -65,6 +65,15 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   optimistic concurrency in the admin UI.
 - **M7 — Revisions and scheduler:** revision history, autosave, and
   scheduled publishing.
+- **M8 — Content browsing parity:** WordPress-equivalent pagination and
+  total-page navigation on the public home page and category archives (a
+  page number past the last available page returns `404` once the site has
+  at least one published post); admin post list `search`/`status`/`author`
+  filters with pagination; and an admin media library with
+  `search`/`type`/`after`/`before` (upload-date range)/`parentId` filters,
+  pagination, and a mutually exclusive grid/list view toggle. Routing and
+  taxonomy (nested categories, permalink tokens) and the REST media/user
+  write endpoints are unchanged by this milestone.
 
 ## Public read guarantees
 

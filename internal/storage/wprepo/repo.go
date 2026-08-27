@@ -186,6 +186,21 @@ func (r *TermRepo) BySlug(ctx context.Context, taxonomy, slug string) (domain.Te
 	return domain.Term{ID: row.ID, Name: row.Name, Slug: row.Slug, Taxonomy: row.Taxonomy}, nil
 }
 
+// CountPublishedByTermSlug returns the number of published posts related to
+// a taxonomy term, mirroring PostRepo.ByTermSlug's join chain without the
+// post columns/limit/offset. Pure COUNT(*); no writes.
+func (r *TermRepo) CountPublishedByTermSlug(ctx context.Context, taxonomy, termSlug string) (int, error) {
+	return r.db.NewSelect().
+		TableExpr("? AS p", bun.Ident(r.prefix+"posts")).
+		Join("JOIN ? AS tr ON tr.object_id = p.?", bun.Ident(r.prefix+"term_relationships"), bun.Ident("ID")).
+		Join("JOIN ? AS tt ON tt.term_taxonomy_id = tr.term_taxonomy_id", bun.Ident(r.prefix+"term_taxonomy")).
+		Join("JOIN ? AS t ON t.term_id = tt.term_id", bun.Ident(r.prefix+"terms")).
+		Where("tt.taxonomy = ?", taxonomy).
+		Where("t.slug = ?", termSlug).
+		Where("p.post_status = ?", "publish").
+		Count(ctx)
+}
+
 // ListByTaxonomy returns every term of the given taxonomy, ordered by name.
 func (r *TermRepo) ListByTaxonomy(ctx context.Context, taxonomy string) ([]domain.Term, error) {
 	var rows []termRow

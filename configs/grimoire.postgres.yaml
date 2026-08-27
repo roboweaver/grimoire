@@ -11,6 +11,16 @@ session:
   cookie_secure: false
   # Rolling session lifetime in hours (default 336 = 14 days).
   ttl_hours: 336
+media:
+  # Where grimoire reads/writes uploaded media files. Relative paths
+  # resolve against grimoire's own working directory (shown here as the
+  # default). When pointing this config at an *existing* WordPress
+  # database, set this to that site's real wp-content/uploads directory
+  # on disk (an absolute path is recommended) — otherwise
+  # /wp-content/uploads/* requests and Media admin thumbnails 404 even
+  # though the database rows resolve fine. See README.md's "To read an
+  # existing WordPress database" section.
+  uploads_dir: "wp-content/uploads"
 rest:
   # Application Passwords (HTTP Basic auth on /wp-json) are refused over a
   # plain, non-TLS connection by default, matching real WordPress; disable

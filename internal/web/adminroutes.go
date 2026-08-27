@@ -83,6 +83,7 @@ func (s *Server) adminAPIRouter() http.Handler {
 	r.Group(func(gr chi.Router) {
 		gr.Use(s.requireCapabilityJSON("edit_posts"))
 		gr.Method(http.MethodGet, "/stats", s.jsonHandler(s.adminStats))
+		gr.Method(http.MethodGet, "/authors", s.jsonHandler(s.adminAuthors))
 		gr.Method(http.MethodGet, "/posts", s.jsonHandler(s.adminPosts))
 		gr.Method(http.MethodGet, "/posts/{id}", s.jsonHandler(s.adminPost))
 		gr.Method(http.MethodGet, "/menus", s.jsonHandler(s.adminMenus))

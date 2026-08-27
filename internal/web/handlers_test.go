@@ -44,8 +44,9 @@ func newTestServer(t *testing.T) http.Handler {
 		t.Fatalf("render.Load: %v", err)
 	}
 
+	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
 	srv := web.NewServer(
-		content.NewPostService(repos.Posts),
+		posts,
 		content.NewTermService(repos.Terms, repos.Posts),
 		content.NewOptionService(repos.Options),
 		eng,
@@ -84,6 +85,25 @@ func TestHome(t *testing.T) {
 	}
 }
 
+func TestHomeOutOfRangePageReturns404(t *testing.T) {
+	srv := newTestServer(t)
+	rec := get(t, srv, "/?page=999")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestHomeSinglePageSiteOmitsPaginationNav(t *testing.T) {
+	srv := newTestServer(t)
+	rec := get(t, srv, "/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "theme-pagination") {
+		t.Fatalf("single-page site rendered pagination nav: %s", rec.Body.String())
+	}
+}
+
 func TestSinglePost(t *testing.T) {
 	h := newTestServer(t)
 	rec := get(t, h, "/hello-1")
@@ -113,6 +133,33 @@ func TestCategory(t *testing.T) {
 	rec := get(t, h, "/category/news")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("category status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCategorySinglePageOmitsPaginationNav(t *testing.T) {
+	srv := newTestServer(t)
+	rec := get(t, srv, "/category/news")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "theme-pagination") {
+		t.Fatalf("single-page category rendered pagination nav: %s", rec.Body.String())
+	}
+}
+
+func TestCategoryOutOfRangePageReturns404(t *testing.T) {
+	srv := newTestServer(t)
+	rec := get(t, srv, "/category/news?page=999")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestCategoryUnknownSlugStillReturns404(t *testing.T) {
+	srv := newTestServer(t)
+	rec := get(t, srv, "/category/does-not-exist")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (unknown term, unrelated to pagination)", rec.Code)
 	}
 }
 

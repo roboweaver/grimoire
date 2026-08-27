@@ -18,10 +18,11 @@ import (
 // adminReader is the read-only surface the admin JSON API depends on.
 // *content.AdminService satisfies it; tests inject a fake.
 type adminReader interface {
-	List(ctx context.Context, page, perPage int, typ, status string) (content.AdminList, error)
+	List(ctx context.Context, page, perPage int, f content.AdminListFilter) (content.AdminList, error)
 	Detail(ctx context.Context, id int64) (domain.Post, error)
 	Stats(ctx context.Context) (content.Stats, error)
 	DisplayName(ctx context.Context, userID int64) (string, error)
+	Authors(ctx context.Context) ([]domain.AuthorOption, error)
 }
 
 // badRequestError marks a client input error (e.g. a non-numeric id) that
@@ -134,6 +135,11 @@ type postsResponse struct {
 	TotalPages int            `json:"totalPages"`
 }
 
+type authorDTO struct {
+	ID          int64  `json:"id"`
+	DisplayName string `json:"displayName"`
+}
+
 type termSummary struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
@@ -208,7 +214,25 @@ func (s *Server) adminPosts(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 1)
 	perPage := atoiDefault(q.Get("perPage"), 0)
-	list, err := s.admin.List(r.Context(), page, perPage, q.Get("type"), q.Get("status"))
+	status := q.Get("status")
+	if status != "" {
+		switch status {
+		case "publish", "draft", "pending", "private", "future":
+		default:
+			writeJSONError(w, http.StatusBadRequest, "invalid_status", "status must be one of publish, draft, pending, private, future")
+			return nil
+		}
+	}
+	f := content.AdminListFilter{Type: q.Get("type"), Status: status, Search: q.Get("search")}
+	if raw := q.Get("author"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 {
+			writeJSONError(w, http.StatusBadRequest, "invalid_author", "author must be a positive numeric user ID")
+			return nil
+		}
+		f.Author = id
+	}
+	list, err := s.admin.List(r.Context(), page, perPage, f)
 	if err != nil {
 		return err
 	}
@@ -231,6 +255,20 @@ func (s *Server) adminPosts(w http.ResponseWriter, r *http.Request) error {
 		Total:      list.Total,
 		TotalPages: list.TotalPages,
 	})
+}
+
+func (s *Server) adminAuthors(w http.ResponseWriter, r *http.Request) error {
+	authors, err := s.admin.Authors(r.Context())
+	if err != nil {
+		return err
+	}
+	out := make([]authorDTO, len(authors))
+	for i, a := range authors {
+		out[i] = authorDTO{ID: a.ID, DisplayName: a.DisplayName}
+	}
+	return writeJSON(w, http.StatusOK, struct {
+		Authors []authorDTO `json:"authors"`
+	}{Authors: out})
 }
 
 // adminPost returns a single item by id.

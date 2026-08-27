@@ -3,6 +3,8 @@ package render
 import (
 	"html/template"
 	"time"
+
+	"github.com/roboweaver/grimoire/internal/content"
 )
 
 // PostView is the template-facing shape of a post or page. Content and Excerpt
@@ -30,9 +32,10 @@ type TermView struct {
 
 // IndexData backs the home/index template.
 type IndexData struct {
-	SiteTitle string
-	Tagline   string
-	Posts     []PostView
+	SiteTitle  string
+	Tagline    string
+	Posts      []PostView
+	Pagination content.Page
 }
 
 // SingleData backs the single/page templates.
@@ -49,18 +52,22 @@ type SingleData struct {
 
 // CategoryData backs the category/archive templates.
 type CategoryData struct {
-	SiteTitle string
-	Tagline   string
-	Term      TermView
-	Posts     []PostView
+	SiteTitle  string
+	Tagline    string
+	Term       TermView
+	Posts      []PostView
+	Pagination content.Page
 }
 
 // LoginData backs the login template. CSRFToken is embedded as a hidden form
 // field for the double-submit check; Error is set (without detail) after a
 // failed attempt so the form shows a generic message without enumerating users;
-// Redirect carries the post-login destination.
+// Redirect carries the post-login destination. Tagline mirrors the other page
+// data types so the shared base.tmpl masthead can render it uniformly across
+// every page (it is left empty here; the login page has no tagline of its own).
 type LoginData struct {
 	SiteTitle string
+	Tagline   string
 	CSRFToken string
 	Error     bool
 	Redirect  string

@@ -213,6 +213,45 @@ database:
 	}
 }
 
+func TestCheckUploadsDirExists(t *testing.T) {
+	dir := t.TempDir()
+	if err := CheckUploadsDir(dir); err != nil {
+		t.Fatalf("CheckUploadsDir(%q) = %v, want nil", dir, err)
+	}
+}
+
+func TestCheckUploadsDirMissing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "does-not-exist")
+	err := CheckUploadsDir(dir)
+	if err == nil {
+		t.Fatal("CheckUploadsDir on a missing directory: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("error = %q, want mention of 'does not exist'", err.Error())
+	}
+}
+
+func TestCheckUploadsDirEmpty(t *testing.T) {
+	if err := CheckUploadsDir(""); err == nil {
+		t.Fatal("CheckUploadsDir(\"\"): want error, got nil")
+	}
+}
+
+func TestCheckUploadsDirNotADirectory(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "not-a-dir")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	err := CheckUploadsDir(file)
+	if err == nil {
+		t.Fatal("CheckUploadsDir on a file path: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("error = %q, want mention of 'not a directory'", err.Error())
+	}
+}
+
 func TestLoadRESTDefaults(t *testing.T) {
 	path := writeTempConfig(t, `
 database:
@@ -285,5 +324,41 @@ database:
 	}
 	if cfg.REST.PerPageMax != 10 {
 		t.Errorf("per_page_max = %d, want env override 10", cfg.REST.PerPageMax)
+	}
+}
+
+// TestShippedConfigsLoadAndDocumentUploadsDir guards the shipped example
+// configs in configs/*.yaml: they must remain loadable, and must each
+// discoverably document media.uploads_dir (not just rely on the code-level
+// default), since operators pointing grimoire at an existing external
+// WordPress database need to find and set this field in the file they are
+// already editing rather than discover it only via CheckUploadsDir's
+// runtime warning or the README.
+func TestShippedConfigsLoadAndDocumentUploadsDir(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "configs", "*.yaml"))
+	if err != nil {
+		t.Fatalf("glob configs: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no shipped configs found under configs/*.yaml")
+	}
+	for _, path := range paths {
+		path := path
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if !strings.Contains(string(raw), "uploads_dir:") {
+				t.Fatalf("%s does not document media.uploads_dir; add a discoverable uploads_dir example under a media: block", path)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load(%s): %v", path, err)
+			}
+			if cfg.Media.UploadsDir == "" {
+				t.Fatalf("%s: Media.UploadsDir is empty after Load", path)
+			}
+		})
 	}
 }

@@ -22,6 +22,10 @@ type PostRepository interface {
 type TermRepository interface {
 	// BySlug returns the term for a taxonomy/slug pair, or ErrNotFound.
 	BySlug(ctx context.Context, taxonomy, slug string) (Term, error)
+	// CountPublishedByTermSlug returns the number of published posts related
+	// to a taxonomy term (Req 8.1's Total for the category page). Pure
+	// COUNT(*); no writes.
+	CountPublishedByTermSlug(ctx context.Context, taxonomy, termSlug string) (int, error)
 }
 
 // PostTermsRepository resolves the taxonomy terms related to a post. It is
@@ -50,10 +54,18 @@ type AdminPostFilter struct {
 	// Search, when non-empty, restricts results to posts whose title or
 	// content contains the term (case-insensitive substring match).
 	Search string
+	Author int64 // 0 means unfiltered (Req 4.5)
 	// OrderBy selects the sort column: "date" (default) or "id".
 	OrderBy string
 	// Order selects sort direction: "desc" (default) or "asc".
 	Order string
+}
+
+// AuthorOption is a minimal, privacy-conscious author identity for admin
+// filter UIs: an ID plus a display name only (no email, login, or role).
+type AuthorOption struct {
+	ID          int64
+	DisplayName string
 }
 
 // AdminPostRepository lists and counts content for the admin, including drafts
@@ -65,6 +77,10 @@ type AdminPostRepository interface {
 	// CountForAdmin returns the total number of posts matching the filter,
 	// ignoring Limit/Offset (used for pagination totals).
 	CountForAdmin(ctx context.Context, f AdminPostFilter) (int, error)
+	// Authors returns the distinct set of users who have authored at least
+	// one post or page, ordered by display name. It never returns users with
+	// no authored content, so it cannot be used as a general user directory.
+	Authors(ctx context.Context) ([]AuthorOption, error)
 }
 
 // PostCounter counts posts for the dashboard. Additive; pure COUNT(*).
@@ -120,6 +136,10 @@ type CommentMetaRepository interface {
 // MediaFilter selects attachments for the media library. ParentID 0 means any.
 type MediaFilter struct {
 	ParentID int64
+	Search   string
+	Type     string // "", "image", "video", "audio", or "document"
+	After    time.Time
+	Before   time.Time
 	Limit    int
 	Offset   int
 }

@@ -80,8 +80,9 @@ func TestAuthEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render.Load: %v", err)
 	}
+	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
 	srv := web.NewServer(
-		content.NewPostService(repos.Posts),
+		posts,
 		content.NewTermService(repos.Terms, repos.Posts),
 		content.NewOptionService(repos.Options),
 		eng,

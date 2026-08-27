@@ -3,6 +3,8 @@ package render
 import (
 	"html/template"
 	"time"
+
+	"github.com/roboweaver/grimoire/internal/content"
 )
 
 // PostView is the template-facing shape of a post or page. Content and Excerpt
@@ -30,9 +32,10 @@ type TermView struct {
 
 // IndexData backs the home/index template.
 type IndexData struct {
-	SiteTitle string
-	Tagline   string
-	Posts     []PostView
+	SiteTitle  string
+	Tagline    string
+	Posts      []PostView
+	Pagination content.Page
 }
 
 // SingleData backs the single/page templates.

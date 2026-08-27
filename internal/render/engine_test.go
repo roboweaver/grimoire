@@ -96,3 +96,21 @@ func TestLoadIncludesTemplatePartials(t *testing.T) {
 		t.Fatalf("output missing partial content: %q", buf.String())
 	}
 }
+
+func TestTemplateFuncsAddSub(t *testing.T) {
+	root, theme := writeTheme(t, map[string]string{
+		"base.tmpl":  miniBase,
+		"index.tmpl": `{{define "content"}}{{add 1 2}}/{{sub 5 3}}{{end}}`,
+	})
+	e, err := Load(root, theme)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := e.Render(&buf, "index", IndexData{SiteTitle: "grimoire"}); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(buf.String(), "3/2") {
+		t.Fatalf("want add/sub template funcs to render 3/2, got %q", buf.String())
+	}
+}

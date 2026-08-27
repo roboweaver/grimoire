@@ -32,6 +32,12 @@ var hierarchy = map[string][]string{
 	"login":    {"login"},
 }
 
+// templateFuncs are helper functions available to every parsed template.
+var templateFuncs = template.FuncMap{
+	"add": func(a, b int) int { return a + b },
+	"sub": func(a, b int) int { return a - b },
+}
+
 // Engine holds the compiled templates for one theme, keyed by content-template
 // name. Each entry has "base" and "content" defined so ExecuteTemplate("base")
 // composes the page.
@@ -64,7 +70,7 @@ func Load(themesDir, theme string) (*Engine, error) {
 			continue
 		}
 		files := append([]string{basePath, contentPath}, partials...)
-		tmpl, err := template.New(baseTemplate).ParseFiles(files...)
+		tmpl, err := template.New(baseTemplate).Funcs(templateFuncs).ParseFiles(files...)
 		if err != nil {
 			return nil, fmt.Errorf("render: parse %s: %w", name, err)
 		}

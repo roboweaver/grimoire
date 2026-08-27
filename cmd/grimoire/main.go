@@ -104,8 +104,9 @@ func main() {
 	termWrite := content.NewTermWriteService(termRW)
 	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
 
+	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
 	handler := web.NewServer(
-		content.NewPostService(repos.Posts),
+		posts,
 		content.NewTermService(repos.Terms, repos.Posts),
 		content.NewOptionService(repos.Options),
 		eng,

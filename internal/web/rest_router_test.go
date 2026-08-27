@@ -55,8 +55,9 @@ func newRESTRouter(t *testing.T, fake *fakeSessions) http.Handler {
 	)
 	mapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, "wp_")
 	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}))
+	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
 	srv := web.NewServer(
-		content.NewPostService(repos.Posts),
+		posts,
 		content.NewTermService(repos.Terms, repos.Posts),
 		content.NewOptionService(repos.Options),
 		eng,

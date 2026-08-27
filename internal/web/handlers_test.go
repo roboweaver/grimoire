@@ -85,6 +85,25 @@ func TestHome(t *testing.T) {
 	}
 }
 
+func TestHomeOutOfRangePageReturns404(t *testing.T) {
+	srv := newTestServer(t)
+	rec := get(t, srv, "/?page=999")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestHomeSinglePageSiteOmitsPaginationNav(t *testing.T) {
+	srv := newTestServer(t)
+	rec := get(t, srv, "/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "theme-pagination") {
+		t.Fatalf("single-page site rendered pagination nav: %s", rec.Body.String())
+	}
+}
+
 func TestSinglePost(t *testing.T) {
 	h := newTestServer(t)
 	rec := get(t, h, "/hello-1")

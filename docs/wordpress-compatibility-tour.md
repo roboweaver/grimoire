@@ -37,6 +37,13 @@ source content.
 **Current limits:** This pair does not claim plugin or theme-rendering
 parity.
 
+**Pagination:** As of M8, both products page through older posts once
+there are more posts than fit on one page, with matching out-of-range
+behavior — a page number past the last available page returns `404` on
+both, once the site has at least one published post. This screenshot
+pair only shows the first page; it has not been recaptured to
+demonstrate a later page.
+
 ## Single published post
 
 | WordPress | grimoire |
@@ -67,6 +74,12 @@ relationship. WordPress's `github` category is a child of `technology`, so
 its canonical WordPress URL is nested (`/category/technology/github/`);
 grimoire only supports a flat `/category/<slug>` route and has no concept of
 nested categories.
+
+**Pagination (M8):** As with the public home page above, category archives
+now page through older posts once there are more posts than fit on one
+page, with the same matching out-of-range `404` behavior on both products.
+This screenshot pair only shows the first page; it has not been
+recaptured for M8.
 
 ## Admin dashboard
 
@@ -124,6 +137,13 @@ from the public byline shown on the single-post page above ("Rob Weaver"),
 which is left unredacted because a post's author byline is already public,
 published information rather than an admin-only credential.
 
+**Filters (M8):** The published-only gap described above is now addressed
+for live use: grimoire's admin post list has gained an equivalent `status`
+filter (alongside new `search` and `author` filters), all backed by
+pagination and URL query state. The screenshot pair above predates that
+work and still relies on the capture-time DOM redaction described above
+rather than a live filter; it has not been recaptured for M8.
+
 ## Media library
 
 | WordPress | grimoire |
@@ -160,6 +180,15 @@ HTML in the "Representative REST response" section below (post id 400774,
 `alt="Git user woes"`), and that post's text explicitly states its "org,
 user, and key names" are placeholders. No additional redaction was applied
 to this already-public, already-fictional illustration.
+
+**Filters (M8):** The gaps described above are now addressed for live
+use: grimoire's admin media page has gained free-text `search`, `type`,
+and `after`/`before` upload-date-range filters, plus a parent-post picker
+that drives the `parentId` query parameter (previously accepted by the
+backend API but not exposed in the admin UI), pagination, and a mutually
+exclusive grid/list view toggle. The screenshot pair above predates that
+work and still relies on the capture-time DOM edit described above rather
+than a live filter; it has not been recaptured for M8.
 
 ## Representative REST response
 

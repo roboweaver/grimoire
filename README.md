@@ -119,7 +119,10 @@ upload files, so you must also set `media.uploads_dir` to the site's real
 `wp-content/uploads` (resolved against grimoire's own working directory),
 which will not exist for an external WordPress install — leaving it unset
 causes `/wp-content/uploads/*` requests (and Media admin thumbnails) to 404
-even though the database rows resolve fine.
+even though the database rows resolve fine. Every shipped config in
+[`configs/`](./configs) documents a `media.uploads_dir` field with this
+default value spelled out — edit it in place to point at the real
+directory.
 
 ### PostgreSQL
 

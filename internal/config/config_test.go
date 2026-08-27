@@ -326,3 +326,39 @@ database:
 		t.Errorf("per_page_max = %d, want env override 10", cfg.REST.PerPageMax)
 	}
 }
+
+// TestShippedConfigsLoadAndDocumentUploadsDir guards the shipped example
+// configs in configs/*.yaml: they must remain loadable, and must each
+// discoverably document media.uploads_dir (not just rely on the code-level
+// default), since operators pointing grimoire at an existing external
+// WordPress database need to find and set this field in the file they are
+// already editing rather than discover it only via CheckUploadsDir's
+// runtime warning or the README.
+func TestShippedConfigsLoadAndDocumentUploadsDir(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "configs", "*.yaml"))
+	if err != nil {
+		t.Fatalf("glob configs: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no shipped configs found under configs/*.yaml")
+	}
+	for _, path := range paths {
+		path := path
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if !strings.Contains(string(raw), "uploads_dir:") {
+				t.Fatalf("%s does not document media.uploads_dir; add a discoverable uploads_dir example under a media: block", path)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load(%s): %v", path, err)
+			}
+			if cfg.Media.UploadsDir == "" {
+				t.Fatalf("%s: Media.UploadsDir is empty after Load", path)
+			}
+		})
+	}
+}

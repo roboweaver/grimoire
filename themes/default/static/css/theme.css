@@ -27,6 +27,14 @@
 	font-weight: 700;
 }
 
+/* The home page wraps .theme-header-link in an <h1> (see index.tmpl's
+ * masthead-title override) so the site identity is also the page's one
+ * semantic heading there. Reset the browser default <h1> margin so it
+ * doesn't add extra space beyond the header's own flex `gap`. */
+.theme-header-title {
+	margin: 0;
+}
+
 .theme-main {
 	max-width: 960px;
 	margin: 0 auto;

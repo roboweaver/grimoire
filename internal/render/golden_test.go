@@ -71,6 +71,7 @@ func TestGoldenSingle(t *testing.T) {
 	e := defaultEngine(t)
 	data := SingleData{
 		SiteTitle: "grimoire",
+		Tagline:   "A Go-native CMS",
 		Post:      PostView{ID: 1, Slug: "hello-world", Title: "Hello World", Content: "<p>Body <em>html</em>.</p>", Date: fixedDate},
 	}
 	var buf bytes.Buffer
@@ -84,6 +85,7 @@ func TestGoldenCategory(t *testing.T) {
 	e := defaultEngine(t)
 	data := CategoryData{
 		SiteTitle: "grimoire",
+		Tagline:   "A Go-native CMS",
 		Term:      TermView{Name: "News", Slug: "news", Taxonomy: "category"},
 		Posts: []PostView{
 			{Slug: "hello-world", Title: "Hello World", Excerpt: "First post.", Date: fixedDate},
@@ -102,12 +104,21 @@ func TestGoldenCategory(t *testing.T) {
 // render the site title exactly once in the visible body; the <title>
 // element in <head> is intentionally excluded since it legitimately repeats
 // the site title for the browser tab/window.
+//
+// It also guards the home page's semantic heading: the home page must have
+// exactly one <h1> and it must be the site title (wrapping the home link),
+// since home has no other page-specific heading. Inner pages (single,
+// category, page, login) must keep exactly one <h1> too, but theirs is the
+// contextual heading (post/page title, term name, or "Log in") rather than
+// the site title — the site title there stays a plain link in the header,
+// not an <h1>.
 func TestSiteIdentityRendersOnce(t *testing.T) {
 	e := defaultEngine(t)
 	cases := []struct {
-		name     string
-		template string
-		data     any
+		name          string
+		template      string
+		data          any
+		wantH1Content string // substring the page's single <h1> must contain
 	}{
 		{
 			name:     "index",
@@ -119,6 +130,7 @@ func TestSiteIdentityRendersOnce(t *testing.T) {
 					{Slug: "hello-world", Title: "Hello World", Excerpt: "First post.", Date: fixedDate},
 				},
 			},
+			wantH1Content: "grimoire",
 		},
 		{
 			name:     "single",
@@ -127,6 +139,7 @@ func TestSiteIdentityRendersOnce(t *testing.T) {
 				SiteTitle: "grimoire",
 				Post:      PostView{ID: 1, Slug: "hello-world", Title: "Hello World", Content: "<p>Body.</p>", Date: fixedDate},
 			},
+			wantH1Content: "Hello World",
 		},
 		{
 			name:     "category",
@@ -138,6 +151,26 @@ func TestSiteIdentityRendersOnce(t *testing.T) {
 					{Slug: "hello-world", Title: "Hello World", Excerpt: "First post.", Date: fixedDate},
 				},
 			},
+			wantH1Content: "News",
+		},
+		{
+			// page.tmpl reuses SingleData (see its doc comment) and renders
+			// the page's own <h1>, same as single.
+			name:     "page",
+			template: "page",
+			data: SingleData{
+				SiteTitle: "grimoire",
+				Post:      PostView{ID: 2, Slug: "about", Title: "About", Content: "<p>Body.</p>", Date: fixedDate},
+			},
+			wantH1Content: "About",
+		},
+		{
+			name:     "login",
+			template: "login",
+			data: LoginData{
+				SiteTitle: "grimoire",
+			},
+			wantH1Content: "Log in",
 		},
 	}
 	for _, tc := range cases {
@@ -150,8 +183,35 @@ func TestSiteIdentityRendersOnce(t *testing.T) {
 			if n := strings.Count(body, "grimoire"); n != 1 {
 				t.Fatalf("expected site title %q to appear exactly once in <body> for %s, got %d occurrences:\n%s", "grimoire", tc.name, n, body)
 			}
+			if n := strings.Count(body, "<h1"); n != 1 {
+				t.Fatalf("expected exactly one <h1> in <body> for %s, got %d:\n%s", tc.name, n, body)
+			}
+			h1 := singleH1(t, body)
+			if !strings.Contains(h1, tc.wantH1Content) {
+				t.Fatalf("expected the page's <h1> for %s to contain %q, got: %s", tc.name, tc.wantH1Content, h1)
+			}
 		})
 	}
+}
+
+// singleH1 extracts the contents of the sole <h1>...</h1> element in html,
+// failing the test if there is not exactly one.
+func singleH1(t *testing.T, html string) string {
+	t.Helper()
+	start := strings.Index(html, "<h1")
+	if start == -1 {
+		t.Fatalf("no <h1> found:\n%s", html)
+	}
+	openEnd := strings.Index(html[start:], ">")
+	if openEnd == -1 {
+		t.Fatalf("unterminated <h1> tag:\n%s", html)
+	}
+	contentStart := start + openEnd + 1
+	closeIdx := strings.Index(html[contentStart:], "</h1>")
+	if closeIdx == -1 {
+		t.Fatalf("no closing </h1> found:\n%s", html)
+	}
+	return html[contentStart : contentStart+closeIdx]
 }
 
 // bodyOnly returns the header+main region of the rendered page: everything

@@ -28,7 +28,7 @@ func (s *TermService) Category(ctx context.Context, slug string, page, perPage i
 	if err != nil {
 		return domain.Term{}, nil, err
 	}
-	limit, offset := clamp(page, perPage)
+	limit, offset, _ := clamp(page, perPage)
 	posts, err := s.posts.ByTermSlug(ctx, TaxonomyCategory, slug, limit, offset)
 	if err != nil {
 		return domain.Term{}, nil, err

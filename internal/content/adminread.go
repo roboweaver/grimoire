@@ -70,10 +70,7 @@ func NewAdminService(
 // filters; empty values are left unset so the repository applies its defaults
 // (both post and page; all statuses). The total ignores paging.
 func (s *AdminService) List(ctx context.Context, page, perPage int, typ, status string) (AdminList, error) {
-	limit, offset := clamp(page, perPage)
-	if page < 1 {
-		page = 1
-	}
+	limit, offset, page := clamp(page, perPage)
 	f := domain.AdminPostFilter{Limit: limit, Offset: offset}
 	if typ != "" {
 		f.Types = []string{typ}

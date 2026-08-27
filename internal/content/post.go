@@ -19,7 +19,7 @@ func NewPostService(p domain.PostRepository) *PostService {
 // Recent returns published posts for a 1-based page, clamping the page size to
 // [1, MaxPerPage] with DefaultPerPage when unset.
 func (s *PostService) Recent(ctx context.Context, page, perPage int) ([]domain.Post, error) {
-	limit, offset := clamp(page, perPage)
+	limit, offset, _ := clamp(page, perPage)
 	return s.posts.RecentPosts(ctx, limit, offset)
 }
 

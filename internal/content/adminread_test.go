@@ -13,6 +13,7 @@ import (
 type fakeAdminData struct {
 	list       func(domain.AdminPostFilter) ([]domain.Post, error)
 	count      func(domain.AdminPostFilter) (int, error)
+	authors    func() ([]domain.AuthorOption, error)
 	byStatus   func(typ, status string) (int, error)
 	countUsers func() (int, error)
 	countTerms func(taxonomy string) (int, error)
@@ -25,6 +26,9 @@ func (f *fakeAdminData) ListForAdmin(_ context.Context, flt domain.AdminPostFilt
 }
 func (f *fakeAdminData) CountForAdmin(_ context.Context, flt domain.AdminPostFilter) (int, error) {
 	return f.count(flt)
+}
+func (f *fakeAdminData) Authors(_ context.Context) ([]domain.AuthorOption, error) {
+	return f.authors()
 }
 func (f *fakeAdminData) CountByStatus(_ context.Context, typ, status string) (int, error) {
 	return f.byStatus(typ, status)

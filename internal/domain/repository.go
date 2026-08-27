@@ -54,10 +54,18 @@ type AdminPostFilter struct {
 	// Search, when non-empty, restricts results to posts whose title or
 	// content contains the term (case-insensitive substring match).
 	Search string
+	Author int64 // 0 means unfiltered (Req 4.5)
 	// OrderBy selects the sort column: "date" (default) or "id".
 	OrderBy string
 	// Order selects sort direction: "desc" (default) or "asc".
 	Order string
+}
+
+// AuthorOption is a minimal, privacy-conscious author identity for admin
+// filter UIs: an ID plus a display name only (no email, login, or role).
+type AuthorOption struct {
+	ID          int64
+	DisplayName string
 }
 
 // AdminPostRepository lists and counts content for the admin, including drafts
@@ -69,6 +77,10 @@ type AdminPostRepository interface {
 	// CountForAdmin returns the total number of posts matching the filter,
 	// ignoring Limit/Offset (used for pagination totals).
 	CountForAdmin(ctx context.Context, f AdminPostFilter) (int, error)
+	// Authors returns the distinct set of users who have authored at least
+	// one post or page, ordered by display name. It never returns users with
+	// no authored content, so it cannot be used as a general user directory.
+	Authors(ctx context.Context) ([]AuthorOption, error)
 }
 
 // PostCounter counts posts for the dashboard. Additive; pure COUNT(*).

@@ -25,6 +25,10 @@ func (f adminFake) CountForAdmin(_ context.Context, _ AdminPostFilter) (int, err
 	return f.count, nil
 }
 
+func (adminFake) Authors(_ context.Context) ([]AuthorOption, error) {
+	return []AuthorOption{{ID: 1, DisplayName: "Admin"}}, nil
+}
+
 func (f adminFake) CountByStatus(_ context.Context, _, _ string) (int, error) { return f.count, nil }
 func (f adminFake) CountUsers(_ context.Context) (int, error)                 { return f.count, nil }
 func (f adminFake) CountTerms(_ context.Context, _ string) (int, error)       { return f.count, nil }

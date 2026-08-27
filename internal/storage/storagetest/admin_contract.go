@@ -3,6 +3,7 @@ package storagetest
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/roboweaver/grimoire/internal/domain"
 )
@@ -179,6 +180,68 @@ func runAdminContract(t *testing.T, newRepos NewReposFunc) {
 		}
 		if n != 1 {
 			t.Errorf("CountForAdmin(Search=hello two) = %d, want 1", n)
+		}
+	})
+
+	t.Run("Authors returns distinct post authors with display names", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		// Test-local fixture: SeedFixtures gives every post author 1 ("Admin").
+		// Add one more author here rather than editing SeedFixtures, so this
+		// test's data need stays isolated from every other contract/handler
+		// test that assumes a single seeded author.
+		editorID, err := repos.Users.Create(ctx, domain.User{Login: "editor", Nicename: "editor", DisplayName: "Editor Two"})
+		if err != nil {
+			t.Fatalf("create editor user: %v", err)
+		}
+		if _, err := repos.PostWriter.Create(ctx, domain.Post{
+			Author: editorID, Title: "Local", Slug: "authors-test-local", Type: "post",
+			Status: "publish", Date: time.Now(), CommentStatus: "open",
+		}); err != nil {
+			t.Fatalf("create local post: %v", err)
+		}
+		authors, err := repos.AdminPosts.Authors(ctx)
+		if err != nil {
+			t.Fatalf("Authors: %v", err)
+		}
+		if len(authors) != 2 {
+			t.Fatalf("want 2 authors (Admin + Editor Two), got %d: %+v", len(authors), authors)
+		}
+		names := map[string]bool{}
+		for _, a := range authors {
+			names[a.DisplayName] = true
+		}
+		if !names["Admin"] || !names["Editor Two"] {
+			t.Fatalf("authors missing expected names: %+v", authors)
+		}
+	})
+
+	t.Run("ListForAdmin and CountForAdmin honor Author", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		editorID, err := repos.Users.Create(ctx, domain.User{Login: "editor2", Nicename: "editor2", DisplayName: "Editor Filter"})
+		if err != nil {
+			t.Fatalf("create editor user: %v", err)
+		}
+		if _, err := repos.PostWriter.Create(ctx, domain.Post{
+			Author: editorID, Title: "By Editor", Slug: "by-editor", Type: "post",
+			Status: "publish", Date: time.Now(), CommentStatus: "open",
+		}); err != nil {
+			t.Fatalf("create editor post: %v", err)
+		}
+		posts, err := repos.AdminPosts.ListForAdmin(ctx, domain.AdminPostFilter{Author: editorID})
+		if err != nil {
+			t.Fatalf("ListForAdmin: %v", err)
+		}
+		if len(posts) != 1 || posts[0].Slug != "by-editor" {
+			t.Fatalf("Author-filtered ListForAdmin = %+v, want exactly [by-editor]", posts)
+		}
+		count, err := repos.AdminPosts.CountForAdmin(ctx, domain.AdminPostFilter{Author: editorID})
+		if err != nil {
+			t.Fatalf("CountForAdmin: %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("Author-filtered CountForAdmin = %d, want 1", count)
 		}
 	})
 

@@ -11,16 +11,17 @@ import {
   Button,
   DialogTrigger,
   AlertDialog,
-  Text,
   StatusLight,
+  Item,
+  Picker,
+  SearchField,
 } from "@adobe/react-spectrum";
-import ChevronLeft from "@spectrum-icons/workflow/ChevronLeft";
-import ChevronRight from "@spectrum-icons/workflow/ChevronRight";
 import Delete from "@spectrum-icons/workflow/Delete";
 import Edit from "@spectrum-icons/workflow/Edit";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { PaginationBar } from "../components/PaginationBar";
 import { useAsync } from "../hooks";
 import { Empty, ErrorState, Forbidden, Loading } from "../components/States";
 
@@ -48,12 +49,37 @@ export function PostsList({ type = "post" }: PostsListProps) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const page = Math.max(1, Number(params.get("page") || "1") || 1);
+  const search = params.get("search") || "";
+  const status = params.get("status") || "";
+  const author = params.get("author") || "";
   const [reloadToken, setReloadToken] = useState(0);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const authorsState = useAsync((signal) => api.authors(signal), []);
+  const authorOptions =
+    authorsState.status === "success" ? authorsState.data.authors : [];
+  const authorPickerItems = [
+    { key: "all", label: "All authors" },
+    ...authorOptions.map((item) => ({
+      key: String(item.id),
+      label: item.displayName,
+    })),
+  ];
+
   const state = useAsync(
-    (signal) => api.posts({ page, perPage: 10, type }, signal),
-    [page, type, reloadToken],
+    (signal) =>
+      api.posts(
+        {
+          page,
+          perPage: 10,
+          type,
+          status: status || undefined,
+          search: search || undefined,
+          author: author ? Number(author) : undefined,
+        },
+        signal,
+      ),
+    [page, type, status, search, author, reloadToken],
   );
 
   const basePath = type === "page" ? "/pages" : "/posts";
@@ -63,6 +89,16 @@ export function PostsList({ type = "post" }: PostsListProps) {
     setParams((prev) => {
       const p = new URLSearchParams(prev);
       p.set("page", String(next));
+      return p;
+    });
+  }
+
+  function setFilter(key: string, value: string) {
+    setParams((prev) => {
+      const p = new URLSearchParams(prev);
+      if (value) p.set(key, value);
+      else p.delete(key);
+      p.set("page", "1");
       return p;
     });
   }
@@ -86,6 +122,39 @@ export function PostsList({ type = "post" }: PostsListProps) {
         <Button variant="accent" onPress={() => navigate(`${basePath}/new`)}>
           New {label}
         </Button>
+      </Flex>
+
+      <Flex direction="row" gap="size-200" alignItems="end">
+        <SearchField
+          label="Search"
+          value={search}
+          onChange={(v) => setFilter("search", v)}
+          width="size-3000"
+        />
+        <Picker
+          label="Status"
+          selectedKey={status || "all"}
+          onSelectionChange={(key) =>
+            setFilter("status", key === "all" ? "" : String(key))
+          }
+        >
+          <Item key="all">All</Item>
+          <Item key="publish">Published</Item>
+          <Item key="draft">Draft</Item>
+          <Item key="pending">Pending</Item>
+          <Item key="private">Private</Item>
+          <Item key="future">Scheduled</Item>
+        </Picker>
+        <Picker
+          label="Author"
+          selectedKey={author || "all"}
+          onSelectionChange={(key) =>
+            setFilter("author", key === "all" ? "" : String(key))
+          }
+          items={authorPickerItems}
+        >
+          {(item) => <Item key={item.key}>{item.label}</Item>}
+        </Picker>
       </Flex>
 
       {deleteError && <ErrorState message={deleteError} />}
@@ -167,34 +236,13 @@ export function PostsList({ type = "post" }: PostsListProps) {
               </TableBody>
             </TableView>
 
-            <Flex
-              direction="row"
-              alignItems="center"
-              justifyContent="space-between"
-            >
-              <Text>
-                Page {state.data.page} of {Math.max(1, state.data.totalPages)} ·{" "}
-                {state.data.total} item{state.data.total === 1 ? "" : "s"}
-              </Text>
-              <Flex gap="size-100">
-                <ActionButton
-                  isDisabled={page <= 1}
-                  onPress={() => goToPage(page - 1)}
-                  aria-label="Previous page"
-                >
-                  <ChevronLeft />
-                  <Text>Previous</Text>
-                </ActionButton>
-                <ActionButton
-                  isDisabled={page >= state.data.totalPages}
-                  onPress={() => goToPage(page + 1)}
-                  aria-label="Next page"
-                >
-                  <Text>Next</Text>
-                  <ChevronRight />
-                </ActionButton>
-              </Flex>
-            </Flex>
+            <PaginationBar
+              page={state.data.page}
+              totalPages={state.data.totalPages}
+              total={state.data.total}
+              itemLabel={label}
+              onPageChange={goToPage}
+            />
           </>
         ))}
     </Flex>

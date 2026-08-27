@@ -27,6 +27,11 @@ export interface PostListItem {
   date: string;
 }
 
+export interface AuthorOption {
+  id: number;
+  displayName: string;
+}
+
 export interface PostList {
   items: PostListItem[];
   page: number;

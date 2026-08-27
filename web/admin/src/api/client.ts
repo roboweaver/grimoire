@@ -1,5 +1,6 @@
 import type {
   ApiErrorBody,
+  AuthorOption,
   AutosaveDetail,
   AutosaveWriteInput,
   CommentList,
@@ -160,7 +161,7 @@ export const api = {
   session: (signal?: AbortSignal) => get<SessionInfo>("/session", signal),
   stats: (signal?: AbortSignal) => get<Stats>("/stats", signal),
   posts: (
-    params: { page?: number; perPage?: number; type?: string; status?: string },
+    params: { page?: number; perPage?: number; type?: string; status?: string; search?: string; author?: number },
     signal?: AbortSignal,
   ) => {
     const q = new URLSearchParams();
@@ -168,9 +169,12 @@ export const api = {
     if (params.perPage) q.set("perPage", String(params.perPage));
     if (params.type) q.set("type", params.type);
     if (params.status) q.set("status", params.status);
+    if (params.search) q.set("search", params.search);
+    if (params.author) q.set("author", String(params.author));
     const qs = q.toString();
     return get<PostList>(`/posts${qs ? `?${qs}` : ""}`, signal);
   },
+  authors: (signal?: AbortSignal) => get<{ authors: AuthorOption[] }>("/authors", signal),
   post: (id: number | string, signal?: AbortSignal) =>
     get<PostDetail>(`/posts/${id}`, signal),
   comments: (params: { page?: number; perPage?: number; status?: string; postId?: number }, signal?: AbortSignal) => {
@@ -188,10 +192,18 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     }),
-  media: (params: { page?: number; perPage?: number }, signal?: AbortSignal) => {
+  media: (
+    params: { page?: number; perPage?: number; parentId?: number; search?: string; type?: string; after?: string; before?: string },
+    signal?: AbortSignal,
+  ) => {
     const q = new URLSearchParams();
     if (params.page) q.set("page", String(params.page));
     if (params.perPage) q.set("perPage", String(params.perPage));
+    if (params.parentId) q.set("parentId", String(params.parentId));
+    if (params.search) q.set("search", params.search);
+    if (params.type) q.set("type", params.type);
+    if (params.after) q.set("after", params.after);
+    if (params.before) q.set("before", params.before);
     const qs = q.toString();
     return get<MediaList>(`/media${qs ? `?${qs}` : ""}`, signal);
   },

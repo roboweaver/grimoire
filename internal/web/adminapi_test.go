@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/roboweaver/grimoire/internal/auth"
@@ -29,6 +30,7 @@ type fakeAdmin struct {
 	detail      func(id int64) (domain.Post, error)
 	stats       func() (content.Stats, error)
 	displayName func(userID int64) (string, error)
+	authors     func() ([]domain.AuthorOption, error)
 }
 
 func (f *fakeAdmin) List(_ context.Context, page, perPage int, filter content.AdminListFilter) (content.AdminList, error) {
@@ -38,6 +40,9 @@ func (f *fakeAdmin) Detail(_ context.Context, id int64) (domain.Post, error) { r
 func (f *fakeAdmin) Stats(_ context.Context) (content.Stats, error)          { return f.stats() }
 func (f *fakeAdmin) DisplayName(_ context.Context, id int64) (string, error) {
 	return f.displayName(id)
+}
+func (f *fakeAdmin) Authors(_ context.Context) ([]domain.AuthorOption, error) {
+	return f.authors()
 }
 
 func testAdminServer(a adminReader) *Server {
@@ -259,6 +264,60 @@ func TestAdminPostsMissingStatusReturns200(t *testing.T) {
 	srv.jsonHandler(srv.adminPosts).ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (Req 4.5: absent status must not 400): %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminAuthorsEndpoint(t *testing.T) {
+	admin := &fakeAdmin{authors: func() ([]domain.AuthorOption, error) {
+		return []domain.AuthorOption{{ID: 1, DisplayName: "Admin"}}, nil
+	}}
+	srv := testAdminServer(admin)
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/authors", nil)
+	req = req.WithContext(principalCtx("edit_posts"))
+	rec := httptest.NewRecorder()
+	srv.jsonHandler(srv.adminAuthors).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"displayName":"Admin"`) {
+		t.Fatalf("body missing displayName: %s", rec.Body.String())
+	}
+}
+
+func TestAdminPostsInvalidAuthorReturns400(t *testing.T) {
+	admin := &fakeAdmin{list: func(_, _ int, _ content.AdminListFilter) (content.AdminList, error) {
+		t.Fatal("list should not be called for an invalid author param")
+		return content.AdminList{}, nil
+	}}
+	srv := testAdminServer(admin)
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/posts?author=not-a-number", nil)
+	req = req.WithContext(principalCtx("edit_posts"))
+	rec := httptest.NewRecorder()
+	srv.jsonHandler(srv.adminPosts).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code"`) {
+		t.Fatalf("expected {\"error\":{\"code\":...}} envelope, got %s", rec.Body.String())
+	}
+}
+
+func TestAdminPostsAuthorFilterForwarded(t *testing.T) {
+	var gotFilter content.AdminListFilter
+	admin := &fakeAdmin{list: func(_, _ int, f content.AdminListFilter) (content.AdminList, error) {
+		gotFilter = f
+		return content.AdminList{Page: 1, PerPage: 10, Total: 1, TotalPages: 1}, nil
+	}}
+	srv := testAdminServer(admin)
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/posts?author=42", nil)
+	req = req.WithContext(principalCtx("edit_posts"))
+	rec := httptest.NewRecorder()
+	srv.jsonHandler(srv.adminPosts).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if gotFilter.Author != 42 {
+		t.Fatalf("Author = %d, want 42", gotFilter.Author)
 	}
 }
 

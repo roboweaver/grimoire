@@ -36,6 +36,7 @@ type AdminListFilter struct {
 	Type   string
 	Status string
 	Search string
+	Author int64
 }
 
 // AdminList is a page of admin content plus pagination metadata.
@@ -83,7 +84,7 @@ func NewAdminService(
 // version rebuilt a fresh, narrower filter for the count call).
 func (s *AdminService) List(ctx context.Context, page, perPage int, f AdminListFilter) (AdminList, error) {
 	limit, offset, page := clamp(page, perPage)
-	af := domain.AdminPostFilter{Limit: limit, Offset: offset, Search: f.Search}
+	af := domain.AdminPostFilter{Limit: limit, Offset: offset, Search: f.Search, Author: f.Author}
 	if f.Type != "" {
 		af.Types = []string{f.Type}
 	}
@@ -102,6 +103,13 @@ func (s *AdminService) List(ctx context.Context, page, perPage int, f AdminListF
 	}
 	p := newPage(page, limit, total)
 	return AdminList{Items: items, Page: p.Page, PerPage: p.PerPage, Total: p.Total, TotalPages: p.TotalPages}, nil
+}
+
+// Authors returns every user who has authored at least one post or page,
+// for admin filter UIs (Req 4.3). See domain.AuthorOption's doc comment for
+// the privacy rationale.
+func (s *AdminService) Authors(ctx context.Context) ([]domain.AuthorOption, error) {
+	return s.posts.Authors(ctx)
 }
 
 // Detail returns a single post/page by ID regardless of status or type.

@@ -279,3 +279,37 @@ func TestAdminServiceListMissingFilterFieldsMeansUnfiltered(t *testing.T) {
 		t.Fatalf("zero-value AdminListFilter should return all posts, got %d items / total %d", len(got.Items), got.Total)
 	}
 }
+
+func TestAdminServiceAuthorsDelegates(t *testing.T) {
+	data := &fakeAdminData{
+		authors: func() ([]domain.AuthorOption, error) {
+			return []domain.AuthorOption{{ID: 1, DisplayName: "Admin"}}, nil
+		},
+	}
+	svc := newAdminService(data, &fakeUserReader{})
+	got, err := svc.Authors(context.Background())
+	if err != nil {
+		t.Fatalf("Authors: %v", err)
+	}
+	if len(got) != 1 || got[0].DisplayName != "Admin" {
+		t.Fatalf("Authors = %+v", got)
+	}
+}
+
+func TestAdminServiceListForwardsAuthor(t *testing.T) {
+	var gotFilter domain.AdminPostFilter
+	data := &fakeAdminData{
+		list: func(f domain.AdminPostFilter) ([]domain.Post, error) {
+			gotFilter = f
+			return []domain.Post{{ID: 1, Author: 7, Title: "a"}}, nil
+		},
+		count: func(domain.AdminPostFilter) (int, error) { return 1, nil },
+	}
+	svc := newAdminService(data, &fakeUserReader{})
+	if _, err := svc.List(context.Background(), 1, 10, AdminListFilter{Author: 7}); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if gotFilter.Author != 7 {
+		t.Fatalf("ListForAdmin did not receive Author: %+v", gotFilter)
+	}
+}

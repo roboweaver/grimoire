@@ -136,6 +136,10 @@ type CommentMetaRepository interface {
 // MediaFilter selects attachments for the media library. ParentID 0 means any.
 type MediaFilter struct {
 	ParentID int64
+	Search   string
+	Type     string // "", "image", "video", "audio", or "document"
+	After    time.Time
+	Before   time.Time
 	Limit    int
 	Offset   int
 }

@@ -3,6 +3,7 @@ package storagetest
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -96,4 +97,119 @@ func runMediaContract(t *testing.T, newRepos NewReposFunc) {
 			t.Fatalf("SetParent missing err = %v, want ErrNotFound", err)
 		}
 	})
+
+	t.Run("MediaRepository filters by search, type, and date range", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		ctx := context.Background()
+		cases := []struct {
+			name   string
+			filter domain.MediaFilter
+			wantID []int64
+		}{
+			{
+				name:   "search matches filename case-insensitively",
+				filter: domain.MediaFilter{Search: "jpg", Limit: 10},
+				wantID: []int64{201},
+			},
+			{
+				name:   "search matches title case-insensitively",
+				filter: domain.MediaFilter{Search: "ASSET", Limit: 10},
+				wantID: []int64{202},
+			},
+			{
+				name:   "type image matches both jpeg and png",
+				filter: domain.MediaFilter{Type: "image", Limit: 10},
+				wantID: []int64{202, 201},
+			},
+			{
+				name:   "type video matches nothing",
+				filter: domain.MediaFilter{Type: "video", Limit: 10},
+				wantID: []int64{},
+			},
+			{
+				name:   "type document matches nothing (no non-media attachments seeded)",
+				filter: domain.MediaFilter{Type: "document", Limit: 10},
+				wantID: []int64{},
+			},
+			{
+				name:   "after excludes the earlier attachment",
+				filter: domain.MediaFilter{After: mustParseDate(t, "2024-01-06T12:00:00Z"), Limit: 10},
+				wantID: []int64{202},
+			},
+			{
+				name:   "before excludes the later attachment",
+				filter: domain.MediaFilter{Before: mustParseDate(t, "2024-01-06T00:00:00Z"), Limit: 10},
+				wantID: []int64{201},
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				list, err := repos.Media.List(ctx, tc.filter)
+				if err != nil {
+					t.Fatalf("List: %v", err)
+				}
+				count, err := repos.Media.Count(ctx, tc.filter)
+				if err != nil {
+					t.Fatalf("Count: %v", err)
+				}
+				if len(list) != count {
+					t.Fatalf("len(list)=%d != count=%d — listQuery and Count predicates diverged", len(list), count)
+				}
+				gotID := make([]int64, len(list))
+				for i, m := range list {
+					gotID[i] = m.ID
+				}
+				if !reflect.DeepEqual(gotID, tc.wantID) {
+					t.Fatalf("got IDs %v, want %v", gotID, tc.wantID)
+				}
+			})
+		}
+	})
+
+	t.Run("MediaRepository type filter matches MIME case-insensitively", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		id, err := repos.MediaWriter.Create(ctx, domain.Media{
+			Title:    "Uppercase MIME Upload",
+			Filename: "2024/02/upper.JPG",
+			URL:      "/wp-content/uploads/2024/02/upper.JPG",
+			MimeType: "IMAGE/JPEG",
+			Date:     time.Date(2024, 2, 4, 5, 6, 7, 0, time.UTC),
+			ParentID: 0,
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		list, err := repos.Media.List(ctx, domain.MediaFilter{Type: "image", Limit: 10})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		count, err := repos.Media.Count(ctx, domain.MediaFilter{Type: "image", Limit: 10})
+		if err != nil {
+			t.Fatalf("Count: %v", err)
+		}
+		if len(list) != count {
+			t.Fatalf("len(list)=%d != count=%d — listQuery and Count predicates diverged", len(list), count)
+		}
+		gotID := make([]int64, len(list))
+		for i, m := range list {
+			gotID[i] = m.ID
+		}
+		wantID := []int64{id, 202, 201}
+		if !reflect.DeepEqual(gotID, wantID) {
+			t.Fatalf("got IDs %v, want %v", gotID, wantID)
+		}
+	})
+}
+
+func mustParseDate(t *testing.T, s string) time.Time {
+	t.Helper()
+	ts, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatalf("mustParseDate(%q): %v", s, err)
+	}
+	return ts
 }

@@ -186,12 +186,20 @@ func RunOverlayContract(t *testing.T, vendor string, open OpenRawDB) {
 		}
 	})
 
-	t.Run("preflight accepts a database built by the greenfield set", func(t *testing.T) {
-		// This is the drift guard for migrate.RequiredSchema: the greenfield set
-		// is the definition of the schema grimoire needs, so anything it creates
-		// must be something Preflight knows to ask for. Adding a column to a
-		// greenfield migration without listing it in RequiredSchema is caught
-		// here rather than in production.
+	t.Run("RequiredSchema matches the schema the greenfield set builds, exactly", func(t *testing.T) {
+		// The drift guard for migrate.RequiredSchema, and it has to run in both
+		// directions to be worth anything.
+		//
+		// Too strict (RequiredSchema names a column the migrations do not create)
+		// makes Preflight reject databases that are actually fine. The OK() check
+		// below catches that.
+		//
+		// Too lax is the dangerous direction and an OK() check cannot see it: if a
+		// later migration adds a column grimoire's queries depend on and
+		// RequiredSchema is not updated to match, Preflight would wave through a
+		// WordPress database missing that column and grimoire would fail later,
+		// mid-request. So the column sets are compared for equality, not
+		// containment.
 		db, prefix, cleanup := open(t)
 		defer cleanup()
 		migFS, err := storage.MigrationsFS(vendor)
@@ -201,13 +209,26 @@ func RunOverlayContract(t *testing.T, vendor string, open OpenRawDB) {
 		if _, err := migrate.Apply(ctx, db, migFS, vendor, prefix); err != nil {
 			t.Fatalf("greenfield Apply: %v", err)
 		}
+
 		report, err := migrate.Preflight(ctx, db, prefix)
 		if err != nil {
 			t.Fatalf("Preflight: %v", err)
 		}
 		if !report.OK() {
 			t.Errorf("Preflight rejected a database the greenfield set just built; "+
-				"migrate.RequiredSchema is out of sync with the migrations: %v", report.Err())
+				"migrate.RequiredSchema asks for more than the migrations create: %v", report.Err())
+		}
+
+		for _, rt := range migrate.RequiredSchema() {
+			actual := columnsOf(ctx, t, db, prefix+rt.Name)
+			if !sameStrings(rt.Columns, actual) {
+				t.Errorf("migrate.RequiredSchema is out of step with the migrations for %q\n"+
+					" RequiredSchema: %v\n"+
+					"  actual schema: %v\n"+
+					"Update RequiredSchema so Preflight rejects a WordPress database that "+
+					"is missing a column grimoire reads.",
+					rt.Name, sortedCopy(rt.Columns), sortedCopy(actual))
+			}
 		}
 	})
 
@@ -398,19 +419,28 @@ func tableReadable(ctx context.Context, db *sql.DB, table string) bool {
 
 // sameStrings compares two string slices as multisets, so a vendor reporting
 // columns in a different order does not fail a comparison about which columns
-// exist.
+// exist. Comparison is case-insensitive because Postgres folds the mixed-case
+// WordPress column names (ID, comment_post_ID) to lower case.
 func sameStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	x := append([]string(nil), a...)
-	y := append([]string(nil), b...)
-	sort.Strings(x)
-	sort.Strings(y)
+	x, y := sortedCopy(a), sortedCopy(b)
 	for i := range x {
 		if !strings.EqualFold(x[i], y[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// sortedCopy returns a case-normalized, sorted copy of in, for stable diff
+// output in failure messages.
+func sortedCopy(in []string) []string {
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = strings.ToLower(s)
+	}
+	sort.Strings(out)
+	return out
 }

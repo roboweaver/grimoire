@@ -56,9 +56,18 @@ func TestParseTS(t *testing.T) {
 			if !got.Equal(tc.want) {
 				t.Fatalf("parseTS(%q) = %v, want %v", tc.in, got, tc.want)
 			}
-			if !got.After(time.Now().Add(-time.Hour)) {
-				// sanity: a future timestamp must be After(now)
-				t.Fatalf("parseTS(%q) = %v not treated as a real instant", tc.in, got)
+			// Sanity: the parsed value must behave as a real, orderable instant
+			// rather than a degenerate one, so ordering against fixed reference
+			// points on either side must hold.
+			//
+			// Anchored to tc.want, deliberately not to time.Now(). The original
+			// form of this check was got.After(time.Now().Add(-time.Hour)) with
+			// the comment "a future timestamp must be After(now)", which only
+			// held while the hardcoded 2026-09-06 fixture was still in the
+			// future. It began failing permanently once wall-clock time passed
+			// that instant, even though parseTS was correct the whole time.
+			if !got.After(tc.want.Add(-time.Hour)) || !got.Before(tc.want.Add(time.Hour)) {
+				t.Fatalf("parseTS(%q) = %v not treated as a real instant near %v", tc.in, got, tc.want)
 			}
 		})
 	}

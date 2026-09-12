@@ -1,0 +1,12 @@
+# Keep the build context small. Only assets/, cmd/, internal/, pkg/, themes/,
+# configs/ and deploy/ are needed to build and run the binaries -- note that
+# assets/ IS a Go package (imported by internal/web/static.go), not just media,
+# so it must NOT be excluded.
+.git
+.github
+docs
+plans
+test
+web
+*.md
+grimoire.db

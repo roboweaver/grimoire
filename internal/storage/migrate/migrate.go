@@ -1,6 +1,26 @@
 // Package migrate applies embedded, per-vendor SQL migrations against a
-// *sql.DB. It records applied versions in a prefixed schema_migrations table so
-// that Apply is idempotent.
+// *sql.DB. It records applied versions in a prefixed tracking table so that
+// applying a set repeatedly is idempotent.
+//
+// There are two independent migration sets, each with its own version stream:
+//
+//   - The greenfield set (Apply, tracked in {prefix}schema_migrations) builds
+//     grimoire's WordPress-compatible schema from an empty database. It uses
+//     plain ALTER TABLE ... ADD COLUMN, so it must never be pointed at a real
+//     WordPress database, whose tables already have those columns.
+//
+//   - The overlay set (ApplyOverlay, tracked in {prefix}grimoire_migrations)
+//     creates only grimoire-owned objects, entirely with IF NOT EXISTS and
+//     without any ALTER TABLE. It is safe against a live, populated WordPress
+//     database and is the supported way to adopt one.
+//
+// The two tracking tables are deliberately separate: the sets number their
+// migrations independently, so a shared table would let one set's version 1
+// mask the other's.
+//
+// Preflight complements ApplyOverlay by verifying, without writing anything,
+// that a database already provides the WordPress tables and columns grimoire
+// reads.
 package migrate
 
 import (
@@ -20,13 +40,71 @@ import (
 // prefixToken is replaced with the configured table prefix in migration SQL.
 const prefixToken = "{{prefix}}"
 
-// Apply runs all migrations in migFS with a version greater than the highest
-// already applied, replacing prefixToken with prefix. It returns the highest
-// applied version. Apply is safe to call repeatedly; already-applied
-// migrations are skipped. vendor selects the placeholder dialect for the
-// version-tracking INSERT (see internal/storage/rebind).
+// Tracking-table suffixes for the two migration sets. Each set counts its
+// migrations from 0001, so they must not share a version stream.
+const (
+	greenfieldTable = "schema_migrations"
+	overlayTable    = "grimoire_migrations"
+)
+
+// Apply runs the greenfield migration set: all migrations in migFS with a
+// version greater than the highest already applied, replacing prefixToken with
+// prefix. It returns the highest applied version. Apply is safe to call
+// repeatedly; already-applied migrations are skipped. vendor selects the
+// placeholder dialect for the version-tracking INSERT (see
+// internal/storage/rebind).
+//
+// Apply assumes an empty or grimoire-provisioned database. Against an existing
+// WordPress database its ALTER TABLE ... ADD COLUMN statements will fail with a
+// duplicate-column error on MySQL and SQLite; use ApplyOverlay there instead.
 func Apply(ctx context.Context, db *sql.DB, migFS fs.FS, vendor, prefix string) (int, error) {
-	migTable := prefix + "schema_migrations"
+	return apply(ctx, db, migFS, vendor, prefix, prefix+greenfieldTable)
+}
+
+// ApplyOverlay runs the overlay migration set against an existing, populated
+// WordPress database, creating only the grimoire-owned objects that database is
+// missing. Progress is tracked in {prefix}grimoire_migrations, separately from
+// Apply's {prefix}schema_migrations.
+//
+// The overlay set contains no ALTER TABLE and only IF NOT EXISTS statements, so
+// it alters nothing that already exists and is safe to run more than once.
+// Callers adopting an unknown database should run Preflight first to confirm the
+// WordPress tables and columns grimoire reads are actually present.
+func ApplyOverlay(ctx context.Context, db *sql.DB, migFS fs.FS, vendor, prefix string) (int, error) {
+	return apply(ctx, db, migFS, vendor, prefix, prefix+overlayTable)
+}
+
+// PendingOverlay returns the names of overlay migrations in migFS that have not
+// yet been recorded in {prefix}grimoire_migrations, in apply order.
+//
+// It writes nothing at all -- not even the tracking table, which ApplyOverlay
+// would create -- so it is safe to run against a production database. A missing
+// tracking table simply means nothing has been applied yet.
+func PendingOverlay(ctx context.Context, db *sql.DB, migFS fs.FS, prefix string) ([]string, error) {
+	migTable := prefix + overlayTable
+	applied := 0
+	// Probe with a zero-row read so an absent tracking table is not an error.
+	var v sql.NullInt64
+	if err := db.QueryRowContext(ctx,
+		fmt.Sprintf(`SELECT MAX(version) FROM %s`, migTable)).Scan(&v); err == nil && v.Valid {
+		applied = int(v.Int64)
+	}
+	migs, err := loadMigrations(migFS)
+	if err != nil {
+		return nil, err
+	}
+	var pending []string
+	for _, m := range migs {
+		if m.version > applied {
+			pending = append(pending, m.name)
+		}
+	}
+	return pending, nil
+}
+
+// apply is the shared migration runner behind Apply and ApplyOverlay; migTable
+// selects which version stream to record progress in.
+func apply(ctx context.Context, db *sql.DB, migFS fs.FS, vendor, prefix, migTable string) (int, error) {
 	if _, err := db.ExecContext(ctx, fmt.Sprintf(
 		`CREATE TABLE IF NOT EXISTS %s (version BIGINT PRIMARY KEY, applied_at VARCHAR(64) NOT NULL)`,
 		migTable,

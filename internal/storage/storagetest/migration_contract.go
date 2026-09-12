@@ -27,11 +27,16 @@ type OpenRawDB func(t *testing.T) (db *sql.DB, prefix string, cleanup func())
 // It then documents 0004's intentionally vendor-asymmetric re-application
 // behavior (see that migration file's per-vendor header comment): PostgreSQL's
 // "ADD COLUMN IF NOT EXISTS" makes 0004 safe to re-run against a schema that
-// already has its six columns (e.g. an already-overlaid pre-existing
-// database); MySQL/SQLite's plain "ADD COLUMN" does not, and errors with a
-// duplicate-column error. This asymmetry must never be "fixed" to be uniform
-// across vendors -- it matches M4's 0003 migration's own precedent, and the
-// safe-to-rerun guarantee is documented as holding for Postgres only.
+// already has its six columns; MySQL/SQLite's plain "ADD COLUMN" does not, and
+// errors with a duplicate-column error.
+//
+// That asymmetry is not what makes an existing WordPress database adoptable, and
+// it is deliberately left in place rather than papered over per vendor. The
+// greenfield set's job is to build grimoire's schema from nothing; adopting a
+// live WordPress database is the overlay set's job, and RunOverlayContract below
+// is what pins that behavior down. Making the greenfield ALTERs uniformly
+// re-runnable would only make it easier to point the wrong set at a production
+// database.
 func RunMigrationContract(t *testing.T, vendor string, open OpenRawDB) {
 	t.Helper()
 	ctx := context.Background()
@@ -95,17 +100,18 @@ func RunMigrationContract(t *testing.T, vendor string, open OpenRawDB) {
 				t.Fatalf("re-applying 0004 against an already-migrated Postgres schema errored (want a silent no-op via ADD COLUMN IF NOT EXISTS): %v", err)
 			}
 		})
-		return
+	} else {
+		t.Run("0004 errors if re-applied against a schema that already has its columns ("+vendor+" plain ADD COLUMN)", func(t *testing.T) {
+			db, prefix, cleanup := open(t)
+			defer cleanup()
+			err := migrateThenRerun0004(ctx, db, vendor, prefix)
+			if err == nil {
+				t.Fatalf("re-applying 0004 against an already-migrated %s schema unexpectedly succeeded; it must error here -- this is documented and intentional: %s uses plain ADD COLUMN, not ADD COLUMN IF NOT EXISTS. Adopting an existing WordPress database is the overlay set's job, not this one's", vendor, vendor)
+			}
+		})
 	}
 
-	t.Run("0004 errors if re-applied against a schema that already has its columns ("+vendor+" plain ADD COLUMN)", func(t *testing.T) {
-		db, prefix, cleanup := open(t)
-		defer cleanup()
-		err := migrateThenRerun0004(ctx, db, vendor, prefix)
-		if err == nil {
-			t.Fatalf("re-applying 0004 against an already-migrated %s schema unexpectedly succeeded; it must error here -- this is documented and intentional: %s uses plain ADD COLUMN, not ADD COLUMN IF NOT EXISTS, so 0004 must never be pointed at an already-overlaid %s database", vendor, vendor, vendor)
-		}
-	})
+	RunOverlayContract(t, vendor, open)
 }
 
 // migrateThenRerun0004 applies 0001-0004 normally, then re-executes 0004's raw

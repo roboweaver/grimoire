@@ -11,6 +11,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/domain"
 	mysqlmig "github.com/roboweaver/grimoire/internal/storage/migrations/mysql"
+	overlaymig "github.com/roboweaver/grimoire/internal/storage/migrations/overlay"
 	postgresmig "github.com/roboweaver/grimoire/internal/storage/migrations/postgres"
 	sqlitemig "github.com/roboweaver/grimoire/internal/storage/migrations/sqlite"
 	"github.com/roboweaver/grimoire/internal/storage/mysql"
@@ -104,7 +105,11 @@ func NewBunDB(vendor string, db *sql.DB) (*bun.DB, error) {
 	}
 }
 
-// MigrationsFS returns the embedded migration files for the given vendor.
+// MigrationsFS returns the embedded greenfield migration files for the given
+// vendor: the full WordPress-compatible schema built up from nothing. Because
+// MySQL and SQLite have no portable ADD COLUMN IF NOT EXISTS, this set is only
+// valid against a database grimoire provisioned itself. To adopt an existing
+// WordPress database, use OverlayMigrationsFS instead.
 func MigrationsFS(vendor string) (fs.FS, error) {
 	switch vendor {
 	case "sqlite":
@@ -116,6 +121,14 @@ func MigrationsFS(vendor string) (fs.FS, error) {
 	default:
 		return nil, fmt.Errorf("storage: unsupported vendor %q", vendor)
 	}
+}
+
+// OverlayMigrationsFS returns the embedded overlay migration files for the given
+// vendor: only the grimoire-owned schema objects that WordPress never creates,
+// all guarded with IF NOT EXISTS and containing no ALTER TABLE. This is the set
+// to apply when overlaying an existing, populated WordPress database.
+func OverlayMigrationsFS(vendor string) (fs.FS, error) {
+	return overlaymig.FS(vendor)
 }
 
 // New opens the configured vendor, wraps it with the vendor Bun dialect, and

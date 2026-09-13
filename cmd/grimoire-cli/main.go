@@ -2,14 +2,19 @@
 // (apply embedded per-vendor migrations), "seed" (insert sample content),
 // "createadmin" (bootstrap the first administrator), and "sessions gc" (delete
 // expired sessions). All accept -config pointing at a grimoire YAML file.
+//
+// To adopt an existing WordPress database, use "migrate -overlay" rather than
+// bare "migrate"; see runMigrate for the distinction.
 package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/config"
@@ -49,13 +54,35 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: grimoire-cli <migrate|seed|createadmin|sessions gc> [-config path]")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "  migrate            provision a greenfield grimoire schema")
+	fmt.Fprintln(os.Stderr, "  migrate -overlay   adopt an existing WordPress database (additive, no ALTER TABLE)")
+	fmt.Fprintln(os.Stderr, "  migrate -check     report schema compatibility without writing anything")
 }
 
+// runMigrate applies schema changes in one of three modes:
+//
+//	migrate           provision a greenfield grimoire schema (default)
+//	migrate -overlay  adopt an existing WordPress database, additively
+//	migrate -check    report schema compatibility, writing nothing
+//
+// The default mode builds the whole WordPress-compatible schema and uses plain
+// ALTER TABLE ... ADD COLUMN, so it fails against a real WordPress database
+// whose tables already have those columns. -overlay is the mode for that case:
+// it creates only grimoire-owned tables, every statement guarded with IF NOT
+// EXISTS, and issues no ALTER TABLE at all.
 func runMigrate(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
 	cfgPath := fs.String("config", "configs/grimoire.sqlite.yaml", "path to grimoire config YAML")
+	overlayMode := fs.Bool("overlay", false,
+		"adopt an existing WordPress database: apply only grimoire-owned, additive DDL (no ALTER TABLE)")
+	checkMode := fs.Bool("check", false,
+		"report whether the database has the WordPress tables/columns grimoire needs, then exit without writing")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *overlayMode && *checkMode {
+		return errors.New("migrate: -overlay and -check are mutually exclusive (-check never writes)")
 	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -66,15 +93,77 @@ func runMigrate(args []string) error {
 		return err
 	}
 	defer db.Close()
-	migFS, err := storage.MigrationsFS(cfg.Database.Vendor)
+
+	vendor, prefix := cfg.Database.Vendor, cfg.Database.TablePrefix
+	ctx := context.Background()
+
+	if *checkMode {
+		return reportPreflight(ctx, db, vendor, prefix)
+	}
+
+	if *overlayMode {
+		// Refuse to touch a database that is not actually WordPress-shaped: a
+		// wrong table_prefix or an empty database would otherwise leave a stray
+		// sessions table behind and fail confusingly later, at login.
+		report, err := migrate.Preflight(ctx, db, prefix)
+		if err != nil {
+			return err
+		}
+		if err := report.Err(); err != nil {
+			return err
+		}
+		migFS, err := storage.OverlayMigrationsFS(vendor)
+		if err != nil {
+			return err
+		}
+		version, err := migrate.ApplyOverlay(ctx, db, migFS, vendor, prefix)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("overlaid %s (prefix %q) to grimoire overlay version %d; "+
+			"existing WordPress tables unchanged\n", vendor, prefix, version)
+		return nil
+	}
+
+	migFS, err := storage.MigrationsFS(vendor)
 	if err != nil {
 		return err
 	}
-	version, err := migrate.Apply(context.Background(), db, migFS, cfg.Database.Vendor, cfg.Database.TablePrefix)
+	version, err := migrate.Apply(ctx, db, migFS, vendor, prefix)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("migrated %s to schema version %d\n", cfg.Database.Vendor, version)
+	fmt.Printf("migrated %s to schema version %d\n", vendor, version)
+	return nil
+}
+
+// reportPreflight prints a schema-compatibility summary for -check. It performs
+// only zero-row SELECTs, so it is safe to point at a production database.
+func reportPreflight(ctx context.Context, db *sql.DB, vendor, prefix string) error {
+	report, err := migrate.Preflight(ctx, db, prefix)
+	if err != nil {
+		return err
+	}
+	if err := report.Err(); err != nil {
+		return err
+	}
+	tables := migrate.RequiredSchema()
+	fmt.Printf("%s database (prefix %q) has all %d WordPress tables grimoire reads.\n",
+		vendor, prefix, len(tables))
+	overlayFS, err := storage.OverlayMigrationsFS(vendor)
+	if err != nil {
+		return err
+	}
+	pending, err := migrate.PendingOverlay(ctx, db, overlayFS, prefix)
+	if err != nil {
+		return err
+	}
+	if len(pending) == 0 {
+		fmt.Println("Grimoire-owned schema is already installed; nothing to apply.")
+		return nil
+	}
+	fmt.Printf("Pending grimoire-owned migrations (%d): %s\n", len(pending), strings.Join(pending, ", "))
+	fmt.Println("Apply them with: grimoire-cli migrate -overlay")
 	return nil
 }
 

@@ -71,12 +71,15 @@ implementation, matching how M5–M7 were run.
       `domain.ErrNotFound` for an unpublished or absent id; honors the
       `types...` default of `{"post","page"}`. Runs across all three vendors,
       mirroring the existing `BySlug` contract case. _(Req 2.4, 7.3)_
-  - _Verified on SQLite._ MySQL verification is blocked by
+  - _Verified on SQLite **and MySQL**._ MySQL was initially blocked by
     [#37](https://github.com/roboweaver/grimoire/issues/37), a pre-existing
     defect in the MySQL greenfield `0003` migration (191-char prefix key on a
-    `VARCHAR(100)` column) that fails the fixture build for the **entire**
-    MySQL contract suite, not just this case. Confirmed pre-existing by
-    stashing this change and re-running.
+    `VARCHAR(100)` column) that failed the fixture build for the **entire**
+    MySQL contract suite, not just this case — confirmed pre-existing by
+    stashing this change and re-running. Fixed in #39, and #41 added a
+    `cross-vendor-test` CI job with a MySQL service, so this case is now
+    verified on MySQL automatically on every push rather than only by hand.
+    Postgres remains blocked by [#40](https://github.com/roboweaver/grimoire/issues/40).
 - [x] 2.2 Add `PublishedByID(ctx, id int64, types ...string) (Post, error)` to
       `domain.PostRepository` and implement it in `internal/storage/wprepo`,
       reusing `BySlug`'s published-only/type-defaulting semantics. Do **not**

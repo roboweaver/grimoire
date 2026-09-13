@@ -54,7 +54,7 @@ type m6Env struct {
 func newM6Env(t *testing.T) *m6Env {
 	t.Helper()
 	ctx := t.Context()
-	dsn := filepath.Join(t.TempDir(), "grimoire.db")
+	dsn := testDSN(t)
 	dbcfg := config.DatabaseConfig{Vendor: "sqlite", DSN: dsn, TablePrefix: "wp_"}
 
 	repos, err := storage.New(dbcfg)

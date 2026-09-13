@@ -30,7 +30,7 @@ import (
 // goroutine leak).
 func TestM7SchedulerWiring(t *testing.T) {
 	ctx := context.Background()
-	dsn := filepath.Join(t.TempDir(), "grimoire.db")
+	dsn := testDSN(t)
 	dbcfg := config.DatabaseConfig{Vendor: "sqlite", DSN: dsn, TablePrefix: "wp_"}
 
 	repos, err := storage.New(dbcfg)

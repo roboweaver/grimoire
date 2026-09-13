@@ -50,7 +50,7 @@ type m4Env struct {
 func newM4Env(t *testing.T) *m4Env {
 	t.Helper()
 	ctx := context.Background()
-	dsn := filepath.Join(t.TempDir(), "grimoire.db")
+	dsn := testDSN(t)
 	dbcfg := config.DatabaseConfig{Vendor: "sqlite", DSN: dsn, TablePrefix: "wp_"}
 
 	repos, err := storage.New(dbcfg)

@@ -1,5 +1,10 @@
 # Tasks — M2: Users, Authentication & Roles
 
+> **Checkbox state reconciled 2026-09-13.** These boxes were not ticked as the
+> work landed. They were reconciled retroactively against the merged
+> implementation (PR #2) and the milestone index in [../README.md](../README.md).
+> If this file and the index ever disagree, trust the index and git history.
+
 Implementation checklist for M2, following strict TDD. Tasks are ordered so each
 builds on the last and references the requirements it satisfies. Keep
 `gofmt -l .` empty, `go vet ./...`, `go build ./...`, and `go test ./...` green
@@ -66,6 +71,6 @@ increments with the trailer
   - _Acceptance:_ `createadmin` then login succeeds; `sessions gc` removes only expired rows; CLI never prints secrets. _(Req 8.1–8.4)_
 
 ## Phase 10 — Validate & PR
-- [ ] 10.1 Full gate sweep: `gofmt -l .` (empty), `go vet ./...`, `go build ./...`, `go test ./...` all green; run MySQL/Postgres contract runs if DSNs available.
-- [ ] 10.2 Open **PR #2** against `main` (do **not** merge) and report PR-open to the creator session.
+- [x] 10.1 Full gate sweep: `gofmt -l .` (empty), `go vet ./...`, `go build ./...`, `go test ./...` all green; run MySQL/Postgres contract runs if DSNs available.
+- [x] 10.2 Open **PR #2** against `main` (do **not** merge) and report PR-open to the creator session.
   - _Acceptance:_ CI-equivalent gates pass locally; PR open with a milestone summary. _(All requirements; Milestone success criterion)_

@@ -1,5 +1,10 @@
 # Tasks — M7: Revisions, Autosave, Scheduler & REST Term Parity
 
+> **Checkbox state reconciled 2026-09-13.** These boxes were not ticked as the
+> work landed. They were reconciled retroactively against the merged
+> implementation (PR #18 and PR #19) and the milestone index in [../README.md](../README.md).
+> If this file and the index ever disagree, trust the index and git history.
+
 Implementation checklist for M7, following strict TDD. Tasks are ordered so
 each builds on the last and references the requirements it satisfies. Keep
 `gofmt -l .` empty, `go vet ./...`, `go build ./...`, and `go test ./...`
@@ -19,7 +24,7 @@ has 4, Req 6 has 7, Req 7 has 4, Req 8 has 6.
 ## Phase 0 — Spec
 - [x] 0.1 Write `requirements.md`, `design.md`, `tasks.md` and update the `plans/README.md` milestone index (new row 07, status "📝 Specified").
   - _Acceptance:_ Three Kiro spec files exist matching M1–M6 style, with mandatory Security Considerations and SEO Considerations sections in `design.md` and every diagram in Mermaid; README row 07 links to this directory. _(All requirements)_
-- [ ] 0.2 Open the spec PR and obtain user/reviewer approval (GPT-5.5 + Kimi K3 review cycle) before coding.
+- [x] 0.2 Open the spec PR and obtain user/reviewer approval (GPT-5.5 + Kimi K3 review cycle) before coding.
   - _Acceptance:_ PR open against `main`, not merged; creator session notified; any review feedback addressed with follow-up commits before Phase 1 begins.
 
 ## Phase 1 — Domain/storage additions (`internal/domain`, `internal/storage/wprepo`, migrations)

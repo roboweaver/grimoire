@@ -1,5 +1,13 @@
 # WordPress Core Parity Roadmap: Tasks
 
+> **M8 checkbox state reconciled 2026-09-13.** M8's boxes were not ticked as the
+> work landed; they were reconciled retroactively against the merged
+> implementation in PR #22 and the status correction in PR #25.
+>
+> **M9 and M10 are deliberately unticked** — that is accurate, not drift. Neither
+> has been implemented, and both still require their own spec before any code, as
+> the M9/M10 sections below state.
+
 This file is the actionable roadmap for M8/M9/M10. M8's tasks are
 implementation-ready: each cites exact files, exact existing symbols, and
 the requirement/AC it satisfies. M9 and M10 are broken into concrete task
@@ -20,15 +28,15 @@ migration needs (if any) are deferred to their own specs.
 
 **Requirements:** 3.1–3.4, 5.1–5.4, 8.1, 8.3
 
-- [ ] 1.1 In `internal/domain/repository.go`, add `Author int64` to
+- [x] 1.1 In `internal/domain/repository.go`, add `Author int64` to
       `AdminPostFilter` (zero = unfiltered, matching the existing
       zero-value convention already used by `ParentID` on `MediaFilter`).
-- [ ] 1.2 In `internal/domain/repository.go`, add `Search string`,
+- [x] 1.2 In `internal/domain/repository.go`, add `Search string`,
       `Type string`, `After time.Time`, `Before time.Time` to
       `MediaFilter` (zero values unfiltered; `Type` is one of
       `image`/`video`/`audio`/`document`, validated at the HTTP layer in
       Task 6, not in the domain struct itself).
-- [ ] 1.3 Add a new method to resolve a term-scoped published-post count.
+- [x] 1.3 Add a new method to resolve a term-scoped published-post count.
       Add it to `domain.TermRepository` as
       `CountByTermSlug(ctx context.Context, taxonomy, slug string) (int, error)`,
       documented as: "returns the number of published posts
@@ -36,7 +44,7 @@ migration needs (if any) are deferred to their own specs.
       or 0 if the term does not exist." (A term that does not exist is not
       an error here — the caller already resolves term existence via
       `BySlug` before needing the count.)
-- [ ] 1.4 Implement `CountByTermSlug` on `*TermRepo` in
+- [x] 1.4 Implement `CountByTermSlug` on `*TermRepo` in
       `internal/storage/wprepo/repo.go`, alongside the existing `TermRepo`
       methods already defined there (`BySlug` at line 170,
       `ListByTaxonomy` at line 190, `TermsByIDs` at line 211) — as a live
@@ -48,21 +56,21 @@ migration needs (if any) are deferred to their own specs.
       distinct from the existing `TermRepo.CountTerms` in `adminreads.go`
       (line 119), which counts *terms* in a taxonomy, not *posts* in one
       term — do not conflate the two.
-- [ ] 1.5 Add a cross-vendor contract test for `CountByTermSlug` in the
+- [x] 1.5 Add a cross-vendor contract test for `CountByTermSlug` in the
       existing `internal/storage/storagetest/termreader_contract.go`,
       covering: a term with N published + M draft posts (expect N), a term
       with zero posts (expect 0), and an unknown slug (expect 0, no error).
-- [ ] 1.6 Run `go test ./internal/storage/... ./internal/domain/...` and
+- [x] 1.6 Run `go test ./internal/storage/... ./internal/domain/...` and
       confirm the new contract cases pass on every configured vendor.
 
 ### Task 2: Add pagination totals to `PostService.Recent` and `TermService.Category`
 
 **Requirements:** 1.1–1.5, 2.1–2.5, 8.1
 
-- [ ] 2.1 In `internal/content/post.go`, change `NewPostService` to accept
+- [x] 2.1 In `internal/content/post.go`, change `NewPostService` to accept
       a second parameter `pc domain.PostCounter`, storing it alongside the
       existing `posts domain.PostRepository` field.
-- [ ] 2.2 Add a small shared result type (e.g. in `pagination.go`, since
+- [x] 2.2 Add a small shared result type (e.g. in `pagination.go`, since
       both `PostService` and `TermService` need the same shape) —
       `type Page struct { Total int; TotalPages int }` — and change
       `PostService.Recent`'s return type from `([]domain.Post, error)` to
@@ -79,13 +87,13 @@ migration needs (if any) are deferred to their own specs.
       `AdminService.List` in `adminread.go` to call the new shared
       `TotalPages` helper in place of its existing inline formula, as a
       pure refactor (no behavior change — same tests must still pass).
-- [ ] 2.3 In `internal/content/term.go`, `TermService` already has both
+- [x] 2.3 In `internal/content/term.go`, `TermService` already has both
       `terms domain.TermRepository` and `posts` dependencies from its
       existing constructor — no constructor signature change is needed here
       (unlike `PostService` in Task 2.1). Add the term-count call inside
       `Category` using the new `domain.TermRepository.CountByTermSlug` from
       Task 1, returning the same `Page` shape as `PostService.Recent`.
-- [ ] 2.4 Update `internal/content/post.go`'s `NewPostService` signature
+- [x] 2.4 Update `internal/content/post.go`'s `NewPostService` signature
       itself, then every call site, to pass the new second argument.
       `NewPostService(` appears 20 times across 18 Go files today
       (confirmed via `grep -rn "NewPostService(" --include="*.go" .`); one
@@ -110,7 +118,7 @@ migration needs (if any) are deferred to their own specs.
       call sites in `internal/content/post_test.go` using a fake
       `PostRepository` directly, each needing a fake `PostCounter` argument
       too. Fix any other call site the compiler flags after this change.
-- [ ] 2.5 `internal/content/post_test.go` and `internal/content/term_test.go`
+- [x] 2.5 `internal/content/post_test.go` and `internal/content/term_test.go`
       both already exist today (confirmed via `ls internal/content/`); this
       task extends them rather than creating new files. Also note: Task
       1.3 adds `CountByTermSlug` to the `domain.TermRepository` interface,
@@ -127,15 +135,15 @@ migration needs (if any) are deferred to their own specs.
       known fixture of posts, and that a page number beyond `TotalPages`
       still returns an empty slice (not an error) — the out-of-range→404
       decision belongs to the HTTP handler (Task 3), not the service.
-- [ ] 2.6 Run `go test ./internal/content/...` and confirm all pass.
+- [x] 2.6 Run `go test ./internal/content/...` and confirm all pass.
 
 ### Task 3: Wire public handlers to 404 on out-of-range pages and render totals
 
 **Requirements:** 1.1–1.5, 2.1–2.5
 
-- [ ] 3.1 In `internal/render/view.go`, add `Page`, `TotalPages`, `Total int`
+- [x] 3.1 In `internal/render/view.go`, add `Page`, `TotalPages`, `Total int`
       fields to both `IndexData` (line 32) and `CategoryData` (line 51).
-- [ ] 3.2 In `internal/web/handlers.go`'s `home` handler: after calling
+- [x] 3.2 In `internal/web/handlers.go`'s `home` handler: after calling
       `PostService.Recent`, if `page > 1 && result.Total > 0 && page >
       result.TotalPages`, return `domain.ErrNotFound` so the existing
       `s.handler()` middleware wrapper (`internal/web/middleware.go:18-29`)
@@ -144,34 +152,34 @@ migration needs (if any) are deferred to their own specs.
       otherwise populate the new `IndexData` fields. A zero-post site
       (`result.Total == 0`) must render normally (empty list, no 404) for
       any page value, per Requirement 1.6.
-- [ ] 3.3 Apply the same change to the `category` handler using
+- [x] 3.3 Apply the same change to the `category` handler using
       `CategoryData` and `TermService.Category`'s new `Page` return value:
       an unknown category slug continues to 404 via the existing
       `domain.ErrNotFound` path (unchanged), an out-of-range page for a
       *known* category slug with `Total > 0` now also returns
       `domain.ErrNotFound` (same condition as 3.2), and a known category
       with zero posts renders empty for any page value, per Requirement 2.6.
-- [ ] 3.4 Update the public pagination templates at
+- [x] 3.4 Update the public pagination templates at
       `themes/default/templates/index.tmpl` and
       `themes/default/templates/category.tmpl` to add a previous/next
       control, shown only when `TotalPages > 1`, matching the existing
       template styling conventions already used for other list rendering
       in these templates.
-- [ ] 3.5 Extend the existing `internal/web/handlers_test.go` with cases
+- [x] 3.5 Extend the existing `internal/web/handlers_test.go` with cases
       for: a page within range returns `200` with correct pagination
       fields in the rendered output; a page beyond `TotalPages` on a
       non-empty home/category returns `404`; a zero-post home page and a
       known-but-empty category both return `200` (empty list) for any page
       value; an unknown category slug still returns `404` (regression check
       on existing behavior).
-- [ ] 3.6 Run `go test ./internal/web/... ./internal/render/...` and
+- [x] 3.6 Run `go test ./internal/web/... ./internal/render/...` and
       confirm all pass.
 
 ### Task 4: Extend `AdminService.List` with search/author and add input validation
 
 **Requirements:** 3.1–3.5, 4.1–4.4
 
-- [ ] 4.1 In `internal/content/adminread.go`, change `AdminService.List`
+- [x] 4.1 In `internal/content/adminread.go`, change `AdminService.List`
       (`internal/content/adminread.go:72`, currently
       `List(ctx context.Context, page, perPage int, typ, status string)
       (AdminList, error)`) to
@@ -222,7 +230,7 @@ migration needs (if any) are deferred to their own specs.
       identically at `adminreads.go:42` and `:94` — add the `Author`
       predicate as a second, equally-shared `q.Where(...)` call alongside
       it, not a diverging one-sided addition).
-- [ ] 4.2 Update `internal/web/adminapi.go`'s `adminPosts` handler
+- [x] 4.2 Update `internal/web/adminapi.go`'s `adminPosts` handler
       (currently `s.admin.List(r.Context(), page, perPage, q.Get("type"),
       q.Get("status"))` at line 211) to build a `domain.AdminPostFilter`
       literal from the query string — `Types: []string{q.Get("type")}` when
@@ -234,13 +242,13 @@ migration needs (if any) are deferred to their own specs.
       signature from 4.1. `status`, when non-empty, must validate against
       the fixed allowed set `{"publish", "draft", "pending", "private",
       "future"}` (empty means unfiltered, matching existing behavior).
-- [ ] 4.3 On validation failure for `status` or `author`, respond `400`
+- [x] 4.3 On validation failure for `status` or `author`, respond `400`
       using the existing `writeJSONError(w, http.StatusBadRequest, code,
       message)` helper (`internal/web/adminapi.go:264`), which already
       produces the standard envelope
       `{"error":{"code":"...","message":"..."}}` — e.g.
       `writeJSONError(w, http.StatusBadRequest, "invalid_status", "invalid status")`.
-- [ ] 4.4 Write Go handler tests in `internal/web/adminapi_test.go`
+- [x] 4.4 Write Go handler tests in `internal/web/adminapi_test.go`
       (extend the existing file): valid `status`/`search`/`author`
       combinations return `200` with correctly filtered results; each
       invalid value (`status=bogus`, `author=notanumber`, `author=-1`)
@@ -266,14 +274,14 @@ migration needs (if any) are deferred to their own specs.
       pattern already used there for `Search` (lines 147-183), so every
       configured storage vendor is proven to apply `f.Author` identically
       in `ListForAdmin` and `CountForAdmin`.
-- [ ] 4.5 Run `go test ./internal/content/... ./internal/web/...` and
+- [x] 4.5 Run `go test ./internal/content/... ./internal/web/...` and
       confirm all pass.
 
 ### Task 4A: Add a narrow admin author-listing endpoint (Requirement 3.7)
 
 **Requirements:** 3.7
 
-- [ ] 4A.1 In `internal/domain/repository.go`, add
+- [x] 4A.1 In `internal/domain/repository.go`, add
       `type AuthorOption struct { ID int64; Name string }` and extend the
       `AdminPostRepository` interface (currently at lines 59-68, methods
       `ListForAdmin`/`CountForAdmin`) with
@@ -292,7 +300,7 @@ migration needs (if any) are deferred to their own specs.
       context.Context) ([]domain.AuthorOption, error) { return
       f.authors() }` — rather than leaving it for a later compiler error to
       surface.
-- [ ] 4A.2 Implement `Authors` on the type implementing
+- [x] 4A.2 Implement `Authors` on the type implementing
       `AdminPostRepository` in `internal/storage/wprepo/adminreads.go`
       (alongside `ListForAdmin`/`CountForAdmin`), as a Bun query built the
       same way as this file's neighbors in `media.go` — never a raw SQL
@@ -311,10 +319,10 @@ migration needs (if any) are deferred to their own specs.
       "page"})).OrderExpr("u.display_name ASC")` — a privacy-scoped read
       that never returns a user with zero posts/pages, unlike a full
       `{prefix}users` listing.
-- [ ] 4A.3 Add `AdminService.Authors(ctx context.Context)
+- [x] 4A.3 Add `AdminService.Authors(ctx context.Context)
       ([]domain.AuthorOption, error)` in `internal/content/adminread.go` as
       a thin passthrough to `s.posts.Authors(ctx)`.
-- [ ] 4A.4 Add handler `adminAuthors` in `internal/web/adminapi.go`
+- [x] 4A.4 Add handler `adminAuthors` in `internal/web/adminapi.go`
       returning `writeJSON(w, http.StatusOK, authorListResponse{Items:
       ...})` (a new small DTO type), and register
       `gr.Method(http.MethodGet, "/authors", s.jsonHandler(s.adminAuthors))`
@@ -323,31 +331,31 @@ migration needs (if any) are deferred to their own specs.
       `gr.Use(s.requireCapabilityJSON("edit_posts"))` at line 84, which
       already wraps `/posts` at line 86) — no new capability-gating
       mechanism is introduced.
-- [ ] 4A.5 Add cross-vendor contract test coverage in
+- [x] 4A.5 Add cross-vendor contract test coverage in
       `internal/storage/storagetest/admin_contract.go` for `Authors`: a
       site with N distinct post/page authors returns exactly those N
       entries; a user with zero posts/pages is excluded; ordering is by
       display name.
-- [ ] 4A.6 Write a Go handler test for `adminAuthors` in
+- [x] 4A.6 Write a Go handler test for `adminAuthors` in
       `internal/web/adminapi_test.go`: a caller without `edit_posts`
       receives `403` (matching the existing `adminPosts` capability-gating
       test pattern in the same file); a caller with `edit_posts` receives
       `200` with the expected author list.
-- [ ] 4A.7 In `web/admin/src/api/client.ts`, add an `authors()` function
+- [x] 4A.7 In `web/admin/src/api/client.ts`, add an `authors()` function
       calling `GET /admin/api/authors` and returning the typed item list,
       following the same request/response pattern `posts()` already uses.
-- [ ] 4A.8 Run `go test ./internal/storage/... ./internal/content/...
+- [x] 4A.8 Run `go test ./internal/storage/... ./internal/content/...
       ./internal/web/...` and confirm all pass.
 
 ### Task 5: Wire `client.ts`/`PostsList.tsx` to the new admin filters
 
 **Requirements:** 3.1–3.5, 3.7, 8.2
 
-- [ ] 5.1 In `web/admin/src/api/client.ts`, extend the `posts()` function's
+- [x] 5.1 In `web/admin/src/api/client.ts`, extend the `posts()` function's
       parameter type and query-string construction to include optional
       `search` and `author` fields, alongside its existing `page`,
       `perPage`, `type`, `status`.
-- [ ] 5.2 In `web/admin/src/views/PostsList.tsx`, add three new controls
+- [x] 5.2 In `web/admin/src/views/PostsList.tsx`, add three new controls
       above the existing `TableView`: a Spectrum `Picker` for `status`
       (options: All, Published, Draft, Pending, Private, Scheduled,
       mapping to the same allowed set as Task 4.2), a Spectrum
@@ -356,28 +364,28 @@ migration needs (if any) are deferred to their own specs.
       added in Task 4A.7 (each option's value is the author's numeric ID,
       its label is the author's display name — never a bare numeric-ID
       `NumberField`, per Requirement 3.7).
-- [ ] 5.3 Sync all three new controls to the URL query string using the
+- [x] 5.3 Sync all three new controls to the URL query string using the
       same `useSearchParams`/`setParams` pattern `PostsList.tsx` already
       uses for `page`; changing any filter resets `page` to `1` in the
       same `setParams` call (mirroring how the existing pagination
       controls already update the URL).
-- [ ] 5.4 Update the data-fetching effect to pass the three new params to
+- [x] 5.4 Update the data-fetching effect to pass the three new params to
       `api.posts(...)`.
-- [ ] 5.5 Write/extend React tests for `PostsList.tsx` (confirm existing
+- [x] 5.5 Write/extend React tests for `PostsList.tsx` (confirm existing
       test file via `glob "web/admin/src/views/PostsList.test.*"`, create
       if absent following the existing test-setup conventions used by
       sibling view tests): changing each filter triggers a re-fetch with
       the expected query params and resets to page 1; loading a URL with
       filters pre-populates the controls; keyboard operability of each new
       control.
-- [ ] 5.6 Run the admin frontend test suite (`vitest run`, per
+- [x] 5.6 Run the admin frontend test suite (`vitest run`, per
       `web/admin/package.json`'s `test` script) and confirm all pass.
 
 ### Task 6: Extend media filtering on the backend
 
 **Requirements:** 5.1–5.4, 4.3–4.4
 
-- [ ] 6.1 `internal/content/media.go` and `MediaService` already exist —
+- [x] 6.1 `internal/content/media.go` and `MediaService` already exist —
       `MediaService.List(ctx, filter domain.MediaFilter) ([]domain.Media, int, error)`
       (`internal/content/media.go`) already accepts a filter struct and
       already calls both `s.repo.List(ctx, filter)` and
@@ -409,7 +417,7 @@ migration needs (if any) are deferred to their own specs.
       corrects. `f.Limit`/`f.Offset` stay applied only in `listQuery` (as
       today), never in `Count`, since `Count` must ignore paging by
       definition.
-- [ ] 6.2 In `internal/web/adminapi_media.go`'s `adminMediaList`, read
+- [x] 6.2 In `internal/web/adminapi_media.go`'s `adminMediaList`, read
       `search`, `type`, `after`, `before` from the query string (`after`/
       `before` as RFC 3339 dates) and set them on the existing
       `domain.MediaFilter{...}` literal at line 70; validate `type` against
@@ -425,9 +433,9 @@ migration needs (if any) are deferred to their own specs.
       predicate set, `Total`/`TotalPages` returned here are already
       guaranteed to reflect the filtered result set — no additional handler
       logic is needed to keep them in sync.
-- [ ] 6.3 On validation failure, respond `400` using `writeJSONError`
+- [x] 6.3 On validation failure, respond `400` using `writeJSONError`
       (same helper and envelope as Task 4.3).
-- [ ] 6.4 Write Go handler tests in `internal/web/adminapi_media_test.go`
+- [x] 6.4 Write Go handler tests in `internal/web/adminapi_media_test.go`
       (extend or create, matching Task 4.4's structure): valid filter
       combinations return `200` with correctly filtered/paginated results;
       each invalid value returns `400`; a filter combination matching zero
@@ -444,24 +452,24 @@ migration needs (if any) are deferred to their own specs.
       `internal/storage/storagetest/media_contract.go` so every configured
       storage vendor is proven to apply `Search`/`Type`/`After`/`Before` to
       `Count` identically to `List` (Requirement 9's cross-vendor coverage).
-- [ ] 6.5 Run `go test ./internal/content/... ./internal/web/...
+- [x] 6.5 Run `go test ./internal/content/... ./internal/web/...
       ./internal/storage/...` and confirm all pass.
 
 ### Task 7: Rebuild `Media.tsx` with pagination, filters, and a grid/list toggle
 
 **Requirements:** 5.1–5.4, 6.1–6.4, 7.1–7.3, 8.2
 
-- [ ] 7.1 In `web/admin/src/api/client.ts`, extend `media()` to forward
+- [x] 7.1 In `web/admin/src/api/client.ts`, extend `media()` to forward
       `parentId` (currently accepted by the backend but dropped by this
       function — fix this first, it is a one-line bug fix independent of
       the rest of this task) plus the new `search`, `type`, `after`,
       `before` params from Task 6.
-- [ ] 7.2 In `web/admin/src/views/Media.tsx`, add URL-backed `page` state
+- [x] 7.2 In `web/admin/src/views/Media.tsx`, add URL-backed `page` state
       using the same `useSearchParams` pattern as `PostsList.tsx`
       (Requirement 8.2's shared-pattern requirement), replacing the
       current call `api.media({})` with one that passes `page`, `perPage`,
       and every filter's current value.
-- [ ] 7.3 Add filter controls mirroring Task 5.2's approach: a
+- [x] 7.3 Add filter controls mirroring Task 5.2's approach: a
       `SearchField` for `search`; a `Picker` for `type` (options: All,
       Image, Video, Audio, Document); `@adobe/react-spectrum`'s
       `DateRangePicker` for `after`/`before` (already available at the
@@ -473,34 +481,34 @@ migration needs (if any) are deferred to their own specs.
       100})` (the same client function `PostsList.tsx` already uses) and
       mapping each `PostListItem`'s `id`/`title` to an option, plus a
       leading "All" option that clears the `parentId` filter.
-- [ ] 7.4 Add a Spectrum `ActionButtonGroup` (or `ToggleButton` pair) for
+- [x] 7.4 Add a Spectrum `ActionButtonGroup` (or `ToggleButton` pair) for
       grid/list mode, synced to the URL query string; render **either**
       the existing `Grid` component **or** the existing `TableView`
       component for the current page's items based on this state — never
       both (fixing the current always-render-both behavior).
-- [ ] 7.5 Add previous/next pagination controls and a "Page X of Y · N
+- [x] 7.5 Add previous/next pagination controls and a "Page X of Y · N
       items" text, matching `PostsList.tsx`'s existing presentation
       exactly (same component choices, same copy pattern) so the two
       views are visually and behaviorally consistent (Requirement 8.2).
-- [ ] 7.6 Write/extend React tests for `Media.tsx`: filter changes trigger
+- [x] 7.6 Write/extend React tests for `Media.tsx`: filter changes trigger
       a re-fetch with expected query params and reset to page 1; the
       grid/list toggle renders exactly one view at a time; toggling
       persists across a reload via the URL; pagination controls behave
       like `PostsList.tsx`'s equivalent tests from Task 5.5.
-- [ ] 7.7 Run the admin frontend test suite and confirm all pass.
+- [x] 7.7 Run the admin frontend test suite and confirm all pass.
 
 ### Task 8: Extract shared pagination UI once both views work (optional refactor)
 
 **Requirements:** 8.2
 
-- [ ] 8.1 With Tasks 5 and 7 both complete, diff `PostsList.tsx`'s and
+- [x] 8.1 With Tasks 5 and 7 both complete, diff `PostsList.tsx`'s and
       `Media.tsx`'s pagination-control JSX; if they are substantially
       identical (expected, since Task 7.5 copies the pattern
       deliberately), extract a small shared `PaginationBar` component
       (new file `web/admin/src/components/PaginationBar.tsx`) taking
       `page`, `totalPages`, `total`, and an `onPageChange` callback, and
       use it from both views.
-- [ ] 8.2 Update both views' existing tests to exercise the shared
+- [x] 8.2 Update both views' existing tests to exercise the shared
       component instead of duplicating pagination-specific assertions;
       run the admin frontend test suite and confirm all pass.
 
@@ -508,21 +516,21 @@ migration needs (if any) are deferred to their own specs.
 
 **Requirements:** 9.1–9.4
 
-- [ ] 9.1 Run the full Go test suite: `go test ./...` (confirm no vendor
+- [x] 9.1 Run the full Go test suite: `go test ./...` (confirm no vendor
       is skipped by checking whatever environment variables the existing
       `storagetest` harness expects for MySQL/Postgres, per its existing
       `NewReposFunc` setup).
-- [ ] 9.2 Run the full admin frontend test suite (`vitest run`) and the
+- [x] 9.2 Run the full admin frontend test suite (`vitest run`) and the
       existing typecheck command (`tsc --noEmit`, i.e. `npm run typecheck`
       in `web/admin`); `web/admin/package.json` has no separate `lint`
       script today, so typecheck is the only additional gate.
-- [ ] 9.3 Manually load the public home page, a category archive, the
+- [x] 9.3 Manually load the public home page, a category archive, the
       admin content list, and the admin media library against a local
       build seeded with more than one page of content, at a common
       desktop width and a common mobile width; compare side-by-side
       against `main` to confirm behavioral parity with the WordPress
       workflow being matched (not pixel identity), per Requirement 9.4.
-- [ ] 9.4 Confirm no new migration file was added anywhere in the repo
+- [x] 9.4 Confirm no new migration file was added anywhere in the repo
       (`git status` shows no new file under any `migrations`-style
       directory) — M8 must ship with zero schema changes per its own
       design.

@@ -35,6 +35,72 @@ jobs:
       - name: go test (SQLite only)
         run: go test ./...
 
+  # Cross-vendor coverage. Kept as a separate job so a vendor-specific failure is
+  # attributable at a glance, and so the fast SQLite job still reports quickly.
+  #
+  # This job exists because a MySQL-only defect shipped undetected: the greenfield
+  # 0003 migration declared a prefix key longer than its column, which MySQL
+  # rejects, and it failed the fixture build for the entire MySQL contract suite
+  # (~60 subtests) across two milestones. See #37. The build-test job above runs
+  # SQLite only, and the MySQL/Postgres contract runs are gated behind DSN
+  # environment variables, so nothing here exercised them.
+  #
+  # MySQL matters most of the three: it is what real WordPress runs on, and so the
+  # vendor grimoire is most likely to be pointed at.
+  #
+  # Postgres is deliberately NOT included yet. Its contract suite currently fails
+  # (62 of 70 subtests) because seed and preflight reference the mixed-case "ID"
+  # column unquoted while the Postgres migrations declare it quoted -- tracked in
+  # #40. Add a postgres service here once that is fixed; adding it now would land
+  # this workflow permanently red.
+  cross-vendor-test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: grimoire_ci
+          MYSQL_DATABASE: grimoire_test
+        ports:
+          - 3306:3306
+        # Without a health check the job races the server's initialisation and
+        # fails intermittently on connection refused rather than on a real defect.
+        # This runs inside the mysql container, where mysqladmin is present.
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pgrimoire_ci"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+          --health-start-period=30s
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          check-latest: true
+      # Belt and braces: GitHub already waits for the service health check above
+      # before running steps. This uses a bash TCP probe rather than mysqladmin so
+      # it does not depend on a MySQL client being installed on the runner image.
+      - name: Wait for MySQL to accept connections
+        run: |
+          for i in $(seq 1 60); do
+            if (exec 3<>/dev/tcp/127.0.0.1/3306) 2>/dev/null; then
+              echo "MySQL accepting connections after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "MySQL did not accept connections within 60s"
+          exit 1
+      # multiStatements is required: the migration runner executes multi-statement
+      # .sql files. parseTime is required for DATETIME columns to scan into
+      # time.Time, the same reason the shipped MySQL config documents it.
+      - name: go test (MySQL contract)
+        env:
+          GRIMOIRE_TEST_MYSQL_DSN: "root:grimoire_ci@tcp(127.0.0.1:3306)/grimoire_test?parseTime=true&multiStatements=true"
+        run: go test ./internal/storage/storagetest/ -count=1 -v
+
   admin-freshness:
     runs-on: ubuntu-latest
     steps:

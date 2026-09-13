@@ -2,7 +2,7 @@
 
 **A Go-native, WordPress-schema-compatible CMS with a working embedded Adobe React Spectrum admin — no PHP, a swappable database backend, and WordPress-compatible content, auth, and REST surfaces.**
 
-> **Current state:** M1-M7 are implemented. The public site, embedded Adobe React Spectrum admin, WordPress-compatible content/auth/REST surfaces, revisions/autosave, and scheduled publishing all work today. REST write coverage includes posts/pages, comments, and taxonomy terms; media and user writes are not exposed.
+> **Current state:** M1-M8 are implemented. The public site, embedded Adobe React Spectrum admin, WordPress-compatible content/auth/REST surfaces, revisions/autosave, scheduled publishing, and WordPress-equivalent content browsing (public and admin pagination, admin post/media filters) all work today. REST write coverage includes posts/pages, comments, and taxonomy terms; media and user writes are not exposed.
 
 > ## What's a grimoire?
 > A *grimoire* is a wizard's book of spells and knowledge — a single authoritative
@@ -172,10 +172,26 @@ full specification.
 - ✅ **M5:** [Extensions and REST API](./plans/05-extensions-rest-api) — delivers the compiled hook system and WordPress-compatible REST surface.
 - ✅ **M6:** [Admin CRUD editor](./plans/06-admin-crud-editor) — delivers full content editing, status transitions, and optimistic concurrency in admin.
 - ✅ **M7:** [Revisions and scheduler](./plans/07-revisions-scheduler) — delivers revision history, autosave, and scheduled publishing.
+- ✅ **M8:** [Content browsing parity](./plans/wordpress-core-parity-roadmap) — delivers public and admin pagination with out-of-range 404s, admin post `search`/`status`/`author` filters, and a media library with filters and a grid/list toggle.
+- 📝 **M9:** [Routing and taxonomy parity](./plans/wordpress-core-parity-roadmap) — roadmap-level only. Covers `permalink_structure`/`category_base`/`tag_base`, core permalink tokens with canonical redirects, tag/date/author archives, and nested categories. Requires its own spec before implementation.
+- 📝 **M10:** [REST write and content safety parity](./plans/wordpress-core-parity-roadmap) — roadmap-level only. Covers a capability-aware write-boundary sanitization policy, then REST media/user writes and `content.rendered` fidelity. Requires its own spec before implementation.
 
 ## Status
 
-✅ M1-M7 are implemented.
+✅ M1-M8 are implemented.
+
+📝 M9 and M10 are scoped at roadmap level in
+[`plans/wordpress-core-parity-roadmap`](./plans/wordpress-core-parity-roadmap)
+but not implemented; each needs its own spec first.
+
+Known gaps worth knowing before adopting an existing WordPress site:
+
+- **Permalinks.** Single posts are served from one flat `/{slug}` route and
+  `permalink_structure` is ignored, so a site using any non-plain permalink
+  structure will 404 on its own published URLs. Tracked in
+  [#23](https://github.com/roboweaver/grimoire/issues/23), addressed by M9.
+- **REST writes** for media and users are not exposed (they return `501`).
+  Addressed by M10, which lands write-boundary sanitization first.
 
 ## Licensing note
 

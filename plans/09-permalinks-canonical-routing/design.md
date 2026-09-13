@@ -34,7 +34,7 @@ option reads at startup.
                                                │
                                                ├─► routing.Structure  (tokens, order, trailing slash, chi pattern)
                                                │
-router.go ◄────────── Structure.ChiPattern ────┘   register "/{y}/{m}/{d}/{slug}" alongside "/{slug}"
+router.go ◄────────── Structure.ChiPatterns ───┘   register both slash forms alongside "/{slug}"
     │
     ▼
 single handler ──► Structure.Match(path) ──► identifier (+ date parts)
@@ -121,9 +121,26 @@ type Structure struct {
 // back to Flat (Requirement 4).
 func Parse(structure, categoryBase, tagBase string) (Structure, error)
 
-// ChiPattern returns the chi route pattern for this structure, e.g.
-// "/{year}/{monthnum}/{day}/{postname}". Empty when Flat.
-func (s Structure) ChiPattern() string
+// ChiPatterns returns the chi route patterns for this structure: the form
+// without a trailing slash and the form with one, in that order. Empty when
+// Flat.
+//
+// Revised from `ChiPattern() string` during Phase 1. chi matches the two
+// slash forms as DISTINCT routes, so registering only the canonical one
+// makes chi 404 the other before any handler can redirect it -- which
+// would defeat Requirement 3.3. Both must be registered and both must
+// reach the handler, which then redirects whichever is non-canonical.
+func (s Structure) ChiPatterns() []string
+
+// ParamsFromPath splits a path into the chi-style parameter map this
+// structure would produce, without needing a router. Added in Phase 1 so
+// the canonical fixed-point property (Requirement 3.5) can be asserted in
+// a pure unit test rather than only through a live router.
+func (s Structure) ParamsFromPath(path string) (map[string]string, bool)
+
+// SupportedTokens lists the tokens this package understands, for the
+// startup warning and migrate -check's report (Requirement 4.2, 4.5).
+func SupportedTokens() []string
 
 // Match extracts the identifying component and any date components from a
 // request path already matched by ChiPattern. Returns ok=false when a
@@ -152,8 +169,8 @@ redirects to it, and `Canonical(Canonical(post))` is trivially the same string.
 
 ### `internal/web`
 
-- **`router.go`** — when `Structure` is not `Flat`, register
-  `Structure.ChiPattern()` mapped to the `single` handler, *before* the existing
+- **`router.go`** — when `Structure` is not `Flat`, register **both** patterns
+  from `Structure.ChiPatterns()` mapped to the `single` handler, *before* the existing
   `/{slug}` route. `/{slug}` stays registered, and with a non-flat structure its
   handler becomes the canonical-redirect path (Requirement 3.1) rather than a
   renderer. Registration order relative to `/category/{slug}`, `/`, `/login` and

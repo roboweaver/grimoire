@@ -16,15 +16,15 @@ implementation, matching how M5–M7 were run.
 
 ## Phase 0 — Spec
 
-- [ ] 0.1 Write `requirements.md`, `design.md`, `tasks.md` and add the row to the
+- [x] 0.1 Write `requirements.md`, `design.md`, `tasks.md` and add the row to the
       `plans/README.md` milestone index (status → Specified).
   - _Acceptance:_ All three files exist and the index links them.
-- [ ] 0.2 Open the spec PR and obtain review approval before writing code.
+- [x] 0.2 Open the spec PR and obtain review approval before writing code.
   - _Acceptance:_ PR open, CI green, approved.
 
 ## Phase 1 — `internal/routing` package (pure, no DB, no HTTP)
 
-- [ ] 1.1 Write failing table-driven tests for `routing.Parse`: the three
+- [x] 1.1 Write failing table-driven tests for `routing.Parse`: the three
       WordPress presets ("Day and name" `/%year%/%monthnum%/%day%/%postname%/`,
       "Month and name" `/%year%/%monthnum%/%postname%/`, "Post name"
       `/%postname%/`); empty structure → `Flat`; `%post_id%`-only; a structure
@@ -32,21 +32,21 @@ implementation, matching how M5–M7 were run.
       naming the token; a structure with no identifying token → `ErrUnsupported`;
       `category_base`/`tag_base` defaulting to `category`/`tag` when empty and
       overriding when set. _(Req 1.3, 1.4, 1.5, 2.1, 2.4, 4.1)_
-- [ ] 1.2 Implement `Token`, `Structure`, `Ref`, `Parse` and `ErrUnsupported`.
+- [x] 1.2 Implement `Token`, `Structure`, `Ref`, `Parse` and `ErrUnsupported`.
       `Parse` records `TrailingSlash` from whether the raw structure ends in `/`.
       _(Req 1.1, 2.1, 3.3, 4.1)_
-- [ ] 1.3 Write failing tests for `Structure.ChiPattern`: each preset maps to the
+- [x] 1.3 Write failing tests for `Structure.ChiPattern`: each preset maps to the
       expected chi pattern; `Flat` yields `""`. _(Req 2.1)_
-- [ ] 1.4 Implement `ChiPattern`. _(Req 2.1)_
-- [ ] 1.5 Write failing tests for `Structure.Match`: extracts slug/id and date
+- [x] 1.4 Implement `ChiPattern`. _(Req 2.1)_
+- [x] 1.5 Write failing tests for `Structure.Match`: extracts slug/id and date
       parts; rejects a 1-digit month or day and a non-4-digit year; rejects a
       non-numeric `%post_id%`. _(Req 2.2, 2.4)_
-- [ ] 1.6 Implement `Match`. _(Req 2.2, 2.4)_
-- [ ] 1.7 Write failing tests for `Structure.Canonical`: correct zero-padded
+- [x] 1.6 Implement `Match`. _(Req 2.2, 2.4)_
+- [x] 1.7 Write failing tests for `Structure.Canonical`: correct zero-padded
       output per preset; trailing slash present/absent per structure; and the
       **fixed-point property** — `Canonical` applied to a post, then matched and
       re-canonicalised, yields the identical string. _(Req 2.2, 3.3, 3.5)_
-- [ ] 1.8 Implement `Canonical` as the single construction site for a permalink,
+- [x] 1.8 Implement `Canonical` as the single construction site for a permalink,
       so the redirect target and the REST `link` field cannot diverge.
       _(Req 3.1, 3.3, 6.1)_
 
@@ -79,7 +79,10 @@ implementation, matching how M5–M7 were run.
 - [ ] 3.4 Write a failing test asserting that when `permalink_structure` is
       empty, no canonical redirect is issued and `/{slug}` renders `200` exactly
       as before this milestone. _(Req 1.2, 3.6)_
-- [ ] 3.5 Register `Structure.ChiPattern()` in `router.go` when not `Flat`,
+- [ ] 3.5 Register **both** patterns from `Structure.ChiPatterns()` in
+      `router.go` when not `Flat` — chi treats the two slash forms as distinct
+      routes, so registering only the canonical one would make chi `404` the
+      other before the handler could redirect it —
       ahead of the existing `/{slug}` route, leaving the relative order of
       `/category/{slug}`, `/`, `/login`, `/comment` and
       `/wp-content/uploads/*` unchanged. _(Req 2.1, 2.6)_

@@ -59,10 +59,29 @@ milestone:
   support is required.
 - **Full WordPress template-hierarchy fidelity.** M1 implements a pragmatic
   subset (`index`, `single`, `page`, `archive`, `category`). Broader hierarchy
-  parity is deferred.
+  parity is deferred. _Now assigned: **M9.F** in
+  [`wordpress-core-parity-roadmap`](./wordpress-core-parity-roadmap), because
+  M9.C/M9.D add archive routes that each need a template-resolution answer._
 - **Adopt `$wp$` as grimoire's own new-password format.** M2.1 verifies WordPress
   6.8 `$wp$` hashes in place but still issues **bcrypt** for new passwords.
   Adopting `$wp$` (HMAC-SHA384→bcrypt) for new/rehashed passwords would maximize
   WordPress round-trip compatibility and length-safety. _Deferred from M2.1;
-  owner: project lead. Target: a later auth milestone, with its own
-  `NeedsRehash` upgrade policy + tests._
+  owner: project lead. Now assigned: **M10.G**, since M10.C is the first point
+  where grimoire writes password hashes over a public API. Carries its own
+  `NeedsRehash` upgrade policy + tests, and must reconcile M10.C's "never
+  introduce a second hash scheme" wording._
+
+### Deferrals assigned to a milestone
+
+Previously these sat in milestone prose with no owning task, which is how they
+went unscheduled:
+
+| Deferred from | Item | Now |
+|---|---|---|
+| M1 | Template-hierarchy fidelity | **M9.F** |
+| M2.1 | `$wp$` for issued passwords | **M10.G** |
+| M4 | Navigation menu **editing** (read-only shipped) | **M10.F** |
+
+Still unassigned by design: the Bun dependency question above is a watch item,
+not scheduled work — it only becomes a task if a vendor Bun cannot support is
+actually required.

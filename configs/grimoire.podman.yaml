@@ -1,10 +1,13 @@
-# grimoire config for the local Podman stack, pointed at the SAME MySQL
-# database and content tree as the restored WordPress site.
+# grimoire config for running in a container against an EXISTING WordPress
+# database — the same MySQL instance and wp-content tree that WordPress itself
+# uses, rather than a greenfield grimoire schema.
 #
-# See accuweaverllc/scripts/podman-grimoire.sh for the orchestration.
+# Values here are defaults for that shape of deployment. Anything site-specific
+# is supplied at run time through GRIMOIRE_* environment variables, which
+# override this file, so the file itself stays reusable.
 
 server:
-  # Published on the host as localhost:8080 by the grimoire-pod.
+  # Container-internal port. Publish it on the host from the pod, not here.
   addr: ":8080"
 
 theme: default
@@ -12,38 +15,49 @@ theme: default
 database:
   vendor: mysql
 
-  # PLACEHOLDER ONLY. The real DSN is composed at container start by
-  # deploy/podman-entrypoint.sh, which reads the shared wp-db-password Podman
-  # secret and exports GRIMOIRE_DATABASE_DSN (env overrides this file). The
-  # password is deliberately never written here.
-  #   effective: wordpress:<secret>@tcp(wp-db-pod:3306)/wordpress?parseTime=true&charset=utf8mb4
-  # parseTime=true is mandatory, otherwise every DATETIME column fails to scan.
-  dsn: "unset:unset@tcp(wp-db-pod:3306)/wordpress?parseTime=true&charset=utf8mb4"
+  # PLACEHOLDER ONLY — override with GRIMOIRE_DATABASE_DSN.
+  #
+  # deploy/podman-entrypoint.sh composes the real DSN at container start from a
+  # mounted secret file, so the database password is never written to this file,
+  # baked into the image, or exposed in `podman inspect`.
+  #
+  # parseTime=true is mandatory: without it every DATETIME column fails to scan.
+  dsn: "unset:unset@tcp(db:3306)/wordpress?parseTime=true&charset=utf8mb4"
 
-  # The live accuweaver.com site does NOT use the "wp_" default, and the prefix
-  # is concatenated literally with no separator inserted. Its tables are
-  # "accuweaverposts", "accuweaveroptions", ... so the prefix has NO trailing
-  # underscore. Using "accuweaver_" here would look for "accuweaver_posts" and
-  # find nothing.
-  table_prefix: "accuweaver"
+  # WordPress's own default. Override with GRIMOIRE_DATABASE_TABLE_PREFIX for a
+  # site that uses anything else.
+  #
+  # Worth knowing: the prefix is concatenated literally, with no separator
+  # inserted. A site whose tables are "myprefixposts" needs "myprefix" with NO
+  # trailing underscore, while stock WordPress tables ("wp_posts") need the
+  # underscore. Getting this wrong is quiet rather than loud — grimoire finds no
+  # tables and serves an install wizard on top of a fully populated database.
+  table_prefix: "wp_"
 
 session:
   cookie_name: "grimoire_session"
-  # Served over plain HTTP on localhost, so a Secure cookie would never be sent.
+  # Leave false when serving plain HTTP; a Secure cookie would never be sent.
+  # Set GRIMOIRE_SESSION_COOKIE_SECURE=1 behind TLS.
   cookie_secure: false
   ttl_hours: 336
 
 media:
-  # Absolute path to the shared wp-content volume, the same one the wordpress
-  # container mounts. grimoire reads media *rows* from the DB but serves the
-  # *files* from here; if this is wrong, /wp-content/uploads/* and every Media
-  # admin thumbnail 404s even though the database resolves fine.
+  # Where the WordPress content tree is mounted inside the container. grimoire
+  # reads media *rows* from the database but serves the *files* from disk, so if
+  # this does not point at the real wp-content/uploads then /wp-content/uploads/*
+  # and every Media admin thumbnail 404s even though the database resolves fine.
+  #
+  # This has no GRIMOIRE_* override, so it must be correct here. The path below
+  # matches the standard WordPress container layout.
   uploads_dir: "/var/www/html/wp-content/uploads"
 
 rest:
-  # Relaxed from the default (true) because this stack is plain HTTP on
-  # localhost, where real WordPress would also refuse Application Passwords.
-  # Local development only -- do not carry this setting to a deployed host.
+  # Relaxed from the shipped default (true) because this config targets a
+  # plain-HTTP container stack, where real WordPress would also refuse
+  # Application Passwords.
+  #
+  # LOCAL DEVELOPMENT ONLY. Set this back to true, or set trusted_proxy_header,
+  # before exposing the service anywhere real.
   require_tls_for_application_passwords: false
   trusted_proxy_header: ""
   per_page_max: 100

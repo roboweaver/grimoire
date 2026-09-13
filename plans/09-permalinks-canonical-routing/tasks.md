@@ -66,16 +66,32 @@ implementation, matching how M5–M7 were run.
 
 ## Phase 2 — Published-post-by-id read path
 
-- [ ] 2.1 Write a failing `storagetest` contract case for
-      `PostRepository.ByID`: returns a published post by id; returns
+- [x] 2.1 Write a failing `storagetest` contract case for
+      `PostRepository.PublishedByID`: returns a published post by id; returns
       `domain.ErrNotFound` for an unpublished or absent id; honors the
       `types...` default of `{"post","page"}`. Runs across all three vendors,
       mirroring the existing `BySlug` contract case. _(Req 2.4, 7.3)_
-- [ ] 2.2 Add `ByID(ctx, id int64, types ...string) (Post, error)` to
+  - _Verified on SQLite **and MySQL**._ MySQL was initially blocked by
+    [#37](https://github.com/roboweaver/grimoire/issues/37), a pre-existing
+    defect in the MySQL greenfield `0003` migration (191-char prefix key on a
+    `VARCHAR(100)` column) that failed the fixture build for the **entire**
+    MySQL contract suite, not just this case — confirmed pre-existing by
+    stashing this change and re-running. Fixed in #39, and #41 added a
+    `cross-vendor-test` CI job with a MySQL service, so this case is now
+    verified on MySQL automatically on every push rather than only by hand.
+    Postgres remains blocked by [#40](https://github.com/roboweaver/grimoire/issues/40).
+- [x] 2.2 Add `PublishedByID(ctx, id int64, types ...string) (Post, error)` to
       `domain.PostRepository` and implement it in `internal/storage/wprepo`,
       reusing `BySlug`'s published-only/type-defaulting semantics. Do **not**
       reach through the write-side `PostWriter.ByID` from the public read path.
       _(Req 2.4)_
+  - _Named `PublishedByID`, not `ByID`._ The design assumed `ByID` was
+    available, but `*wprepo.PostRepo` is the single concrete type satisfying
+    **both** `PostRepository` and `PostWriter`, and `PostWriter.ByID(ctx, id)`
+    already occupies that method name — the two collide outright. The rename is
+    also the better outcome: a status-filtered lookup sitting next to a
+    status-blind one, both called `ByID`, is a trap, and the disclosure
+    difference is now unmissable at every call site.
 
 ## Phase 3 — Web wiring: route registration, resolution, canonical redirects
 

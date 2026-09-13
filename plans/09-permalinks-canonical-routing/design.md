@@ -192,8 +192,14 @@ redirects to it, and `Canonical(Canonical(post))` is trivially the same string.
   primary key **regardless of status**". Reusing it on the public path would
   serve drafts, private and trashed posts to anonymous visitors at a guessable
   URL. This design therefore adds
-  `PostRepository.ByID(ctx, id int64, types ...string) (Post, error)` mirroring
-  `BySlug`'s published-only, type-defaulting semantics. This is a correctness and
+  `PostRepository.PublishedByID(ctx, id int64, types ...string) (Post, error)`
+  mirroring `BySlug`'s published-only, type-defaulting semantics.
+
+  Named `PublishedByID` rather than `ByID` (revised during Phase 2):
+  `*wprepo.PostRepo` is the single concrete type satisfying both this port and
+  `PostWriter`, so a second `ByID` collides with the existing one outright. The
+  rename is the better outcome anyway — two same-named lookups with opposite
+  disclosure properties would be a trap. This is a correctness and
   disclosure boundary, not a layering preference.
 
 ### `internal/render`
@@ -290,7 +296,7 @@ so the SEO posture is the requirement rather than a side effect:
 2. **Handler tests, `internal/web`** — exact status and `Location` assertions for
    each row of the status-code table, using the existing handler-test fakes.
    Includes the fixed-point no-loop test and the date-mismatch 404.
-3. **Cross-vendor contract test** — `PostRepository.ByID` added to the existing
+3. **Cross-vendor contract test** — `PostRepository.PublishedByID` added to the existing
    `storagetest` contract so all three vendors are covered, matching how
    `BySlug` is already tested.
 4. **e2e** — one test in `test/e2e` booting the stack with a dated structure and
@@ -309,7 +315,7 @@ so the SEO posture is the requirement rather than a side effect:
 | Requirement | Components |
 |---|---|
 | 1 — read option set | `cmd/grimoire/main.go`, `content.OptionService`, `routing.Parse` |
-| 2 — token resolution | `routing.Structure.Match`, `routing.Ref`, `web.single`, `PostRepository.ByID` |
+| 2 — token resolution | `routing.Structure.Match`, `routing.Ref`, `web.single`, `PostRepository.PublishedByID` |
 | 3 — canonical redirects | `routing.Structure.Canonical`, `web.single`, `router.go` |
 | 4 — loud fallback | `routing.Parse` + `ErrUnsupported`, `cmd/grimoire/main.go`, `grimoire-cli migrate -check` |
 | 5 — template hierarchy | `internal/render/engine.go` `hierarchy` map |

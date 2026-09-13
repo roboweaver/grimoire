@@ -252,6 +252,77 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 		}
 	})
 
+	// PublishedByID backs the %post_id% permalink token (M9a). It mirrors BySlug's
+	// semantics deliberately: published-only, with types defaulting to
+	// {"post","page"}.
+	//
+	// The draft case is the reason this port exists rather than reusing the
+	// write-side PostWriter.ByID, whose contract is "regardless of status".
+	// With a %post_id% permalink structure the id is in the URL, so a
+	// status-blind read would serve drafts, private and trashed posts to
+	// anonymous visitors at a trivially guessable address.
+	t.Run("PublishedByID post, page, draft, absent, and type filter", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		// Resolve ids through existing reads rather than hardcoding fixture id
+		// literals, so this case survives fixture renumbering.
+		post, err := repos.Posts.BySlug(ctx, "hello-2")
+		if err != nil {
+			t.Fatalf("BySlug hello-2: %v", err)
+		}
+		page, err := repos.Posts.BySlug(ctx, "about")
+		if err != nil {
+			t.Fatalf("BySlug about: %v", err)
+		}
+
+		got, err := repos.Posts.PublishedByID(ctx, post.ID)
+		if err != nil {
+			t.Fatalf("PublishedByID published post: %v", err)
+		}
+		if got.ID != post.ID || got.Slug != "hello-2" || got.Type != "post" {
+			t.Errorf("PublishedByID post = %+v, want id=%d slug=hello-2 type=post", got, post.ID)
+		}
+
+		gotPage, err := repos.Posts.PublishedByID(ctx, page.ID)
+		if err != nil {
+			t.Fatalf("PublishedByID published page: %v", err)
+		}
+		if gotPage.Type != "page" {
+			t.Errorf("PublishedByID page type = %q, want page (default types must include page)", gotPage.Type)
+		}
+
+		// An explicit type filter must exclude a row of another type.
+		if _, err := repos.Posts.PublishedByID(ctx, page.ID, "post"); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("PublishedByID(pageID, \"post\") err = %v, want ErrNotFound", err)
+		}
+
+		if _, err := repos.Posts.PublishedByID(ctx, 9_999_999); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("PublishedByID absent err = %v, want ErrNotFound", err)
+		}
+		if _, err := repos.Posts.PublishedByID(ctx, 0); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("PublishedByID(0) err = %v, want ErrNotFound", err)
+		}
+
+		// The disclosure boundary: an unpublished row must never be readable
+		// through this port, even by exact id.
+		drafts, err := repos.AdminPosts.ListForAdmin(ctx, domain.AdminPostFilter{
+			Statuses: []string{"draft"},
+		})
+		if err != nil {
+			t.Fatalf("list drafts: %v", err)
+		}
+		if len(drafts) == 0 {
+			t.Fatal("fixtures have no draft; the disclosure case cannot be verified")
+		}
+		for _, d := range drafts {
+			if _, err := repos.Posts.PublishedByID(ctx, d.ID); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("PublishedByID(draft %d %q) err = %v, want ErrNotFound -- a draft must not be "+
+					"readable by id on the public read path", d.ID, d.Slug, err)
+			}
+		}
+	})
+
 	t.Run("ByTermSlug related published posts newest-first", func(t *testing.T) {
 		repos, cleanup := newRepos(t)
 		defer cleanup()

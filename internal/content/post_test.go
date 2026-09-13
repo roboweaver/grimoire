@@ -19,6 +19,11 @@ type fakePostRepo struct {
 	bySlugPost  domain.Post
 	bySlugErr   error
 
+	byIDID    int64
+	byIDTypes []string
+	byIDPost  domain.Post
+	byIDErr   error
+
 	termTax, termSlug     string
 	termLimit, termOffset int
 	termPosts             []domain.Post
@@ -33,6 +38,11 @@ func (f *fakePostRepo) RecentPosts(ctx context.Context, limit, offset int) ([]do
 func (f *fakePostRepo) BySlug(ctx context.Context, slug string, types ...string) (domain.Post, error) {
 	f.bySlugSlug, f.bySlugTypes = slug, types
 	return f.bySlugPost, f.bySlugErr
+}
+
+func (f *fakePostRepo) PublishedByID(ctx context.Context, id int64, types ...string) (domain.Post, error) {
+	f.byIDID, f.byIDTypes = id, types
+	return f.byIDPost, f.byIDErr
 }
 
 func (f *fakePostRepo) ByTermSlug(ctx context.Context, taxonomy, termSlug string, limit, offset int) ([]domain.Post, error) {

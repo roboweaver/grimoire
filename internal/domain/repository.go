@@ -14,6 +14,20 @@ type PostRepository interface {
 	// BySlug returns a single published post/page by its slug (post_name).
 	// When types is empty, implementations default to {"post", "page"}.
 	BySlug(ctx context.Context, slug string, types ...string) (Post, error)
+	// PublishedByID returns a single published post/page by primary key, or
+	// ErrNotFound. When types is empty, implementations default to
+	// {"post", "page"}.
+	//
+	// Named for its filter rather than called ByID, for two reasons. The
+	// concrete adapter satisfies both this port and PostWriter, whose
+	// ByID(ctx, id) returns a row *regardless of status* for editing, so the
+	// names would collide outright. More importantly the published filter is
+	// the entire point: this backs the %post_id% permalink token, where the id
+	// arrives from a visitor's URL, so a status-blind lookup would disclose
+	// drafts, private and trashed posts at a trivially guessable address. A
+	// method named ByID sitting next to one that ignores status is a trap; this
+	// name makes the difference unmissable at every call site.
+	PublishedByID(ctx context.Context, id int64, types ...string) (Post, error)
 	// ByTermSlug returns published posts related to a taxonomy term, newest first.
 	ByTermSlug(ctx context.Context, taxonomy, termSlug string, limit, offset int) ([]Post, error)
 }

@@ -1,0 +1,49 @@
+# grimoire config for the local Podman stack, pointed at the SAME MySQL
+# database and content tree as the restored WordPress site.
+#
+# See accuweaverllc/scripts/podman-grimoire.sh for the orchestration.
+
+server:
+  # Published on the host as localhost:8080 by the grimoire-pod.
+  addr: ":8080"
+
+theme: default
+
+database:
+  vendor: mysql
+
+  # PLACEHOLDER ONLY. The real DSN is composed at container start by
+  # deploy/podman-entrypoint.sh, which reads the shared wp-db-password Podman
+  # secret and exports GRIMOIRE_DATABASE_DSN (env overrides this file). The
+  # password is deliberately never written here.
+  #   effective: wordpress:<secret>@tcp(wp-db-pod:3306)/wordpress?parseTime=true&charset=utf8mb4
+  # parseTime=true is mandatory, otherwise every DATETIME column fails to scan.
+  dsn: "unset:unset@tcp(wp-db-pod:3306)/wordpress?parseTime=true&charset=utf8mb4"
+
+  # The live accuweaver.com site does NOT use the "wp_" default, and the prefix
+  # is concatenated literally with no separator inserted. Its tables are
+  # "accuweaverposts", "accuweaveroptions", ... so the prefix has NO trailing
+  # underscore. Using "accuweaver_" here would look for "accuweaver_posts" and
+  # find nothing.
+  table_prefix: "accuweaver"
+
+session:
+  cookie_name: "grimoire_session"
+  # Served over plain HTTP on localhost, so a Secure cookie would never be sent.
+  cookie_secure: false
+  ttl_hours: 336
+
+media:
+  # Absolute path to the shared wp-content volume, the same one the wordpress
+  # container mounts. grimoire reads media *rows* from the DB but serves the
+  # *files* from here; if this is wrong, /wp-content/uploads/* and every Media
+  # admin thumbnail 404s even though the database resolves fine.
+  uploads_dir: "/var/www/html/wp-content/uploads"
+
+rest:
+  # Relaxed from the default (true) because this stack is plain HTTP on
+  # localhost, where real WordPress would also refuse Application Passwords.
+  # Local development only -- do not carry this setting to a deployed host.
+  require_tls_for_application_passwords: false
+  trusted_proxy_header: ""
+  per_page_max: 100

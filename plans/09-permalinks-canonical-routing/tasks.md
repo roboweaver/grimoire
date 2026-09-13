@@ -49,6 +49,20 @@ implementation, matching how M5–M7 were run.
 - [x] 1.8 Implement `Canonical` as the single construction site for a permalink,
       so the redirect target and the REST `link` field cannot diverge.
       _(Req 3.1, 3.3, 6.1)_
+- [x] 1.9 Add an env-gated real-database permalink validation
+      (`internal/routing/realdb_test.go`), skipped unless
+      `GRIMOIRE_TEST_WP_DSN` is set, mirroring `storagetest`'s
+      `TestRealWordPressDB` gating. Reads the target site's *own*
+      `permalink_structure` rather than assuming one, derives the expected path
+      independently of `Canonical` so the implementation cannot merely agree
+      with itself, and round-trips every path back through `Match` to prove no
+      canonical URL would be redirected again.
+      _Not in the original plan._ Added because Requirement 7.4's real-data
+      validation is what proves the grammar matches how WordPress actually
+      wrote the rows — zero-padding, stored-date timezone and trailing-slash
+      form all come from data, not from the spec. Task 7.2 remains open and
+      separate: that one is the full-stack e2e check, this one is
+      resolver-level. _(Req 7.4)_
 
 ## Phase 2 — Published-post-by-id read path
 

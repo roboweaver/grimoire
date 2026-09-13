@@ -26,3 +26,12 @@ web/theme/node_modules/
 
 # Local preview runtime (db, logs)
 /data/
+
+# Local agent / analysis tooling
+# Per-machine tool config and generated analysis output, not shared project
+# state. .scout/scout.config.yaml was previously committed by accident (swept
+# into 0277754, an unrelated postgres placeholder fix) and is untracked as of
+# this change.
+.opencode/
+.scout/
+graphify-out/

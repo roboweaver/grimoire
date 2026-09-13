@@ -24,7 +24,12 @@ CREATE TABLE IF NOT EXISTS {{prefix}}comments (
   KEY comment_approved_date_gmt (comment_approved, comment_date_gmt),
   KEY comment_date_gmt (comment_date_gmt),
   KEY comment_parent (comment_parent),
-  KEY comment_author_email (comment_author_email(191)),
+  -- 10, matching WordPress core's own schema. The column is VARCHAR(100), so the
+  -- 191 used elsewhere in these migrations (the utf8mb4 767-byte index-limit
+  -- workaround, 767/4) is not merely unnecessary here but invalid: MySQL rejects
+  -- a prefix longer than the column with Error 1089. Verified against a real
+  -- WordPress database, where this index has SUB_PART = 10 on a varchar(100).
+  KEY comment_author_email (comment_author_email(10)),
   KEY user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

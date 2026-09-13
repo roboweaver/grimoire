@@ -126,6 +126,44 @@ func (r *PostRepo) BySlug(ctx context.Context, slug string, types ...string) (do
 	return row.toDomain(), nil
 }
 
+// PublishedByID returns a single published post/page by primary key. When types
+// is empty it defaults to {"post", "page"}.
+//
+// Mirrors BySlug's filters exactly, including post_status = 'publish'. That
+// status filter is the point of the method: it backs the %post_id% permalink
+// token, so the id arrives from a visitor's URL and an unfiltered lookup would
+// serve drafts, private and trashed rows to anonymous callers.
+//
+// Deliberately NOT named ByID: this same type also implements PostWriter.ByID,
+// which is status-blind by design for the editor. Two same-named lookups with
+// opposite disclosure properties would be a trap.
+func (r *PostRepo) PublishedByID(ctx context.Context, id int64, types ...string) (domain.Post, error) {
+	if len(types) == 0 {
+		types = []string{"post", "page"}
+	}
+	// Guard before querying: WordPress ids start at 1, so a non-positive id can
+	// never match and should not become a database round trip.
+	if id <= 0 {
+		return domain.Post{}, domain.ErrNotFound
+	}
+	var row postRow
+	err := r.db.NewSelect().
+		TableExpr("?", bun.Ident(r.prefix+"posts")).
+		Column(postColumns...).
+		Where("post_status = ?", "publish").
+		Where("? = ?", bun.Ident("ID"), id).
+		Where("post_type IN (?)", bun.In(types)).
+		Limit(1).
+		Scan(ctx, &row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Post{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.Post{}, err
+	}
+	return row.toDomain(), nil
+}
+
 // ByTermSlug returns published posts related to a taxonomy term, newest first.
 func (r *PostRepo) ByTermSlug(ctx context.Context, taxonomy, termSlug string, limit, offset int) ([]domain.Post, error) {
 	var rows []postRow

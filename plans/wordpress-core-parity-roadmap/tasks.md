@@ -570,7 +570,22 @@ the nested-category descendant-inclusion decision (flagged as open in
       `Term.ParentID` read path; at least one fixture-based test against an
       imported real-WordPress-database export (mirroring
       `plans/02.1-wp-hash-real-db`'s validation approach) for permalink and
-      nested-category behavior.
+      nested-category behavior. This requirement extends to 9.F below.
+- [ ] **9.F — Template-hierarchy fidelity.** Folded in from M1's deferral,
+      recorded under "Open decisions" in [`../README.md`](../README.md):
+      M1 shipped a pragmatic template subset (`index`, `single`, `page`,
+      `archive`, `category` — confirmed as the only templates in
+      `themes/default/templates/`) and broader WordPress
+      template-hierarchy parity was deferred with no milestone attached.
+      It belongs here because 9.C adds tag, date and author archive routes
+      and 9.D adds nested-category archives, and every one of those routes
+      needs a template-resolution answer: WordPress would look for
+      `tag.tmpl`, `author.tmpl`, `date.tmpl`, `category-{slug}.tmpl` and so
+      on before falling back to `archive` then `index`. Implementing 9.C/9.D
+      without deciding this means new routes silently reuse `archive.tmpl`,
+      which is a parity gap invented by omission rather than chosen.
+      Specify how much of WordPress's lookup order to support, and where
+      fallback stops, in the same dedicated design as 9.A's resolver.
 
 ---
 
@@ -632,4 +647,40 @@ Security Considerations section).
       forbidden caller) for each of 10.B/10.C's newly enabled write routes;
       a content-safety test proving 10.A's policy is applied on every
       newly enabled write route and on the pre-existing admin/comment
-      write paths it now also covers.
+      write paths it now also covers. This requirement extends to 10.F and
+      10.G below.
+- [ ] **10.F — Navigation menu editing.** Folded in from M4's deferral,
+      which shipped nav menus read-only and recorded "Menu **editing**
+      deferred" with no milestone attached. `internal/web/adminroutes.go`
+      registers only `GET /menus` and `GET /menus/{id}` today; there is no
+      write handler anywhere.
+      It belongs in M10 rather than M9 because it is a write path, not a
+      routing one: menu item titles and URLs are user-supplied content
+      crossing a write boundary, so it must land **after** 10.A and be
+      passed through the same policy. Specify the create/update/delete
+      shape for menus and menu items (including reordering and nesting via
+      `menu_order`/parent, which the read path already models as
+      `domain.NavMenuItem.Order`/`.ParentID`), and which capability gates
+      it. WordPress uses `edit_theme_options`, which already exists in
+      `internal/auth/roles.go:119` but is granted to `RoleAdministrator`
+      only — note the existing read path gates on `edit_posts` instead, so
+      decide deliberately whether editing tightens to administrator or
+      matches the read gate.
+- [ ] **10.G — `$wp$` as grimoire's issued password format.** Folded in
+      from M2.1's deferral, recorded under "Open decisions" in
+      [`../README.md`](../README.md) with "Target: a later auth milestone"
+      and no milestone attached.
+      Today `password.Hash` calls `bcrypt.GenerateFromPassword` directly,
+      so grimoire *verifies* WordPress 6.8 `$wp$` hashes but *issues* plain
+      bcrypt. On a database shared with a live WordPress install — the
+      configuration `configs/grimoire.podman.yaml` and
+      `plans/02.1-wp-hash-real-db` both target — a password changed through
+      grimoire may not round-trip back to WordPress.
+      It belongs here because 10.C enables REST user writes including
+      password fields, so this milestone is the first point where grimoire
+      writes password hashes over a public API.
+      **Note the conflict to resolve:** 10.C as written says to reuse M2's
+      handling and "never introduce a second hash scheme". Adopting `$wp$`
+      changes that scheme deliberately. Whichever way this is decided, 10.C's
+      wording must be reconciled in the same design, along with a
+      `NeedsRehash` upgrade policy for existing bcrypt rows.

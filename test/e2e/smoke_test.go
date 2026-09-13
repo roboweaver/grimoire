@@ -22,7 +22,7 @@ import (
 // then asserts the public routes render and error-map correctly.
 func TestSmoke(t *testing.T) {
 	ctx := context.Background()
-	dsn := filepath.Join(t.TempDir(), "grimoire.db")
+	dsn := testDSN(t)
 	cfg := config.DatabaseConfig{Vendor: "sqlite", DSN: dsn, TablePrefix: "wp_"}
 
 	repos, err := storage.New(cfg)

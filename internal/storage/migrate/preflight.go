@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/roboweaver/grimoire/internal/storage/rebind"
 )
 
 // RequiredTable names a WordPress table grimoire reads, together with the
@@ -120,32 +122,40 @@ func (r *PreflightReport) Err() error {
 // signal we want, and "WHERE 1=0" guarantees no rows are read even on a table
 // with a hundred thousand of them.
 //
-// Identifiers are interpolated bare rather than quoted, which is correct on all
-// three vendors despite the mixed-case WordPress column names (ID,
-// comment_post_ID): MySQL and SQLite match column names case-insensitively, and
-// Postgres folds the reference and the stored name alike to lower case because
-// grimoire's Postgres migrations declare those columns unquoted too. Quoting
-// would actively break MySQL, where double quotes denote a string literal unless
-// ANSI_QUOTES is enabled. Every table and column name here is a constant from
-// RequiredSchema; prefix is operator-supplied deployment configuration,
-// interpolated the same way the migration files substitute {{prefix}}.
-func Preflight(ctx context.Context, db *sql.DB, prefix string) (*PreflightReport, error) {
+// Identifiers are quoted per vendor via rebind.Ident, which is why Preflight
+// needs to know the vendor.
+//
+// An earlier version interpolated them bare, on the stated assumption that this
+// was safe on all three vendors "because grimoire's Postgres migrations declare
+// those columns unquoted too". That premise was false: the Postgres migrations
+// declare the mixed-case WordPress columns QUOTED (`"ID" BIGINT ...`), so the
+// stored name is upper case while a bare reference folds to lower case and
+// matches nothing. Preflight consequently reported a schema it had just built as
+// incompatible, and the same mismatch broke seeding — see the package comment on
+// rebind.Ident for the full vendor rules, including why quoting the Postgres way
+// on MySQL would silently turn a column reference into a string literal.
+//
+// Every table and column name here is a constant from RequiredSchema; prefix is
+// operator-supplied deployment configuration, and rebind.Ident escapes any
+// embedded quote character in it.
+func Preflight(ctx context.Context, db *sql.DB, vendor, prefix string) (*PreflightReport, error) {
 	report := &PreflightReport{Prefix: prefix, MissingColumns: map[string][]string{}}
 	for _, rt := range RequiredSchema() {
 		table := prefix + rt.Name
-		if !probe(ctx, db, "SELECT 1 FROM "+table+" WHERE 1=0") {
+		quotedTable := rebind.Ident(vendor, table)
+		if !probe(ctx, db, "SELECT 1 FROM "+quotedTable+" WHERE 1=0") {
 			report.MissingTables = append(report.MissingTables, table)
 			continue
 		}
 		// The table is readable, so narrow down which columns are absent. Probe
 		// them all at once first, since that is one round trip and the common
 		// case is that nothing is missing.
-		if probe(ctx, db, "SELECT "+strings.Join(rt.Columns, ", ")+" FROM "+table+" WHERE 1=0") {
+		if probe(ctx, db, "SELECT "+rebind.IdentList(vendor, rt.Columns)+" FROM "+quotedTable+" WHERE 1=0") {
 			continue
 		}
 		var missing []string
 		for _, col := range rt.Columns {
-			if !probe(ctx, db, "SELECT "+col+" FROM "+table+" WHERE 1=0") {
+			if !probe(ctx, db, "SELECT "+rebind.Ident(vendor, col)+" FROM "+quotedTable+" WHERE 1=0") {
 				missing = append(missing, col)
 			}
 		}

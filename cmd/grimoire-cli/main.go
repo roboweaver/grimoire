@@ -105,7 +105,7 @@ func runMigrate(args []string) error {
 		// Refuse to touch a database that is not actually WordPress-shaped: a
 		// wrong table_prefix or an empty database would otherwise leave a stray
 		// sessions table behind and fail confusingly later, at login.
-		report, err := migrate.Preflight(ctx, db, prefix)
+		report, err := migrate.Preflight(ctx, db, vendor, prefix)
 		if err != nil {
 			return err
 		}
@@ -140,7 +140,7 @@ func runMigrate(args []string) error {
 // reportPreflight prints a schema-compatibility summary for -check. It performs
 // only zero-row SELECTs, so it is safe to point at a production database.
 func reportPreflight(ctx context.Context, db *sql.DB, vendor, prefix string) error {
-	report, err := migrate.Preflight(ctx, db, prefix)
+	report, err := migrate.Preflight(ctx, db, vendor, prefix)
 	if err != nil {
 		return err
 	}

@@ -210,7 +210,7 @@ func RunOverlayContract(t *testing.T, vendor string, open OpenRawDB) {
 			t.Fatalf("greenfield Apply: %v", err)
 		}
 
-		report, err := migrate.Preflight(ctx, db, prefix)
+		report, err := migrate.Preflight(ctx, db, vendor, prefix)
 		if err != nil {
 			t.Fatalf("Preflight: %v", err)
 		}
@@ -236,7 +236,7 @@ func RunOverlayContract(t *testing.T, vendor string, open OpenRawDB) {
 		db, prefix, cleanup := open(t)
 		defer cleanup()
 		newStockWordPressDB(ctx, t, db, vendor, prefix)
-		report, err := migrate.Preflight(ctx, db, prefix)
+		report, err := migrate.Preflight(ctx, db, vendor, prefix)
 		if err != nil {
 			t.Fatalf("Preflight: %v", err)
 		}
@@ -248,7 +248,7 @@ func RunOverlayContract(t *testing.T, vendor string, open OpenRawDB) {
 	t.Run("preflight reports missing tables on an empty database", func(t *testing.T) {
 		db, prefix, cleanup := open(t)
 		defer cleanup()
-		report, err := migrate.Preflight(ctx, db, prefix)
+		report, err := migrate.Preflight(ctx, db, vendor, prefix)
 		if err != nil {
 			t.Fatalf("Preflight: %v", err)
 		}
@@ -276,7 +276,7 @@ func RunOverlayContract(t *testing.T, vendor string, open OpenRawDB) {
 			fmt.Sprintf(`ALTER TABLE %sposts DROP COLUMN post_password`, prefix)); err != nil {
 			t.Skipf("cannot drop a column on %s to build this fixture: %v", vendor, err)
 		}
-		report, err := migrate.Preflight(ctx, db, prefix)
+		report, err := migrate.Preflight(ctx, db, vendor, prefix)
 		if err != nil {
 			t.Fatalf("Preflight: %v", err)
 		}

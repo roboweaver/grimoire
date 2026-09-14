@@ -33,15 +33,16 @@ func Run(ctx context.Context, db *sql.DB, vendor, prefix string) error {
 			[]any{"blogname", "grimoire", "yes"}},
 		{`INSERT INTO ` + prefix + `options (option_name, option_value, autoload) VALUES (?, ?, ?)`,
 			[]any{"blogdescription", "A Go-native CMS", "yes"}},
-		{`INSERT INTO ` + prefix + `users (ID, user_login, user_nicename, display_name) VALUES (?, ?, ?, ?)`,
+		{`INSERT INTO ` + prefix + `users (` + rebind.Ident(vendor, "ID") +
+			`, user_login, user_nicename, display_name) VALUES (?, ?, ?, ?)`,
 			[]any{1, "admin", "admin", "Admin"}},
-		post(prefix, 1, "hello-world", "Hello, World", "post", "publish", "2024-01-01 09:00:00",
+		post(vendor, prefix, 1, "hello-world", "Hello, World", "post", "publish", "2024-01-01 09:00:00",
 			"<p>Welcome to grimoire, a Go-native, WordPress-compatible CMS.</p>", "The first post."),
-		post(prefix, 2, "second-post", "Second Post", "post", "publish", "2024-01-02 09:00:00",
+		post(vendor, prefix, 2, "second-post", "Second Post", "post", "publish", "2024-01-02 09:00:00",
 			"<p>Another article rendered server-side from the database.</p>", "More content."),
-		post(prefix, 3, "third-post", "Third Post", "post", "publish", "2024-01-03 09:00:00",
+		post(vendor, prefix, 3, "third-post", "Third Post", "post", "publish", "2024-01-03 09:00:00",
 			"<p>The third of three seeded posts.</p>", "Even more."),
-		post(prefix, 4, "about", "About", "page", "publish", "2024-01-04 09:00:00",
+		post(vendor, prefix, 4, "about", "About", "page", "publish", "2024-01-04 09:00:00",
 			"<p>grimoire is a single-binary CMS with a switchable database backend.</p>", "About this site."),
 		{`INSERT INTO ` + prefix + `terms (term_id, name, slug) VALUES (?, ?, ?)`,
 			[]any{1, "News", "news"}},
@@ -76,10 +77,14 @@ func alreadySeeded(ctx context.Context, db *sql.DB, vendor, prefix string) (bool
 	return n > 0, nil
 }
 
-func post(prefix string, id int64, slug, title, ptype, status, date, content, excerpt string) stmt {
+// post builds one seed INSERT. It takes vendor because the ID column is
+// mixed-case in the WordPress schema and Postgres resolves an unquoted
+// reference to a lower-case name that does not exist -- see rebind.Ident.
+func post(vendor, prefix string, id int64, slug, title, ptype, status, date, content, excerpt string) stmt {
 	return stmt{
 		q: `INSERT INTO ` + prefix + `posts ` +
-			`(ID, post_author, post_date, post_content, post_title, post_excerpt, post_status, post_name, post_type) ` +
+			`(` + rebind.Ident(vendor, "ID") +
+			`, post_author, post_date, post_content, post_title, post_excerpt, post_status, post_name, post_type) ` +
 			`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		args: []any{id, 1, date, content, title, excerpt, status, slug, ptype},
 	}

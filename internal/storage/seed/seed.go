@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/roboweaver/grimoire/internal/storage/migrate"
 	"github.com/roboweaver/grimoire/internal/storage/rebind"
 )
 
@@ -64,7 +65,17 @@ func Run(ctx context.Context, db *sql.DB, vendor, prefix string) error {
 			return fmt.Errorf("seed %q: %w", s.q, err)
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Every insert above supplies its own primary key, which on PostgreSQL
+	// leaves the identity sequences still pointing at 1. Without this the seed
+	// succeeds and then the first post or user created through the admin fails
+	// with a duplicate-key error -- see migrate.SyncIdentitySequences. It runs
+	// after the commit so the sequences are aligned with data that is actually
+	// durable.
+	return migrate.SyncIdentitySequences(ctx, db, vendor, prefix)
 }
 
 func alreadySeeded(ctx context.Context, db *sql.DB, vendor, prefix string) (bool, error) {

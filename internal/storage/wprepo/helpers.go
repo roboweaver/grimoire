@@ -110,6 +110,18 @@ func vendorOf(db *bun.DB) string {
 
 // execQuerier is the subset of database/sql used by raw write paths. Both
 // *bun.DB and bun.Tx satisfy it, so insert helpers work inside a transaction.
+//
+// Both are Bun types, never a bare *sql.DB, and that matters for placeholders:
+// Bun's ExecContext/QueryContext/QueryRowContext substitute `?` themselves and
+// then call the underlying driver with the finished SQL and *no* arguments. So
+// every query reaching this interface must keep its `?` placeholders. Passing
+// one through rebind.Rebind first is actively wrong on PostgreSQL: the rewrite
+// leaves no `?` behind, Bun's formatter short-circuits on
+// `strings.IndexByte(query, '?') == -1` and returns the text verbatim, the
+// arguments are silently dropped, and the server rejects the statement with
+// `there is no parameter $1`. rebind.Rebind belongs only on paths that hand a
+// query to database/sql directly -- migrations, seeding and the contract
+// fixtures, all of which take a *sql.DB. See rebind's package comment.
 type execQuerier interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
@@ -117,26 +129,29 @@ type execQuerier interface {
 
 // insertReturningID runs an INSERT and returns the generated primary key.
 //
-// The column list must contain only lowercase/underscore identifiers (never the
-// mixed-case "ID" column) so the unquoted SQL is valid on every vendor. On
+// cols are plain column names, quoted per vendor via rebind.IdentList, so a
+// mixed-case WordPress column such as comment_post_ID may be passed directly
+// rather than the caller having to know it needs special handling. On
 // PostgreSQL the returning expression (already vendor-quoted, e.g. `"ID"`) is
 // appended as a RETURNING clause and scanned; on SQLite and MySQL the generated
 // key comes from LastInsertId.
+//
+// Placeholders stay as `?` because q is a Bun executor -- see execQuerier.
 func insertReturningID(ctx context.Context, q execQuerier, vendor, table string, cols []string, returning string, args ...any) (int64, error) {
 	ph := make([]string, len(cols))
 	for i := range ph {
 		ph[i] = "?"
 	}
-	query := "INSERT INTO " + table + " (" + strings.Join(cols, ", ") + ") VALUES (" + strings.Join(ph, ", ") + ")"
+	query := "INSERT INTO " + table + " (" + rebind.IdentList(vendor, cols) + ") VALUES (" + strings.Join(ph, ", ") + ")"
 	if vendor == "postgres" {
 		query += " RETURNING " + returning
 		var id int64
-		if err := q.QueryRowContext(ctx, rebind.Rebind(vendor, query), args...).Scan(&id); err != nil {
+		if err := q.QueryRowContext(ctx, query, args...).Scan(&id); err != nil {
 			return 0, err
 		}
 		return id, nil
 	}
-	res, err := q.ExecContext(ctx, rebind.Rebind(vendor, query), args...)
+	res, err := q.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}

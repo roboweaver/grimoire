@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/roboweaver/grimoire/internal/domain"
-	"github.com/roboweaver/grimoire/internal/storage/rebind"
 	"github.com/uptrace/bun"
 )
 
@@ -63,7 +62,6 @@ func (r *PostTermsRepo) TermsForPost(ctx context.Context, postID int64, taxonomy
 // any mutation runs, so a rejected call never partially clears a post's
 // existing term relationships.
 func (r *PostTermsRepo) SetPostTerms(ctx context.Context, postID int64, taxonomy string, termIDs []int64) error {
-	vendor := vendorOf(r.db)
 	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		exists, err := tx.NewSelect().
 			TableExpr("?", bun.Ident(r.prefix+"posts")).
@@ -125,14 +123,14 @@ func (r *PostTermsRepo) SetPostTerms(ctx context.Context, postID int64, taxonomy
 		// Step 1: clear this taxonomy's existing relationships for postID.
 		delQ := "DELETE FROM " + r.prefix + "term_relationships WHERE object_id = ? AND term_taxonomy_id IN " +
 			"(SELECT term_taxonomy_id FROM " + r.prefix + "term_taxonomy WHERE taxonomy = ?)"
-		if _, err := tx.ExecContext(ctx, rebind.Rebind(vendor, delQ), postID, taxonomy); err != nil {
+		if _, err := tx.ExecContext(ctx, delQ, postID, taxonomy); err != nil {
 			return err
 		}
 
 		// Step 2: insert a fresh relationship row per resolved taxonomy ID.
 		insQ := "INSERT INTO " + r.prefix + "term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, 0)"
 		for _, ttID := range newTTIDs {
-			if _, err := tx.ExecContext(ctx, rebind.Rebind(vendor, insQ), postID, ttID); err != nil {
+			if _, err := tx.ExecContext(ctx, insQ, postID, ttID); err != nil {
 				return err
 			}
 		}
@@ -148,7 +146,7 @@ func (r *PostTermsRepo) SetPostTerms(ctx context.Context, postID int64, taxonomy
 				continue
 			}
 			seen[ttID] = true
-			if _, err := tx.ExecContext(ctx, rebind.Rebind(vendor, countQ), ttID, ttID); err != nil {
+			if _, err := tx.ExecContext(ctx, countQ, ttID, ttID); err != nil {
 				return err
 			}
 		}

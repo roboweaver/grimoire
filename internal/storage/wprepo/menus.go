@@ -163,20 +163,26 @@ func (r *NavMenuRepo) menuByTermID(ctx context.Context, termID int64) (domain.Na
 }
 
 func (r *NavMenuRepo) menuItems(ctx context.Context, termID int64) ([]domain.NavMenuItem, error) {
-	q := `SELECT p.ID, p.post_title, p.menu_order,
+	// pID is the alias-qualified primary key. The alias is lower case and
+	// needs no quoting, but the column does: WordPress spells it "ID", and on
+	// PostgreSQL a bare p.ID folds to p.id, which does not exist. Quoting the
+	// column alone (p."ID") is the only form valid on all three vendors --
+	// quoting the whole thing would look for a column literally named p.ID.
+	pID := "p." + rebind.Ident(vendorOf(r.db), "ID")
+	q := `SELECT ` + pID + `, p.post_title, p.menu_order,
 COALESCE(MAX(CASE WHEN pm.meta_key = '_menu_item_type' THEN pm.meta_value END), '') AS item_type,
 COALESCE(MAX(CASE WHEN pm.meta_key = '_menu_item_object' THEN pm.meta_value END), '') AS item_object,
 COALESCE(MAX(CASE WHEN pm.meta_key = '_menu_item_object_id' THEN pm.meta_value END), '0') AS object_id,
 COALESCE(MAX(CASE WHEN pm.meta_key = '_menu_item_menu_item_parent' THEN pm.meta_value END), '0') AS parent_id,
 COALESCE(MAX(CASE WHEN pm.meta_key = '_menu_item_url' THEN pm.meta_value END), '') AS item_url
 FROM ` + r.prefix + `posts p
-JOIN ` + r.prefix + `term_relationships tr ON tr.object_id = p.ID
+JOIN ` + r.prefix + `term_relationships tr ON tr.object_id = ` + pID + `
 JOIN ` + r.prefix + `term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
-LEFT JOIN ` + r.prefix + `postmeta pm ON pm.post_id = p.ID
+LEFT JOIN ` + r.prefix + `postmeta pm ON pm.post_id = ` + pID + `
 WHERE tt.taxonomy = ? AND tt.term_id = ? AND p.post_type = ?
-GROUP BY p.ID, p.post_title, p.menu_order
-ORDER BY p.menu_order ASC, p.ID ASC`
-	rows, err := r.db.QueryContext(ctx, rebind.Rebind(vendorOf(r.db), q), "nav_menu", termID, "nav_menu_item")
+GROUP BY ` + pID + `, p.post_title, p.menu_order
+ORDER BY p.menu_order ASC, ` + pID + ` ASC`
+	rows, err := r.db.QueryContext(ctx, q, "nav_menu", termID, "nav_menu_item")
 	if err != nil {
 		return nil, err
 	}

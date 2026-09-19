@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/domain"
-	"github.com/roboweaver/grimoire/internal/storage/rebind"
 	"github.com/uptrace/bun"
 )
 
@@ -43,11 +42,12 @@ func NewSessionRepo(db *bun.DB, prefix string) *SessionRepo {
 	return &SessionRepo{db: db, prefix: prefix}
 }
 
-// Create inserts a new session row. The id column is a lowercase identifier and
-// is caller-supplied (the hashed token), so a plain rebound INSERT is portable.
+// Create inserts a new session row. Every column here is a lowercase identifier
+// and the id is caller-supplied (the hashed token), so a plain INSERT with `?`
+// placeholders is portable across all three vendors.
 func (r *SessionRepo) Create(ctx context.Context, s domain.Session) error {
 	q := "INSERT INTO " + r.prefix + "sessions (id, user_id, csrf_token, created, expires) VALUES (?, ?, ?, ?, ?)"
-	_, err := r.db.ExecContext(ctx, rebind.Rebind(vendorOf(r.db), q),
+	_, err := r.db.ExecContext(ctx, q,
 		s.ID, s.UserID, s.CSRFToken, formatTS(s.Created), formatTS(s.Expires))
 	return err
 }

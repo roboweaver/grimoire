@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	"github.com/roboweaver/grimoire/internal/domain"
-	"github.com/roboweaver/grimoire/internal/storage/rebind"
 	"github.com/uptrace/bun"
 )
 
@@ -206,7 +205,7 @@ func (r *UserMetaRepo) Set(ctx context.Context, userID int64, key, value string)
 		return nil
 	}
 	q := "INSERT INTO " + r.prefix + "usermeta (user_id, meta_key, meta_value) VALUES (?, ?, ?)"
-	_, err = r.db.ExecContext(ctx, rebind.Rebind(vendorOf(r.db), q), userID, key, value)
+	_, err = r.db.ExecContext(ctx, q, userID, key, value)
 	return err
 }
 

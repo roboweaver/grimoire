@@ -13,6 +13,7 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/storage"
+	"github.com/roboweaver/grimoire/internal/storage/migrate"
 	"github.com/roboweaver/grimoire/internal/storage/rebind"
 )
 
@@ -105,24 +106,13 @@ func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error 
 			[]any{"stylesheet", "twentytwentyfive", "yes"}},
 		{`INSERT INTO ` + prefix + `options (option_name, option_value, autoload) VALUES (?, ?, ?)`,
 			[]any{"theme_mods_twentytwentyfive", `a:1:{s:18:"nav_menu_locations";a:1:{s:7:"primary";i:30;}}`, "yes"}},
-		// Only comment_ID is quoted here. The Postgres migration declares
-		// "comment_ID" quoted, so its stored name keeps its case, while
-		// comment_post_ID and comment_author_IP are declared UNQUOTED in that
-		// same file and were therefore folded to lower case -- quoting a
-		// reference to those two would not match anything. wprepo draws the same
-		// distinction (bun.Ident for comment_ID, bare for comment_post_ID), so
-		// this mirrors the repository layer rather than inventing a rule.
-		{`INSERT INTO ` + prefix + `comments (` + rebind.Ident(vendor, "comment_ID") +
-			`, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_parent, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		{commentInsert(vendor, prefix),
 			[]any{101, 1, "Alice", "alice@example.com", "https://alice.example.com", "198.51.100.1", "2024-01-01 10:00:00", "2024-01-01 10:00:00", "approved comment", "1", "Browser A", 0, 0}},
-		{`INSERT INTO ` + prefix + `comments (` + rebind.Ident(vendor, "comment_ID") +
-			`, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_parent, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		{commentInsert(vendor, prefix),
 			[]any{102, 1, "Bob", "bob@example.com", "", "198.51.100.2", "2024-01-02 10:00:00", "2024-01-02 10:00:00", "held comment", "0", "Browser B", 0, 0}},
-		{`INSERT INTO ` + prefix + `comments (` + rebind.Ident(vendor, "comment_ID") +
-			`, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_parent, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		{commentInsert(vendor, prefix),
 			[]any{103, 2, "Spammer", "spam@example.com", "", "198.51.100.3", "2024-01-03 10:00:00", "2024-01-03 10:00:00", "spam comment", "spam", "SpamBot", 0, 0}},
-		{`INSERT INTO ` + prefix + `comments (` + rebind.Ident(vendor, "comment_ID") +
-			`, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_parent, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		{commentInsert(vendor, prefix),
 			[]any{104, 2, "Trashed", "trash@example.com", "", "198.51.100.4", "2024-01-04 10:00:00", "2024-01-04 10:00:00", "trash comment", "trash", "Browser C", 0, 0}},
 		{`INSERT INTO ` + prefix + `commentmeta (comment_id, meta_key, meta_value) VALUES (?, ?, ?)`,
 			[]any{101, "_seed", "comment-101"}},
@@ -184,7 +174,11 @@ func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error 
 			return fmt.Errorf("seed %q: %w", s.q, err)
 		}
 	}
-	return nil
+	// The fixtures above pin explicit primary keys so the assertions can refer
+	// to known ids. On PostgreSQL that leaves the identity sequences at 1, which
+	// every writer contract case would then trip over as a duplicate key. This
+	// is the same call the production seed path makes, for the same reason.
+	return migrate.SyncIdentitySequences(ctx, db, vendor, prefix)
 }
 
 // postInsert takes vendor because the ID column is mixed-case in the WordPress
@@ -194,6 +188,20 @@ func postInsert(vendor, prefix string) string {
 	return `INSERT INTO ` + prefix + `posts ` +
 		`(` + rebind.Ident(vendor, "ID") +
 		`, post_author, post_date, post_content, post_title, post_excerpt, post_status, post_name, post_type, comment_status, post_parent, post_mime_type, menu_order) ` +
+		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+}
+
+// commentInsert builds the comments fixture INSERT. Three of its columns are
+// mixed-case in the WordPress schema (comment_ID, comment_post_ID,
+// comment_author_IP), so the whole list is quoted per vendor via
+// rebind.IdentList rather than singling any of them out.
+func commentInsert(vendor, prefix string) string {
+	cols := []string{
+		"comment_ID", "comment_post_ID", "comment_author", "comment_author_email",
+		"comment_author_url", "comment_author_IP", "comment_date", "comment_date_gmt",
+		"comment_content", "comment_approved", "comment_agent", "comment_parent", "user_id",
+	}
+	return `INSERT INTO ` + prefix + `comments (` + rebind.IdentList(vendor, cols) + `) ` +
 		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 }
 
@@ -679,6 +687,61 @@ func runSessionContract(t *testing.T, newRepos NewReposFunc) {
 func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 	t.Helper()
 	ctx := context.Background()
+
+	// The fixtures assign explicit primary keys, and the generated key must
+	// continue past them rather than restart at 1. The three vendors get there
+	// differently -- MySQL advances AUTO_INCREMENT, SQLite tracks the maximum
+	// rowid, and PostgreSQL needs its identity sequence realigned by
+	// migrate.SyncIdentitySequences -- so this is asserted once here rather than
+	// trusted per vendor.
+	//
+	// Without it the symptom is a bare duplicate-key error from whichever writer
+	// case happens to run first, which says nothing about the cause.
+	t.Run("generated ids continue past explicitly seeded ones", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+
+		// Highest ids pinned by SeedFixtures: menu items reach 304 in posts,
+		// comments reach 104, and users has only id 1.
+		const highestSeededPostID = 304
+		const highestSeededCommentID = 104
+		const highestSeededUserID = 1
+
+		postID, err := repos.PostWriter.Create(ctx, domain.Post{
+			Author: 1, Date: time.Date(2024, 8, 1, 0, 0, 0, 0, time.UTC),
+			Title: "Sequence Probe", Status: "draft", Slug: "sequence-probe",
+			Type: "post", CommentStatus: "open",
+		})
+		if err != nil {
+			t.Fatalf("PostWriter.Create: %v", err)
+		}
+		if postID <= highestSeededPostID {
+			t.Errorf("generated post id = %d, want > %d (the key generator is "+
+				"behind the seeded rows)", postID, highestSeededPostID)
+		}
+
+		userID, err := repos.Users.Create(ctx, domain.User{
+			Login: "seqprobe", Nicename: "seqprobe", DisplayName: "Seq Probe",
+			Email: "seqprobe@example.com", Registered: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatalf("Users.Create: %v", err)
+		}
+		if userID <= highestSeededUserID {
+			t.Errorf("generated user id = %d, want > %d", userID, highestSeededUserID)
+		}
+
+		commentID, err := repos.CommentWriter.Create(ctx, domain.Comment{
+			PostID: 1, Author: "Seq Probe", AuthorEmail: "seqprobe@example.com",
+			Content: "probe", Status: "1", Date: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatalf("CommentWriter.Create: %v", err)
+		}
+		if commentID <= highestSeededCommentID {
+			t.Errorf("generated comment id = %d, want > %d", commentID, highestSeededCommentID)
+		}
+	})
 
 	t.Run("PostWriter Create, Update, Delete", func(t *testing.T) {
 		repos, cleanup := newRepos(t)

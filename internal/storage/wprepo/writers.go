@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/domain"
-	"github.com/roboweaver/grimoire/internal/storage/rebind"
 	"github.com/uptrace/bun"
 )
 
@@ -131,7 +130,7 @@ func (r *TermRepo) Create(ctx context.Context, t domain.Term) (int64, error) {
 		termID = id
 		q := "INSERT INTO " + r.prefix + "term_taxonomy " +
 			"(term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?)"
-		_, err = tx.ExecContext(ctx, rebind.Rebind(vendor, q), termID, t.Taxonomy, "", 0, 0)
+		_, err = tx.ExecContext(ctx, q, termID, t.Taxonomy, "", 0, 0)
 		return err
 	})
 	if err != nil {
@@ -171,19 +170,18 @@ func (r *TermRepo) Update(ctx context.Context, t domain.Term) error {
 // at those taxonomy rows, all in one transaction. It returns ErrNotFound when no
 // term has the given term_id.
 func (r *TermRepo) Delete(ctx context.Context, id int64) error {
-	vendor := vendorOf(r.db)
 	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		relQ := "DELETE FROM " + r.prefix + "term_relationships WHERE term_taxonomy_id IN " +
 			"(SELECT term_taxonomy_id FROM " + r.prefix + "term_taxonomy WHERE term_id = ?)"
-		if _, err := tx.ExecContext(ctx, rebind.Rebind(vendor, relQ), id); err != nil {
+		if _, err := tx.ExecContext(ctx, relQ, id); err != nil {
 			return err
 		}
 		ttQ := "DELETE FROM " + r.prefix + "term_taxonomy WHERE term_id = ?"
-		if _, err := tx.ExecContext(ctx, rebind.Rebind(vendor, ttQ), id); err != nil {
+		if _, err := tx.ExecContext(ctx, ttQ, id); err != nil {
 			return err
 		}
 		termQ := "DELETE FROM " + r.prefix + "terms WHERE term_id = ?"
-		res, err := tx.ExecContext(ctx, rebind.Rebind(vendor, termQ), id)
+		res, err := tx.ExecContext(ctx, termQ, id)
 		if err != nil {
 			return err
 		}
@@ -212,7 +210,7 @@ func (r *OptionRepo) Set(ctx context.Context, name, value string) error {
 		return nil
 	}
 	q := "INSERT INTO " + r.prefix + "options (option_name, option_value, autoload) VALUES (?, ?, ?)"
-	_, err = r.db.ExecContext(ctx, rebind.Rebind(vendorOf(r.db), q), name, value, "yes")
+	_, err = r.db.ExecContext(ctx, q, name, value, "yes")
 	return err
 }
 

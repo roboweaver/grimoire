@@ -34,4 +34,5 @@ web/theme/node_modules/
 # this change.
 .opencode/
 .scout/
+.kiro/
 graphify-out/

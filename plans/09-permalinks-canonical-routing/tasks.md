@@ -99,31 +99,60 @@ implementation, matching how M5–M7 were run.
 
 ## Phase 3 — Web wiring: route registration, resolution, canonical redirects
 
-- [ ] 3.1 Write failing handler tests covering every row of `design.md`'s
+- [x] 3.1 Write failing handler tests covering every row of `design.md`'s
       status-code table: canonical path → `200`; non-canonical but matching →
       `301` with exact `Location`; flat `/{slug}` while a structure is configured
       → `301`; date components contradicting the post → `404`; matching path with
       no such published post → `404`; unmatched path → `404`.
       _(Req 2.3, 2.5, 2.6, 3.1, 3.2)_
-- [ ] 3.2 Write a failing test asserting a request already at the canonical path
+- [x] 3.2 Write a failing test asserting a request already at the canonical path
       issues **no** redirect, guarding against a redirect loop.
       _(Req 3.5)_
-- [ ] 3.3 Write a failing test asserting the query string survives a canonical
+- [x] 3.3 Write a failing test asserting the query string survives a canonical
       redirect. _(Req 3.4)_
-- [ ] 3.4 Write a failing test asserting that when `permalink_structure` is
+- [x] 3.4 Write a failing test asserting that when `permalink_structure` is
       empty, no canonical redirect is issued and `/{slug}` renders `200` exactly
       as before this milestone. _(Req 1.2, 3.6)_
-- [ ] 3.5 Register **both** patterns from `Structure.ChiPatterns()` in
+- [x] 3.5 Register **both** patterns from `Structure.ChiPatterns()` in
       `router.go` when not `Flat` — chi treats the two slash forms as distinct
       routes, so registering only the canonical one would make chi `404` the
       other before the handler could redirect it —
       ahead of the existing `/{slug}` route, leaving the relative order of
       `/category/{slug}`, `/`, `/login`, `/comment` and
       `/wp-content/uploads/*` unchanged. _(Req 2.1, 2.6)_
-- [ ] 3.6 Extend `single` in `handlers.go`: build a `Ref`, resolve by slug or id,
+- [x] 3.6 Extend `single` in `handlers.go`: build a `Ref`, resolve by slug or id,
       verify date components against `post.Date`, compare the request path to
       `Canonical(post)`, and `301` on mismatch preserving the query string.
       Flat behavior must be byte-for-byte unchanged. _(Req 2.3, 2.5, 3.1-3.4)_
+  - _The `Ref` is built from the request path, not from chi's parameters._ The
+    plan assumed the chi parameter names would be available, and for the dated
+    presets they are. For a single-segment structure such as `/%postname%/` they
+    are not: `/{postname}` and the existing `/{slug}` are the same node in chi's
+    tree, and chi resolves that collision **silently in favor of whichever was
+    registered last** rather than panicking — verified directly against chi v5.
+    The consequence is that the two slash forms of one post arrive under
+    different parameter names (`/hello-1` as `slug`, `/hello-1/` as `postname`).
+    Reading `r.URL.Path` through `ParamsFromPath` — added in Phase 1 for exactly
+    this kind of caller — is independent of which route won, so the handler is
+    correct without depending on chi's conflict-resolution order. The flat
+    `slug` parameter is still the fallback for requests whose segment count the
+    structure does not produce, which is what makes Requirement 3.1's redirect
+    reachable.
+  - _Two additions the task list did not anticipate, both small and both
+    required:_ `content.PostService.PublishedByID` (the Phase 2 repository method
+    had no service-level wrapper, so `%post_id%` had nothing to call), and a
+    guard in `routing.Match`. `Match` previously returned early only on `Flat`,
+    but `false` is the zero value of a bool, so a zero-value `Structure` reported
+    a **successful match carrying an empty `Ref`**. `ChiPatterns` and `Canonical`
+    already guarded on `len(segments) == 0`; `Match` now does too, and
+    `web.NewServer` seeds its structure from `routing.Parse("", "", "")` so a
+    `Server` that never saw `WithPermalinks` holds a real flat structure rather
+    than an ambiguous zero value.
+  - _Verified by mutation rather than only by passing._ Five deliberate breakages
+    were each confirmed to fail the new tests: never redirecting (8 subtests),
+    disabling the year comparison (1), returning `302` instead of `301` (8),
+    dropping the query string (4), and removing the date verification entirely
+    (2).
 
 ## Phase 4 — Template hierarchy (9.F)
 

@@ -7,7 +7,40 @@ import (
 	"testing"
 )
 
+// resetGlobalForTest empties the process-wide registry for the duration of one
+// test and restores whatever was in it when the test finishes.
+//
+// The registry is deliberately global and append-only: extensions register from
+// package-level init() and never unregister, which is the right shape for
+// production but makes tests that register against a fixed hook name stateful.
+// Without this, a second iteration of the same test binary (`go test -count=2`)
+// sees the first iteration's callbacks still in the chain, and tests that assert
+// on chain composition fail -- a false positive precisely when -count=N is being
+// used to hunt a real flake elsewhere. See issue #47.
+//
+// Deliberately unexported and test-only: production code has no business
+// clearing the registry, so there is nothing to misuse. Registrations are
+// saved and restored rather than dropped so this stays correct if the package
+// ever gains an init() registrant of its own.
+func resetGlobalForTest(t *testing.T) {
+	t.Helper()
+
+	global.mu.Lock()
+	prevActions, prevFilters := global.actions, global.filters
+	global.actions = make(map[string][]ActionFunc)
+	global.filters = make(map[string][]filterFunc)
+	global.mu.Unlock()
+
+	t.Cleanup(func() {
+		global.mu.Lock()
+		global.actions, global.filters = prevActions, prevFilters
+		global.mu.Unlock()
+	})
+}
+
 func TestDoAction_RunsInRegistrationOrder(t *testing.T) {
+	resetGlobalForTest(t)
+
 	hook := "test.action.order"
 	var mu sync.Mutex
 	var got []int
@@ -36,6 +69,8 @@ func TestDoAction_RunsInRegistrationOrder(t *testing.T) {
 }
 
 func TestDoAction_PanicRecoveredDoesNotStopLaterActions(t *testing.T) {
+	resetGlobalForTest(t)
+
 	hook := "test.action.panic"
 	var mu sync.Mutex
 	var ran []string
@@ -63,11 +98,17 @@ func TestDoAction_PanicRecoveredDoesNotStopLaterActions(t *testing.T) {
 }
 
 func TestDoAction_UnregisteredHookIsNoOp(t *testing.T) {
+	// Reset makes "unregistered" a fact about the registry rather than a bet
+	// that no other test ever picks this hook name.
+	resetGlobalForTest(t)
+
 	// Must not panic and must simply do nothing.
 	DoAction(context.Background(), "test.action.unregistered.never-registered", "payload")
 }
 
 func TestApplyFilters_ChainsInRegistrationOrder(t *testing.T) {
+	resetGlobalForTest(t)
+
 	hook := "test.filter.chain"
 	RegisterFilter(hook, func(ctx context.Context, v int) (int, error) {
 		return v + 1, nil
@@ -86,9 +127,20 @@ func TestApplyFilters_ChainsInRegistrationOrder(t *testing.T) {
 	}
 }
 
+// errFilterFailed is a package-level sentinel rather than a per-call
+// errors.New so that errors.Is compares against one stable identity for the
+// whole binary run. A fresh errors.New per iteration produced a uniquely
+// confusing failure under -count=2: the first iteration's error reached the
+// second iteration's errors.Is check, and since the two instances carry the
+// same message the report read "expected sentinel error, got filter failed"
+// -- the same text on both sides. See issue #47.
+var errFilterFailed = errors.New("filter failed")
+
 func TestApplyFilters_ErrorShortCircuitsChain(t *testing.T) {
+	resetGlobalForTest(t)
+
 	hook := "test.filter.error"
-	sentinel := errors.New("filter failed")
+	sentinel := errFilterFailed
 	var thirdCalled bool
 
 	RegisterFilter(hook, func(ctx context.Context, v int) (int, error) {
@@ -117,6 +169,8 @@ func TestApplyFilters_ErrorShortCircuitsChain(t *testing.T) {
 }
 
 func TestApplyFilters_PanicRecoveredShortCircuitsAndReturnsPrePanicValue(t *testing.T) {
+	resetGlobalForTest(t)
+
 	hook := "test.filter.panic"
 	var thirdCalled bool
 
@@ -144,6 +198,9 @@ func TestApplyFilters_PanicRecoveredShortCircuitsAndReturnsPrePanicValue(t *test
 }
 
 func TestApplyFilters_UnregisteredHookReturnsInputUnchanged(t *testing.T) {
+	// See TestDoAction_UnregisteredHookIsNoOp for why this resets.
+	resetGlobalForTest(t)
+
 	got, err := ApplyFilters(context.Background(), "test.filter.unregistered.never-registered", "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -154,6 +211,8 @@ func TestApplyFilters_UnregisteredHookReturnsInputUnchanged(t *testing.T) {
 }
 
 func TestRegistry_ConcurrentAccessIsRaceFree(t *testing.T) {
+	resetGlobalForTest(t)
+
 	hook := "test.concurrent"
 	RegisterAction(hook, func(ctx context.Context, payload any) {})
 	RegisterFilter(hook, func(ctx context.Context, v int) (int, error) {

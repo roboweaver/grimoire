@@ -1,7 +1,7 @@
 GO ?= go
 CONFIG ?= configs/grimoire.sqlite.yaml
 
-.PHONY: fmt vet build test run migrate seed tidy admin theme-css
+.PHONY: fmt vet build test test-isolation run migrate seed tidy admin theme-css
 
 fmt:
 	gofmt -l -w .
@@ -14,6 +14,11 @@ build:
 
 test:
 	$(GO) test ./...
+
+# test-isolation mirrors the CI isolation probe: running the suite twice in one
+# binary surfaces tests that leak into process-global state. See ci.yml.
+test-isolation:
+	$(GO) test -count=2 ./...
 
 tidy:
 	$(GO) mod tidy

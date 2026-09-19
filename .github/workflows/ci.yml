@@ -48,11 +48,11 @@ jobs:
   # MySQL matters most of the three: it is what real WordPress runs on, and so the
   # vendor grimoire is most likely to be pointed at.
   #
-  # Postgres is deliberately NOT included yet. Its contract suite currently fails
-  # (62 of 70 subtests) because seed and preflight reference the mixed-case "ID"
-  # column unquoted while the Postgres migrations declare it quoted -- tracked in
-  # #40. Add a postgres service here once that is fixed; adding it now would land
-  # this workflow permanently red.
+  # Postgres was held out of this job while its contract suite was failing (#40,
+  # then #42) so the workflow would not land permanently red. Both are fixed, so
+  # all three vendors now run here on every push -- which is the point: every
+  # Postgres defect those two issues covered was reachable only by setting a DSN
+  # locally, and so went unnoticed for several milestones.
   cross-vendor-test:
     runs-on: ubuntu-latest
     services:
@@ -72,6 +72,22 @@ jobs:
           --health-timeout=5s
           --health-retries=20
           --health-start-period=30s
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: grimoire_ci
+          POSTGRES_USER: grimoire
+          POSTGRES_DB: grimoire_test
+        ports:
+          - 5432:5432
+        # Same reasoning as the MySQL health check above; pg_isready ships in the
+        # postgres image.
+        options: >-
+          --health-cmd="pg_isready -U grimoire -d grimoire_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+          --health-start-period=10s
     steps:
       - uses: actions/checkout@v4
       - name: Set up Go
@@ -79,26 +95,37 @@ jobs:
         with:
           go-version: "1.26"
           check-latest: true
-      # Belt and braces: GitHub already waits for the service health check above
-      # before running steps. This uses a bash TCP probe rather than mysqladmin so
-      # it does not depend on a MySQL client being installed on the runner image.
-      - name: Wait for MySQL to accept connections
+      # Belt and braces: GitHub already waits for the service health checks above
+      # before running steps. This uses bash TCP probes rather than the vendors'
+      # own clients so it does not depend on either being installed on the runner
+      # image.
+      - name: Wait for the database services to accept connections
         run: |
-          for i in $(seq 1 60); do
-            if (exec 3<>/dev/tcp/127.0.0.1/3306) 2>/dev/null; then
-              echo "MySQL accepting connections after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "MySQL did not accept connections within 60s"
-          exit 1
-      # multiStatements is required: the migration runner executes multi-statement
-      # .sql files. parseTime is required for DATETIME columns to scan into
-      # time.Time, the same reason the shipped MySQL config documents it.
-      - name: go test (MySQL contract)
+          wait_for() {
+            name=$1 port=$2
+            for i in $(seq 1 60); do
+              if (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+                echo "$name accepting connections after ${i}s"
+                return 0
+              fi
+              sleep 1
+            done
+            echo "$name did not accept connections within 60s"
+            return 1
+          }
+          wait_for MySQL 3306
+          wait_for PostgreSQL 5432
+      # Both DSNs are set for a single run so the contract suite exercises every
+      # vendor in one pass: SQLite always, MySQL and Postgres because their DSN
+      # variables are present.
+      #
+      # multiStatements is required for MySQL: the migration runner executes
+      # multi-statement .sql files. parseTime is required for DATETIME columns to
+      # scan into time.Time, the same reason the shipped MySQL config documents it.
+      - name: go test (cross-vendor contract)
         env:
           GRIMOIRE_TEST_MYSQL_DSN: "root:grimoire_ci@tcp(127.0.0.1:3306)/grimoire_test?parseTime=true&multiStatements=true"
+          GRIMOIRE_TEST_POSTGRES_DSN: "postgres://grimoire:grimoire_ci@127.0.0.1:5432/grimoire_test?sslmode=disable"
         run: go test ./internal/storage/storagetest/ -count=1 -v
 
   admin-freshness:

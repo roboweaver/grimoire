@@ -71,15 +71,19 @@ implementation, matching how M5–M7 were run.
       `domain.ErrNotFound` for an unpublished or absent id; honors the
       `types...` default of `{"post","page"}`. Runs across all three vendors,
       mirroring the existing `BySlug` contract case. _(Req 2.4, 7.3)_
-  - _Verified on SQLite **and MySQL**._ MySQL was initially blocked by
-    [#37](https://github.com/roboweaver/grimoire/issues/37), a pre-existing
-    defect in the MySQL greenfield `0003` migration (191-char prefix key on a
-    `VARCHAR(100)` column) that failed the fixture build for the **entire**
-    MySQL contract suite, not just this case — confirmed pre-existing by
-    stashing this change and re-running. Fixed in #39, and #41 added a
-    `cross-vendor-test` CI job with a MySQL service, so this case is now
-    verified on MySQL automatically on every push rather than only by hand.
-    Postgres remains blocked by [#40](https://github.com/roboweaver/grimoire/issues/40).
+  - _Verified on all three vendors._ Two vendors were initially blocked by
+    pre-existing defects that failed the fixture build for their **entire**
+    contract suite rather than just this case, both confirmed pre-existing by
+    stashing this change and re-running:
+    [#37](https://github.com/roboweaver/grimoire/issues/37) on MySQL (a 191-char
+    prefix key on a `VARCHAR(100)` column in the greenfield `0003` migration,
+    fixed in #39), then
+    [#40](https://github.com/roboweaver/grimoire/issues/40) and
+    [#42](https://github.com/roboweaver/grimoire/issues/42) on Postgres
+    (identifier quoting, then a cluster of repository-layer defects). All are
+    fixed, and the `cross-vendor-test` CI job now runs MySQL and Postgres
+    services alongside SQLite, so this case is verified on every vendor on every
+    push rather than only by hand.
 - [x] 2.2 Add `PublishedByID(ctx, id int64, types ...string) (Post, error)` to
       `domain.PostRepository` and implement it in `internal/storage/wprepo`,
       reusing `BySlug`'s published-only/type-defaulting semantics. Do **not**

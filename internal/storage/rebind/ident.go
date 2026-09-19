@@ -15,14 +15,24 @@ import "strings"
 // load-bearing rather than cosmetic:
 //
 //   - Postgres folds an UNQUOTED identifier to lower case and preserves a
-//     QUOTED one. grimoire's Postgres migrations declare these columns quoted,
-//     so the stored name is upper case; referencing them unquoted resolves to a
-//     lower-case name that does not exist. That mismatch is what broke seeding
-//     and preflight on Postgres entirely.
+//     QUOTED one. grimoire's Postgres migrations declare every one of these
+//     columns quoted, so the stored name keeps WordPress's case; referencing
+//     them unquoted resolves to a lower-case name that does not exist. That
+//     mismatch is what broke seeding and preflight on Postgres entirely.
+//
+//     "Every one" is worth stating because it was not always true.
+//     comment_post_ID and comment_author_IP were originally declared bare in
+//     the 0003 migration while "ID" and "comment_ID" beside them were quoted,
+//     which meant a caller had to know, per column, which style had been used —
+//     and callers duly got it wrong in both directions. The migration was
+//     normalised so quoting can be applied unconditionally to any WordPress
+//     column name.
+//
 //   - MySQL quotes with BACKTICKS. A double-quoted identifier is a string
 //     literal unless ANSI_QUOTES is enabled, so quoting the Postgres way on
 //     MySQL silently turns a column reference into a constant — a wrong answer
 //     rather than an error.
+//
 //   - SQLite accepts double quotes and is case-insensitive for column names.
 //
 // Only Postgres is quoted. MySQL and SQLite match column names

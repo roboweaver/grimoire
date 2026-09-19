@@ -137,10 +137,15 @@ go test ./...   # SQLite unit + contract + e2e tests, no external services
 ```
 
 The cross-vendor contract suite runs against MySQL and PostgreSQL only when their
-DSNs are provided; otherwise those runners skip:
+DSNs are provided; otherwise those runners skip. CI supplies both, so all three
+vendors are exercised on every push.
+
+`multiStatements=true` is required on MySQL because the migration runner executes
+multi-statement `.sql` files, and `parseTime=true` is required for `DATETIME`
+columns to scan into `time.Time`:
 
 ```bash
-GRIMOIRE_TEST_MYSQL_DSN='user:pass@tcp(127.0.0.1:3306)/grimoire_test?parseTime=true' \
+GRIMOIRE_TEST_MYSQL_DSN='user:pass@tcp(127.0.0.1:3306)/grimoire_test?parseTime=true&multiStatements=true' \
 GRIMOIRE_TEST_POSTGRES_DSN='postgres://user:pass@127.0.0.1:5432/grimoire_test?sslmode=disable' \
   go test ./internal/storage/storagetest/... -v
 ```

@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	"github.com/roboweaver/grimoire/internal/domain"
-	"github.com/roboweaver/grimoire/internal/storage/rebind"
 	"github.com/uptrace/bun"
 )
 
@@ -71,7 +70,7 @@ func (r *CommentRepo) List(ctx context.Context, f domain.CommentFilter) ([]domai
 		TableExpr("?", bun.Ident(r.prefix+"comments")).
 		Column(commentColumns...)
 	if f.PostID != 0 {
-		q = q.Where("comment_post_ID = ?", f.PostID)
+		q = q.Where("? = ?", bun.Ident("comment_post_ID"), f.PostID)
 	}
 	if len(f.Statuses) > 0 {
 		q = q.Where("comment_approved IN (?)", bun.In(f.Statuses))
@@ -100,7 +99,7 @@ func (r *CommentRepo) List(ctx context.Context, f domain.CommentFilter) ([]domai
 func (r *CommentRepo) Count(ctx context.Context, f domain.CommentFilter) (int, error) {
 	q := r.db.NewSelect().TableExpr("?", bun.Ident(r.prefix+"comments"))
 	if f.PostID != 0 {
-		q = q.Where("comment_post_ID = ?", f.PostID)
+		q = q.Where("? = ?", bun.Ident("comment_post_ID"), f.PostID)
 	}
 	if len(f.Statuses) > 0 {
 		q = q.Where("comment_approved IN (?)", bun.In(f.Statuses))
@@ -113,7 +112,7 @@ func (r *CommentRepo) ByID(ctx context.Context, id int64) (domain.Comment, error
 	err := r.db.NewSelect().
 		TableExpr("?", bun.Ident(r.prefix+"comments")).
 		Column(commentColumns...).
-		Where("comment_ID = ?", id).
+		Where("? = ?", bun.Ident("comment_ID"), id).
 		Limit(1).
 		Scan(ctx, &row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -143,7 +142,7 @@ func (r *CommentRepo) UpdateStatus(ctx context.Context, id int64, status string)
 	res, err := r.db.NewUpdate().
 		TableExpr("?", bun.Ident(r.prefix+"comments")).
 		Set("comment_approved = ?", status).
-		Where("comment_ID = ?", id).
+		Where("? = ?", bun.Ident("comment_ID"), id).
 		Exec(ctx)
 	if err != nil {
 		return err
@@ -151,7 +150,7 @@ func (r *CommentRepo) UpdateStatus(ctx context.Context, id int64, status string)
 	return errNotFoundIfMissing(ctx, res, func(ctx context.Context) (bool, error) {
 		return r.db.NewSelect().
 			TableExpr("?", bun.Ident(r.prefix+"comments")).
-			Where("comment_ID = ?", id).
+			Where("? = ?", bun.Ident("comment_ID"), id).
 			Exists(ctx)
 	})
 }
@@ -202,7 +201,7 @@ func (r *CommentMetaRepo) Set(ctx context.Context, commentID int64, key, value s
 		return nil
 	}
 	q := "INSERT INTO " + r.prefix + "commentmeta (comment_id, meta_key, meta_value) VALUES (?, ?, ?)"
-	_, err = r.db.ExecContext(ctx, rebind.Rebind(vendorOf(r.db), q), commentID, key, value)
+	_, err = r.db.ExecContext(ctx, q, commentID, key, value)
 	return err
 }
 

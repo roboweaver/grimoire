@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -383,6 +384,22 @@ func insertSession(ctx context.Context, t *testing.T, db *sql.DB, vendor, prefix
 // columnsOf returns table's column names as the driver reports them, via a
 // zero-row SELECT *. This works identically on all three vendors, unlike
 // information_schema or pragma introspection.
+//
+// The result is cloned, and that is load-bearing rather than tidiness. On
+// PostgreSQL, pgdriver builds the column names as unsafe strings pointing into a
+// single shared byte buffer held by a rowDescription, and returns that
+// rowDescription to a sync.Pool when the rows are closed. A later query that
+// draws the same object from the pool refills the buffer IN PLACE, which mutates
+// the []string a previous Columns() call handed out. Callers here keep the names
+// well past Close -- the whole point is to compare a before snapshot against an
+// after one -- so without the copy the "before" values quietly change into
+// whatever was queried next.
+//
+// The symptom was a rare, confusing failure claiming the overlay had renamed the
+// columns of the WordPress tables, with a "before" list containing names from
+// unrelated queries (such as max, from the migration runner's
+// SELECT MAX(version)). database/sql does not promise Columns() stays valid
+// after Close, so copying is the caller's job.
 func columnsOf(ctx context.Context, t *testing.T, db *sql.DB, table string) []string {
 	t.Helper()
 	rows, err := db.QueryContext(ctx, "SELECT * FROM "+table+" WHERE 1=0")
@@ -394,7 +411,7 @@ func columnsOf(ctx context.Context, t *testing.T, db *sql.DB, table string) []st
 	if err != nil {
 		t.Fatalf("columns of %s: %v", table, err)
 	}
-	return cols
+	return slices.Clone(cols)
 }
 
 // countRows returns the number of rows in table.
@@ -419,8 +436,11 @@ func tableReadable(ctx context.Context, db *sql.DB, table string) bool {
 
 // sameStrings compares two string slices as multisets, so a vendor reporting
 // columns in a different order does not fail a comparison about which columns
-// exist. Comparison is case-insensitive because Postgres folds the mixed-case
-// WordPress column names (ID, comment_post_ID) to lower case.
+// exist. Comparison is case-insensitive so that a database whose mixed-case
+// WordPress columns (ID, comment_post_ID) were folded to lower case still
+// compares equal to one that preserved their case: grimoire's own Postgres
+// migrations declare them quoted and so preserve case, but a database created
+// by some other tool may not have, and either is readable.
 func sameStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

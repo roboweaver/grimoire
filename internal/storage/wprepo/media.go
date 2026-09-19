@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/roboweaver/grimoire/internal/domain"
-	"github.com/roboweaver/grimoire/internal/storage/rebind"
 	"github.com/uptrace/bun"
 )
 
@@ -15,11 +14,6 @@ var (
 	_ domain.MediaRepository = (*MediaRepo)(nil)
 	_ domain.MediaWriter     = (*MediaRepo)(nil)
 )
-
-var mediaColumns = []string{
-	`p.ID`, `p.post_title`, `pm.meta_value AS filename`, `p.post_mime_type`, `p.post_date`, `p.post_parent`,
-	`p.post_name`, `p.post_author`,
-}
 
 type mediaRow struct {
 	ID       int64  `bun:"ID"`
@@ -164,7 +158,7 @@ func (r *MediaRepo) Create(ctx context.Context, m domain.Media) (int64, error) {
 		}
 		id = created
 		q := "INSERT INTO " + r.prefix + "postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)"
-		_, err = tx.ExecContext(ctx, rebind.Rebind(vendor, q), id, "_wp_attached_file", m.Filename)
+		_, err = tx.ExecContext(ctx, q, id, "_wp_attached_file", m.Filename)
 		return err
 	})
 	if err != nil {

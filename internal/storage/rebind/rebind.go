@@ -7,6 +7,22 @@
 // placeholders and passes a bare `?` through to the server verbatim, which
 // errors. Rebind bridges that gap without pulling those queries through a query
 // builder.
+//
+// # Rebind is only for database/sql
+//
+// Apply Rebind if and only if the query is handed to a *sql.DB or *sql.Tx.
+// Queries executed through Bun — including Bun's own ExecContext, QueryContext
+// and QueryRowContext, and therefore anything in internal/storage/wprepo — must
+// keep their `?` placeholders, because Bun substitutes the arguments itself and
+// then calls the driver with the finished SQL and no arguments at all.
+//
+// Rebinding first breaks those paths on PostgreSQL in a way that is easy to
+// misread: Bun's query formatter short-circuits on
+// `strings.IndexByte(query, '?') == -1` and returns the text unchanged, so every
+// argument is silently discarded and the server answers
+// `there is no parameter $1` (SQLSTATE 42P02). Nothing goes wrong on MySQL or
+// SQLite, where Rebind is a no-op, so the mistake is invisible until Postgres
+// runs.
 package rebind
 
 import (

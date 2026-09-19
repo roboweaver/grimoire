@@ -225,17 +225,38 @@ implementation, matching how M5–M7 were run.
     report success for a claim the run never checked. Posts whose slug is
     percent-encoded (real sites have them for non-Latin titles) are skipped
     individually; that is a URL-escaping question, not a permalink one.
-  - _Verified against a local SQLite stand-in, not against the live database._
-    No WordPress database was reachable from this machine (nothing listening on
-    :3306; the podman stack publishes MySQL only on its internal network). The
-    test body was exercised end-to-end by temporarily pointing it at a migrated,
-    seeded SQLite database carrying the `accuweaver` prefix and the dated
-    structure: 3 posts passed all four assertions, and two deliberate mutations
-    were each confirmed to fail it — dropping `Canonical`'s trailing slash (3
-    subtests) and dropping the query string from the redirect (3 subtests). The
-    temporary harness was deleted; **the assertions themselves are still
-    unproven against real WordPress rows** and the run should be repeated once
-    the podman stack is up.
+  - _Developed against a local SQLite stand-in, since run against the live
+    database._ When this test was written no WordPress database was reachable
+    from this machine (nothing listening on :3306; the podman stack publishes
+    MySQL only on its internal network). The test body was exercised end-to-end
+    by temporarily pointing it at a migrated, seeded SQLite database carrying the
+    `accuweaver` prefix and the dated structure: 3 posts passed all four
+    assertions, and two deliberate mutations were each confirmed to fail it —
+    dropping `Canonical`'s trailing slash (3 subtests) and dropping the query
+    string from the redirect (3 subtests). The temporary harness was deleted.
+  - _Both env-gated checks have now passed against a live WordPress database._
+    Target: the podman stack in `accuweaverllc/scripts` — MySQL 8.0, database
+    `wordpress`, prefix `accuweaver` (non-default, no trailing underscore),
+    `permalink_structure` `/%year%/%monthnum%/%day%/%postname%/`
+    (`trailing_slash=true`), 145 published posts. MySQL is not published to the
+    host, so the runs happened inside a `golang:1.26-alpine` container joined to
+    the `wp-net` podman network with the repo mounted read-only and the DSN
+    composed from the `wp-db-password` podman secret.
+    `TestRealWordPressPermalinks` passed — "validated 25 real permalinks against
+    structure /%year%/%monthnum%/%day%/%postname%/" — and
+    `TestM9PermalinksRealDBE2E` passed — "validated 5 real permalinks
+    end-to-end against structure /%year%/%monthnum%/%day%/%postname%/", target
+    site `prefix="accuweaver"`. Verified by hand against the same database:
+    `grimoire-cli migrate -check` reported the structure as supported, the REST
+    `link` field returned canonical dated URLs, and the status-code table held —
+    canonical path `200`, flat `/{slug}` `301` with the exact `Location`,
+    flat+query `301` preserving the query, no-trailing-slash form `301`,
+    contradicting date `404`, absent post `404`, and following the redirect
+    `200` at the canonical path. Cross-checked against the real WordPress
+    instance serving the same database on :8090: WordPress's own REST `link`
+    path for post 400774 is byte-for-byte identical to grimoire's
+    (`/2026/07/02/how-to-painlessly-run-multiple-github-accounts-on-one-machine/`),
+    and that path returns `200` on both.
 - [x] 7.3 Update `docs/compatibility.md` to move permalinks from the known-gaps
       list into "What's implemented", and update the root `README.md` Status
       section, which currently names the permalink gap and links #23.

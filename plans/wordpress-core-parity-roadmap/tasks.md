@@ -624,10 +624,13 @@ spec, which inherits those decisions rather than relitigating them.
     three new kinds, a `PublishedByID` cross-vendor contract case, and two
     env-gated real-WordPress-database checks
     (`internal/routing/realdb_test.go`, `test/e2e/m9_permalinks_realdb_test.go`,
-    both on `GRIMOIRE_TEST_WP_DSN`) — though neither has yet been run against a
-    live WordPress database. Still missing: the cross-vendor `Term.ParentID`
-    contract tests and the nested-category half of the real-database check,
-    both of which depend on 9.D.
+    both on `GRIMOIRE_TEST_WP_DSN`) — and both of those have now passed against a
+    live WordPress database (the `accuweaverllc/scripts` podman stack: MySQL 8.0,
+    prefix `accuweaver`, structure `/%year%/%monthnum%/%day%/%postname%/`, 145
+    published posts; 25 real permalinks validated in the routing check, 5
+    end-to-end). Still missing: the cross-vendor `Term.ParentID` contract tests
+    and the nested-category half of the real-database check, both of which
+    depend on 9.D.
 - [x] **9.F — Template-hierarchy fidelity.** Folded in from M1's deferral,
       recorded in [`../README.md`](../README.md)'s decisions list (under
       "Open decisions" when this group was written, now under "Resolved

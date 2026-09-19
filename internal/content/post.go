@@ -56,3 +56,15 @@ func (s *PostService) RecentPage(ctx context.Context, page, perPage int) ([]doma
 func (s *PostService) BySlug(ctx context.Context, slug string) (domain.Post, error) {
 	return s.posts.BySlug(ctx, slug, "post", "page")
 }
+
+// PublishedByID resolves a single published post or page by primary key,
+// mirroring BySlug's published-only, post-or-page semantics.
+// domain.ErrNotFound is propagated for unknown or non-published ids.
+//
+// This backs the %post_id% permalink token, where the id arrives from a
+// visitor's URL and is therefore trivially guessable. It deliberately does not
+// reach the status-blind write-side lookup of the same row, which would disclose
+// drafts, private and trashed posts.
+func (s *PostService) PublishedByID(ctx context.Context, id int64) (domain.Post, error) {
+	return s.posts.PublishedByID(ctx, id, "post", "page")
+}

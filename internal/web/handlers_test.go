@@ -11,13 +11,24 @@ import (
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/internal/routing"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/storage/migrate"
 	"github.com/roboweaver/grimoire/internal/storage/storagetest"
 	"github.com/roboweaver/grimoire/internal/web"
 )
 
+// newTestServer builds a server with no permalink structure configured, i.e.
+// WordPress's "plain" setting, where the flat /{slug} route is canonical.
 func newTestServer(t *testing.T) http.Handler {
+	t.Helper()
+	return newTestServerWithPermalinks(t, "")
+}
+
+// newTestServerWithPermalinks builds a server whose permalink_structure is the
+// given raw option value. An empty structure yields the flat behavior that
+// newTestServer relies on, so the two share one fixture.
+func newTestServerWithPermalinks(t *testing.T, structure string) http.Handler {
 	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "grimoire.db")
@@ -44,6 +55,10 @@ func newTestServer(t *testing.T) http.Handler {
 		t.Fatalf("render.Load: %v", err)
 	}
 
+	st, err := routing.Parse(structure, "", "")
+	if err != nil {
+		t.Fatalf("routing.Parse(%q): %v", structure, err)
+	}
 	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
 	srv := web.NewServer(
 		posts,
@@ -51,7 +66,8 @@ func newTestServer(t *testing.T) http.Handler {
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,
-	).WithThemeStatic(filepath.Join("..", "..", "themes"), "default")
+	).WithThemeStatic(filepath.Join("..", "..", "themes"), "default").
+		WithPermalinks(st)
 	return srv.Routes()
 }
 

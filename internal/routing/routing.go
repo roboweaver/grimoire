@@ -201,16 +201,20 @@ type Ref struct {
 // should verify against the resolved post.
 func (r Ref) HasDate() bool { return r.Year != 0 }
 
-// Match extracts a Ref from chi's parsed URL parameters. It returns false when
-// any component fails its shape rule: dates must be zero-padded to WordPress's
-// widths and be calendar-plausible, an id must be a positive integer, and a
-// slug must be non-empty.
+// Match extracts a Ref from a map of URL parameters, as produced by chi or by
+// ParamsFromPath. It returns false when any component fails its shape rule:
+// dates must be zero-padded to WordPress's widths and be calendar-plausible, an
+// id must be a positive integer, and a slug must be non-empty.
 //
 // Shape is enforced here rather than in the route pattern because chi patterns
 // have no width or range syntax, and because a wrong-shaped path should 404
 // rather than reach a database query.
+// The len(s.segments) check mirrors ChiPatterns and Canonical. Without it a
+// zero-value Structure -- which is not Flat, because false is the zero value of
+// a bool -- would iterate no segments and report a successful match carrying an
+// empty Ref, handing the caller an identifier-less "hit".
 func (s Structure) Match(params map[string]string) (Ref, bool) {
-	if s.Flat {
+	if s.Flat || len(s.segments) == 0 {
 		return Ref{}, false
 	}
 	var ref Ref

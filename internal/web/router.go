@@ -11,6 +11,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/internal/routing"
 )
 
 // Server wires content services and the render engine into HTTP handlers.
@@ -67,6 +68,14 @@ type Server struct {
 	appPasswords           *auth.ApplicationPasswords
 	restRequireTLS         bool
 	restTrustedProxyHeader string
+
+	// permalinks is the resolved permalink_structure. It is read once at
+	// startup rather than per request, because OptionService performs no
+	// caching and the chi patterns are derived from it at registration time
+	// (see the M9a design). NewServer defaults it to a flat structure, so a
+	// Server that never saw WithPermalinks behaves exactly as it did before
+	// M9a rather than carrying an ambiguous zero value.
+	permalinks routing.Structure
 }
 
 // NewServer builds a Server. log may be nil, in which case slog.Default is used.
@@ -74,7 +83,23 @@ func NewServer(posts *content.PostService, terms *content.TermService, options *
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{posts: posts, terms: terms, options: options, render: eng, log: log}
+	// An empty structure is WordPress's "plain" setting and never fails to
+	// parse, so the error is not reachable here.
+	flat, _ := routing.Parse("", "", "")
+	return &Server{posts: posts, terms: terms, options: options, render: eng, log: log, permalinks: flat}
+}
+
+// WithPermalinks configures the permalink structure used to resolve single-post
+// requests and to build canonical paths. It returns the same Server for
+// chaining. When not called, or called with a flat Structure, the flat /{slug}
+// route is canonical and no canonical redirects are issued.
+//
+// The Structure is supplied already parsed so the caller owns the fallback
+// decision: routing.Parse returns a usable flat Structure alongside its error,
+// and the startup path logs that error rather than refusing to boot.
+func (s *Server) WithPermalinks(st routing.Structure) *Server {
+	s.permalinks = st
+	return s
 }
 
 // WithAuth enables the authentication routes and session middleware, wiring the
@@ -151,6 +176,25 @@ func (s *Server) Routes() http.Handler {
 	s.registerAdmin(r)
 	// REST group likewise, so /wp-json/* is never shadowed (Req 1.3).
 	s.registerREST(r)
+	// Permalink routes for the configured structure, registered before the flat
+	// catch-all. Both slash forms are registered because chi matches them as
+	// distinct routes: registering only the canonical one would make chi 404 the
+	// other before `single` could redirect it, which is exactly the duplicate-URL
+	// case Requirement 3.3 exists to close.
+	//
+	// These patterns have a fixed segment count and so cannot shadow
+	// /category/{slug}, /, /login or /wp-content/uploads/*; the relative order of
+	// those is unchanged. A single-segment structure such as /%postname%/ does
+	// collide with /{slug} at chi's parameter node, which chi resolves silently in
+	// favor of whichever was registered last rather than panicking -- so the two
+	// forms of one post can arrive under different parameter names. That is why
+	// `single` derives its components from the request path rather than from
+	// chi's parameter names.
+	for _, pattern := range s.permalinks.ChiPatterns() {
+		r.Method(http.MethodGet, pattern, s.handler(s.single))
+	}
+	// Still registered when a structure is configured, but its role changes: it
+	// becomes the canonical-redirect path (Req 3.1) rather than a renderer.
 	r.Method(http.MethodGet, "/{slug}", s.handler(s.single))
 	return r
 }

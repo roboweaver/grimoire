@@ -36,3 +36,9 @@ web/theme/node_modules/
 .scout/
 .kiro/
 graphify-out/
+
+# Spec task-tool run state. Lives under plans/ because .kiro/specs symlinks
+# there, so the .kiro/ rule above does not reach it. Contents are per-run and
+# per-machine (execution ids, chat session ids, wall-clock timestamps) and
+# record nothing that tasks.md does not already capture.
+plans/**/tasks.meta.json

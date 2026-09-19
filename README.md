@@ -133,7 +133,8 @@ same `migrate` / `seed` / `createadmin` / `sessions gc` / server commands with t
 ### Testing
 
 ```bash
-go test ./...   # SQLite unit + contract + e2e tests, no external services
+go test ./...            # SQLite unit + contract + e2e tests, no external services
+go test -count=2 ./...   # isolation probe: catches tests that leak process-global state
 ```
 
 The cross-vendor contract suite runs against MySQL and PostgreSQL only when their

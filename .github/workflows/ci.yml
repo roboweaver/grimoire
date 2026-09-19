@@ -35,6 +35,20 @@ jobs:
       - name: go test (SQLite only)
         run: go test ./...
 
+      # Isolation probe. Running the suite twice in one binary catches tests that
+      # leak state into process-global state and only pass on a virgin process.
+      # pkg/extensions did exactly that (#47): its registry is global and
+      # append-only by design, so a second iteration saw the first iteration's
+      # callbacks still in the chain. Nothing caught it because the plain
+      # `go test ./...` gate above never runs a second iteration.
+      #
+      # This matters beyond the two tests that happened to collide: -count=N is
+      # the standard way to probe for a real flake, and a package that reports a
+      # false positive under it sends anyone doing that probe down a blind alley.
+      # Cheap to keep honest -- the SQLite suite is a few seconds.
+      - name: go test (isolation probe, -count=2)
+        run: go test -count=2 ./...
+
   # Cross-vendor coverage. Kept as a separate job so a vendor-specific failure is
   # attributable at a glance, and so the fast SQLite job still reports quickly.
   #

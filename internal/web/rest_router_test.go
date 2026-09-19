@@ -13,6 +13,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/internal/routing"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/storage/migrate"
 	"github.com/roboweaver/grimoire/internal/storage/storagetest"
@@ -22,8 +23,19 @@ import (
 // newRESTRouter builds the full chi router with auth + admin + REST wired,
 // backed by a seeded SQLite database (see storagetest.SeedFixtures for the
 // exact fixture shape), plus the fakeSessions so tests can drive the
-// principal.
+// principal. No permalink structure is configured, i.e. WordPress's "plain"
+// setting, where the flat /{slug} route is canonical.
 func newRESTRouter(t *testing.T, fake *fakeSessions) http.Handler {
+	t.Helper()
+	return newRESTRouterWithPermalinks(t, fake, "")
+}
+
+// newRESTRouterWithPermalinks is newRESTRouter with a permalink_structure
+// configured. The same parsed Structure is handed to both the server and the
+// REST mapper, exactly as cmd/grimoire wires them, so the link a REST response
+// advertises and the path the web layer serves at 200 are asserted against one
+// configuration rather than two.
+func newRESTRouterWithPermalinks(t *testing.T, fake *fakeSessions, structure string) http.Handler {
 	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "grimoire.db")
@@ -53,7 +65,11 @@ func newRESTRouter(t *testing.T, fake *fakeSessions) http.Handler {
 		repos.AdminPosts, repos.PostWriter, repos.PostCounter,
 		repos.UserCounter, repos.TermCounter, repos.Users,
 	)
-	mapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, "wp_")
+	st, err := routing.Parse(structure, "", "")
+	if err != nil {
+		t.Fatalf("routing.Parse(%q): %v", structure, err)
+	}
+	mapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, "wp_").WithPermalinks(st)
 	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}))
 	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
 	srv := web.NewServer(
@@ -62,7 +78,8 @@ func newRESTRouter(t *testing.T, fake *fakeSessions) http.Handler {
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,
-	).WithAuth(fake, web.AuthConfig{}).
+	).WithPermalinks(st).
+		WithAuth(fake, web.AuthConfig{}).
 		WithAdmin(admin.Handler("/admin"), adminSvc).
 		WithContentFeatures(comments, nil, nil).
 		WithREST(mapper, repos.AdminPosts, repos.PostWriter, repos.Posts, repos.Media, repos.Users, 0)
@@ -553,6 +570,10 @@ func TestRESTDoesNotShadowPublicSlug(t *testing.T) {
 	}
 }
 
+// TestRESTAbsoluteLinksUseRequestHost covers the flat, single-segment link
+// shape. The multi-segment and trailing-slash shapes a configured
+// permalink_structure produces are covered by
+// TestRESTAbsoluteLinkForCanonicalPermalink (M9a Req 6.3).
 func TestRESTAbsoluteLinksUseRequestHost(t *testing.T) {
 	h := newRESTRouter(t, &fakeSessions{})
 	rec := httptest.NewRecorder()

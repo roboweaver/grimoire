@@ -2,7 +2,7 @@
 
 **A Go-native, WordPress-schema-compatible CMS with a working embedded Adobe React Spectrum admin — no PHP, a swappable database backend, and WordPress-compatible content, auth, and REST surfaces.**
 
-> **Current state:** M1-M8 are implemented. The public site, embedded Adobe React Spectrum admin, WordPress-compatible content/auth/REST surfaces, revisions/autosave, scheduled publishing, and WordPress-equivalent content browsing (public and admin pagination, admin post/media filters) all work today. REST write coverage includes posts/pages, comments, and taxonomy terms; media and user writes are not exposed.
+> **Current state:** M1-M8 and M9a are implemented. The public site, embedded Adobe React Spectrum admin, WordPress-compatible content/auth/REST surfaces, revisions/autosave, scheduled publishing, WordPress-equivalent content browsing (public and admin pagination, admin post/media filters), and WordPress permalinks with canonical redirects all work today. REST write coverage includes posts/pages, comments, and taxonomy terms; media and user writes are not exposed.
 
 > ## What's a grimoire?
 > A *grimoire* is a wizard's book of spells and knowledge — a single authoritative
@@ -178,25 +178,43 @@ full specification.
 - ✅ **M6:** [Admin CRUD editor](./plans/06-admin-crud-editor) — delivers full content editing, status transitions, and optimistic concurrency in admin.
 - ✅ **M7:** [Revisions and scheduler](./plans/07-revisions-scheduler) — delivers revision history, autosave, and scheduled publishing.
 - ✅ **M8:** [Content browsing parity](./plans/wordpress-core-parity-roadmap) — delivers public and admin pagination with out-of-range 404s, admin post `search`/`status`/`author` filters, and a media library with filters and a grid/list toggle.
-- 📝 **M9:** [Routing and taxonomy parity](./plans/wordpress-core-parity-roadmap) — roadmap-level only. Covers `permalink_structure`/`category_base`/`tag_base`, core permalink tokens with canonical redirects, tag/date/author archives, and nested categories. Requires its own spec before implementation.
+- ✅ **M9a:** [Permalinks and canonical routing](./plans/09-permalinks-canonical-routing) — delivers `permalink_structure`/`category_base`/`tag_base` reads, the `%postname%`/`%post_id%`/`%year%`/`%monthnum%`/`%day%` token set (WordPress's three presets), `301` canonical redirects from every other recognised form, canonical REST `link` values, and the `tag`/`author`/`date` template kinds. Unsupported structures fall back to the flat route with a startup `WARN`.
+- 📝 **M9 (remainder):** [Taxonomy and archive parity](./plans/wordpress-core-parity-roadmap) — roadmap-level only. Covers tag/date/author archive routes (9.C) and nested categories (9.D), neither of which M9a serves. Requires its own spec before implementation.
 - 📝 **M10:** [REST write and content safety parity](./plans/wordpress-core-parity-roadmap) — roadmap-level only. Covers a capability-aware write-boundary sanitization policy, then REST media/user writes and `content.rendered` fidelity. Requires its own spec before implementation.
 
 ## Status
 
-✅ M1-M8 are implemented.
+✅ M1-M8 and M9a are implemented.
 
-📝 M9 and M10 are scoped at roadmap level in
+📝 The rest of M9 (tag/date/author archives, nested categories) and all of M10
+are scoped at roadmap level in
 [`plans/wordpress-core-parity-roadmap`](./plans/wordpress-core-parity-roadmap)
 but not implemented; each needs its own spec first.
 
 Known gaps worth knowing before adopting an existing WordPress site:
 
-- **Permalinks.** Single posts are served from one flat `/{slug}` route and
-  `permalink_structure` is ignored, so a site using any non-plain permalink
-  structure will 404 on its own published URLs. Tracked in
-  [#23](https://github.com/roboweaver/grimoire/issues/23), addressed by M9.
+- **Archive routes.** There are no tag, date or author archive routes. M9a
+  registers their template kinds, but nothing serves those URLs yet; roadmap
+  group 9.C adds the handlers.
+- **Nested categories.** Category archives are served only at the flat
+  `/category/{slug}`, and a `category_base`/`tag_base` override configured in
+  WordPress is read but not yet honored by any route. Roadmap group 9.D.
 - **REST writes** for media and users are not exposed (they return `501`).
   Addressed by M10, which lands write-boundary sanitization first.
+
+Permalinks are no longer a gap. M9a serves `permalink_structure` — the
+`%postname%`, `%post_id%`, `%year%`, `%monthnum%` and `%day%` tokens, covering
+WordPress's three presets — and `301`s the flat `/{slug}` path and the
+non-canonical trailing-slash form to the canonical URL, which closed
+[#23](https://github.com/roboweaver/grimoire/issues/23). A structure using
+`%category%` or `%author%`, or one with no post-identifying token, is not
+supported: grimoire falls back to the flat route and warns at startup that
+published URLs will not resolve, and `grimoire-cli migrate -check` reports the
+same before the server is started. Changing `permalink_structure` requires a
+restart, since the options are read once at startup. One divergence to know:
+grimoire applies the structure to pages as well as posts, where WordPress serves
+pages at `/{slug}` regardless — see
+[`docs/compatibility.md`](./docs/compatibility.md).
 
 ## Licensing note
 

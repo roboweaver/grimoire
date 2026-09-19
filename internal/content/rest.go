@@ -9,6 +9,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/php"
+	"github.com/roboweaver/grimoire/internal/routing"
 )
 
 // RESTContext selects which WordPress REST "context" a view model is
@@ -165,20 +166,45 @@ type RESTMapper struct {
 	meta   domain.PostMetaRepository
 	users  domain.UserMetaRepository
 	prefix string
+
+	// permalinks is the resolved permalink_structure, held once here rather
+	// than threaded through every mapping call. NewRESTMapper defaults it to
+	// a flat structure, so a mapper that never saw WithPermalinks produces
+	// the pre-M9a "/{slug}" links rather than carrying an ambiguous zero
+	// value (M9a Req 6.1, 6.2).
+	permalinks routing.Structure
 }
 
 // NewRESTMapper constructs a RESTMapper. prefix is the usermeta key prefix
 // (e.g. "wp_") used to read a user's serialized capabilities for the roles
 // field, matching UserService's own convention.
 func NewRESTMapper(terms domain.PostTermsRepository, meta domain.PostMetaRepository, users domain.UserMetaRepository, prefix string) *RESTMapper {
-	return &RESTMapper{terms: terms, meta: meta, users: users, prefix: prefix}
+	// An empty structure is WordPress's "plain" setting and never fails to
+	// parse, so the error is not reachable here. Mirrors web.NewServer.
+	flat, _ := routing.Parse("", "", "")
+	return &RESTMapper{terms: terms, meta: meta, users: users, prefix: prefix, permalinks: flat}
 }
 
-// postLink is the REST "link" field for a post/page: grimoire's own flat
-// "/{slug}" route (see internal/web/router.go), which both post types
-// share. It is a relative path; the web layer resolves it to an absolute
-// URL from the request's scheme/Host at response time (Req 6.6).
-func postLink(slug string) string { return "/" + slug }
+// WithPermalinks configures the permalink structure used to build the REST
+// "link" field. It returns the same RESTMapper for chaining, matching
+// web.Server.WithPermalinks, so the startup path can hand the same parsed
+// Structure to both without either growing a positional parameter.
+//
+// The Structure is supplied already parsed so the caller owns the fallback
+// decision: routing.Parse returns a usable flat Structure alongside its error.
+func (m *RESTMapper) WithPermalinks(st routing.Structure) *RESTMapper {
+	m.permalinks = st
+	return m
+}
+
+// postLink is the REST "link" field for a post/page, both post types sharing
+// one route. It delegates to routing.Structure.Canonical — the single
+// construction site for a permalink — so the advertised link and the path the
+// web layer serves at 200 cannot diverge (Req 6.1). A flat structure yields
+// "/{slug}" exactly as before M9a (Req 6.2). It is a relative path; the web
+// layer resolves it to an absolute URL from the request's scheme/Host at
+// response time (Req 6.6).
+func (m *RESTMapper) postLink(p domain.Post) string { return m.permalinks.Canonical(p) }
 
 // commentLink is the REST "link" field for a comment. grimoire has no
 // pretty-permalink single-post route parameterized by ID, so this mirrors
@@ -194,7 +220,9 @@ func commentLink(postID, commentID int64) string {
 // fallback ("/?author={id}") for the same reason as commentLink.
 func userLink(userID int64) string { return "/?author=" + strconv.FormatInt(userID, 10) }
 
-func restCommon(p domain.Post, featuredMedia int64) restItemCommon {
+// restCommon is a method rather than a plain function because the link field
+// now depends on the mapper's permalink structure.
+func (m *RESTMapper) restCommon(p domain.Post, featuredMedia int64) restItemCommon {
 	return restItemCommon{
 		ID:            p.ID,
 		Date:          restDate(p.Date),
@@ -204,7 +232,7 @@ func restCommon(p domain.Post, featuredMedia int64) restItemCommon {
 		Slug:          p.Slug,
 		Status:        p.Status,
 		Type:          p.Type,
-		Link:          postLink(p.Slug),
+		Link:          m.postLink(p),
 		GUID:          RESTRendered{Rendered: p.GUID},
 		Title:         RESTRendered{Rendered: p.Title},
 		Content:       RESTContentRendered{Rendered: p.Content, Protected: p.Password != ""},
@@ -239,7 +267,7 @@ func (m *RESTMapper) Post(ctx context.Context, p domain.Post) (RESTPost, error) 
 		tags = []int64{}
 	}
 	return RESTPost{
-		restItemCommon: restCommon(p, featured),
+		restItemCommon: m.restCommon(p, featured),
 		Categories:     categories,
 		Tags:           tags,
 	}, nil
@@ -253,7 +281,7 @@ func (m *RESTMapper) Page(ctx context.Context, p domain.Post) (RESTPage, error) 
 	if err != nil {
 		return RESTPage{}, err
 	}
-	return RESTPage{restItemCommon: restCommon(p, featured)}, nil
+	return RESTPage{restItemCommon: m.restCommon(p, featured)}, nil
 }
 
 // restCommentStatus maps the raw comment_approved enum ("0"/"1"/"spam"/

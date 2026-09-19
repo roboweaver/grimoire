@@ -85,7 +85,14 @@ func main() {
 	menus := content.NewNavMenuService(repos.NavMenus, cfg.Theme)
 	media := content.NewMediaService(repos.Media, repos.MediaWriter, content.MediaConfig{UploadsDir: cfg.Media.UploadsDir, BaseURL: "/wp-content/uploads", AllowedMIMEs: cfg.Media.AllowedMIMEs, MaxUploadSize: cfg.Media.MaxUploadSize})
 
-	restMapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, cfg.Database.TablePrefix)
+	// The permalink structure is resolved once here, then handed to both the
+	// server and the REST mapper, so the path the site serves at 200 and the
+	// "link" a REST response advertises come from one parse rather than two
+	// (M9a Req 1.6, 6.1).
+	options := content.NewOptionService(repos.Options)
+	permalinks := resolvePermalinks(context.Background(), options, log)
+
+	restMapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, cfg.Database.TablePrefix).WithPermalinks(permalinks)
 	featured := content.NewFeaturedImageService(repos.PostMeta, repos.Media)
 	appPasswords := &auth.ApplicationPasswords{
 		Users:  repos.Users,
@@ -115,10 +122,10 @@ func main() {
 	handler := web.NewServer(
 		posts,
 		content.NewTermService(repos.Terms, repos.Posts),
-		content.NewOptionService(repos.Options),
+		options,
 		eng,
 		log,
-	).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
+	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

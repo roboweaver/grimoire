@@ -23,6 +23,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/storage/migrate"
 	"github.com/roboweaver/grimoire/internal/storage/seed"
+	"github.com/roboweaver/grimoire/internal/storage/wprepo"
 )
 
 func main() {
@@ -57,7 +58,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "  migrate            provision a greenfield grimoire schema")
 	fmt.Fprintln(os.Stderr, "  migrate -overlay   adopt an existing WordPress database (additive, no ALTER TABLE)")
-	fmt.Fprintln(os.Stderr, "  migrate -check     report schema compatibility without writing anything")
+	fmt.Fprintln(os.Stderr, "  migrate -check     report schema and permalink compatibility without writing anything")
 }
 
 // runMigrate applies schema changes in one of three modes:
@@ -77,7 +78,8 @@ func runMigrate(args []string) error {
 	overlayMode := fs.Bool("overlay", false,
 		"adopt an existing WordPress database: apply only grimoire-owned, additive DDL (no ALTER TABLE)")
 	checkMode := fs.Bool("check", false,
-		"report whether the database has the WordPress tables/columns grimoire needs, then exit without writing")
+		"report whether the database has the WordPress tables/columns grimoire needs "+
+			"and whether its permalink structure is supported, then exit without writing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -137,8 +139,11 @@ func runMigrate(args []string) error {
 	return nil
 }
 
-// reportPreflight prints a schema-compatibility summary for -check. It performs
-// only zero-row SELECTs, so it is safe to point at a production database.
+// reportPreflight prints the -check summary: schema compatibility, the resolved
+// permalink structure and whether grimoire can serve it, and any pending
+// grimoire-owned migrations. It reads only -- zero-row SELECTs for the schema
+// probe and three single-row option reads for the permalink report -- so it is
+// safe to point at a production database.
 func reportPreflight(ctx context.Context, db *sql.DB, vendor, prefix string) error {
 	report, err := migrate.Preflight(ctx, db, vendor, prefix)
 	if err != nil {
@@ -150,6 +155,20 @@ func reportPreflight(ctx context.Context, db *sql.DB, vendor, prefix string) err
 	tables := migrate.RequiredSchema()
 	fmt.Printf("%s database (prefix %q) has all %d WordPress tables grimoire reads.\n",
 		vendor, prefix, len(tables))
+
+	// Report the permalink configuration next (M9a Req 4.5). This is read-only
+	// and reached only after the report above is clean, so the {prefix}options
+	// table is known to exist -- it is part of RequiredSchema. A failure to
+	// read an option is not fatal here: OptionService maps any read error to
+	// the empty string, which reports as WordPress's "plain" setting, and a
+	// -check that aborted on it would withhold the pending-migration summary
+	// below over a line of diagnostics.
+	bunDB, err := storage.NewBunDB(vendor, db)
+	if err != nil {
+		return err
+	}
+	reportPermalinks(ctx, os.Stdout, content.NewOptionService(wprepo.NewOptionRepo(bunDB, prefix)))
+
 	overlayFS, err := storage.OverlayMigrationsFS(vendor)
 	if err != nil {
 		return err

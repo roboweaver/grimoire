@@ -156,71 +156,101 @@ implementation, matching how M5–M7 were run.
 
 ## Phase 4 — Template hierarchy (9.F)
 
-- [ ] 4.1 Write a failing test asserting `render.Render` resolves the `tag`,
+- [x] 4.1 Write a failing test asserting `render.Render` resolves the `tag`,
       `author` and `date` kinds through `{kind}` → `archive` → `index`, and that
       a kind with no candidate template present still falls back to `index`
       rather than erroring. _(Req 5.2, 5.3, 5.5)_
-- [ ] 4.2 Add the three entries to the existing `hierarchy` map in
+- [x] 4.2 Add the three entries to the existing `hierarchy` map in
       `internal/render/engine.go`. No new resolution mechanism, and no
       slug-specific candidates. _(Req 5.1, 5.2, 5.4)_
 
 ## Phase 5 — REST `link` field
 
-- [ ] 5.1 Write a failing test asserting `postLink` returns the canonical
+- [x] 5.1 Write a failing test asserting `postLink` returns the canonical
       permalink for a configured structure and `/{slug}` when `Flat`, and that
       `commentLink`/`userLink` are unchanged. _(Req 6.1, 6.2, 6.4)_
-- [ ] 5.2 Give the REST mapper a `routing.Structure` at construction and route
+- [x] 5.2 Give the REST mapper a `routing.Structure` at construction and route
       `postLink` through `Structure.Canonical`, rather than threading a structure
       argument through every call site. _(Req 6.1)_
-- [ ] 5.3 Confirm the web layer still resolves the relative `link` to an absolute
+- [x] 5.3 Confirm the web layer still resolves the relative `link` to an absolute
       URL from the request scheme/host, with no change required.
       _(Req 6.3)_
 
 ## Phase 6 — Startup wiring and loud fallback
 
-- [ ] 6.1 Write a failing test asserting that an unsupported structure yields a
+- [x] 6.1 Write a failing test asserting that an unsupported structure yields a
       `Flat` fallback plus an error naming the offending token(s), and that
       construction still succeeds. _(Req 4.1, 4.2, 4.3)_
-- [ ] 6.2 Wire `cmd/grimoire/main.go`: read `permalink_structure`,
+- [x] 6.2 Wire `cmd/grimoire/main.go`: read `permalink_structure`,
       `category_base` and `tag_base` once via `OptionService.Get`, call
       `routing.Parse`, log `INFO` with the resolved structure on success and
       `WARN` on fallback — the warning naming the unsupported token(s) **and**
       stating that published URLs will not resolve while the fallback is active.
       Pass the `Structure` to the server and the REST mapper. _(Req 1.1, 1.6,
       4.2, 4.4)_
-- [ ] 6.3 Extend `grimoire-cli migrate -check`'s report with the resolved
+- [x] 6.3 Extend `grimoire-cli migrate -check`'s report with the resolved
       permalink structure and whether it is supported. Read-only; no change to
       any migration path. _(Req 4.5)_
 
 ## Phase 7 — End-to-end, real-database fixture, and docs
 
-- [ ] 7.1 Add a `test/e2e` test booting the stack with a dated structure:
+- [x] 7.1 Add a `test/e2e` test booting the stack with a dated structure:
       a published post's canonical URL renders `200`, its flat URL `301`s to the
       canonical, and an unrelated path `404`s. Build the DSN with the existing
       `testDSN` helper so it inherits the SQLite `busy_timeout` setting from #34.
       _(Req 7.2)_
-- [ ] 7.2 Add an env-var-gated test against a real WordPress database, skipped
+- [x] 7.2 Add an env-var-gated test against a real WordPress database, skipped
       unless the DSN variable is set, mirroring
       `../02.1-wp-hash-real-db`'s gating so CI stays hermetic. It must exercise a
       dated permalink structure **and** a non-default table prefix — the podman
       stack in `accuweaverllc/scripts` provides both
       (`accuweaver` prefix, `/%year%/%monthnum%/%day%/%postname%/`).
       _(Req 7.4)_
-- [ ] 7.3 Update `docs/compatibility.md` to move permalinks from the known-gaps
+  - Landed as `test/e2e/m9_permalinks_realdb_test.go`
+    (`TestM9PermalinksRealDBE2E`), gated on `GRIMOIRE_TEST_WP_DSN` with the
+    prefix read from `GRIMOIRE_TEST_WP_PREFIX` (default `accuweaver`) — the same
+    two variables `storagetest`'s `TestRealWordPressDB` and task 1.9's
+    resolver-level check already use, so one DSN enables every real-database
+    check in the repo. Read-only: `storage.New` opens without migrating, the
+    structure is *read* from the target's own options rather than written as
+    7.1 does, and every assertion is a `GET`.
+  - _The expected canonical path is derived by substituting tokens into the
+    site's own `permalink_structure` string, never by calling `Canonical`._ That
+    is what makes the `200` a cross-check: a `Canonical` that disagreed by even
+    a trailing slash would `301` the derived path instead of rendering it.
+  - _Fixture preconditions skip rather than pass._ A plain structure, a
+    structure with no date token, or `GRIMOIRE_TEST_WP_PREFIX=wp_` each skip with
+    a message naming the podman stack, because Req 7.4 asks specifically for a
+    dated structure **and** a non-default prefix — running without them would
+    report success for a claim the run never checked. Posts whose slug is
+    percent-encoded (real sites have them for non-Latin titles) are skipped
+    individually; that is a URL-escaping question, not a permalink one.
+  - _Verified against a local SQLite stand-in, not against the live database._
+    No WordPress database was reachable from this machine (nothing listening on
+    :3306; the podman stack publishes MySQL only on its internal network). The
+    test body was exercised end-to-end by temporarily pointing it at a migrated,
+    seeded SQLite database carrying the `accuweaver` prefix and the dated
+    structure: 3 posts passed all four assertions, and two deliberate mutations
+    were each confirmed to fail it — dropping `Canonical`'s trailing slash (3
+    subtests) and dropping the query string from the redirect (3 subtests). The
+    temporary harness was deleted; **the assertions themselves are still
+    unproven against real WordPress rows** and the run should be repeated once
+    the podman stack is up.
+- [x] 7.3 Update `docs/compatibility.md` to move permalinks from the known-gaps
       list into "What's implemented", and update the root `README.md` Status
       section, which currently names the permalink gap and links #23.
       _(Req 3, 6)_
-- [ ] 7.4 Update `plans/README.md`: this milestone → Implemented, and mark
+- [x] 7.4 Update `plans/README.md`: this milestone → Implemented, and mark
       roadmap groups 9.A/9.B/9.F complete in
       `../wordpress-core-parity-roadmap/tasks.md`, leaving 9.C/9.D open.
       **Tick the boxes in this file as the work lands** — the whole reason
       #29 existed was that four milestones shipped with their checkboxes
       untouched.
-- [ ] 7.5 Confirm no new migration file was added anywhere in the repo
+- [x] 7.5 Confirm no new migration file was added anywhere in the repo
       (`git status` shows no new file under any `migrations`-style directory) —
       this milestone must ship with zero schema changes. _(Req 7.5)_
-- [ ] 7.6 Full gate sweep: `gofmt -l .` empty, `go vet ./...`,
+- [x] 7.6 Full gate sweep: `gofmt -l .` empty, `go vet ./...`,
       `go build ./...`, `go test ./...` all green; MySQL/Postgres contract runs
       if DSNs are available.
-- [ ] 7.7 Close [#23](https://github.com/roboweaver/grimoire/issues/23) from the
+- [x] 7.7 Close [#23](https://github.com/roboweaver/grimoire/issues/23) from the
       implementation PR.

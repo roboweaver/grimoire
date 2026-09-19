@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M8)
+# WordPress Compatibility (M1-M9a)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -39,7 +39,7 @@ Type mappings from the WordPress MySQL schema are translated per vendor
 `DATETIME`→`TIMESTAMP`/ISO-8601 `TEXT`, prefix-length keys→plain indexes). See
 `internal/storage/migrations/<vendor>/0001_init.up.sql`.
 
-## What's implemented (M1-M8)
+## What's implemented (M1-M9a)
 
 - **M1 — Content core:** switchable database vendor (MySQL/PostgreSQL/
   SQLite), WordPress-compatible schema, public read rendering of posts,
@@ -73,7 +73,66 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   `search`/`type`/`after`/`before` (upload-date range)/`parentId` filters,
   pagination, and a mutually exclusive grid/list view toggle. Routing and
   taxonomy (nested categories, permalink tokens) and the REST media/user
-  write endpoints are unchanged by this milestone.
+  write endpoints are unchanged by this milestone; permalinks are addressed
+  by M9a below.
+- **M9a — Permalinks and canonical routing:** `permalink_structure`,
+  `category_base` and `tag_base` are read from the site's own `options`
+  table at startup, and single posts and pages are served at the structure
+  those options describe instead of only at a flat `/{slug}` path. The
+  supported tokens are `%postname%`, `%post_id%`, `%year%`, `%monthnum%`
+  and `%day%`, in any order and combination, which covers WordPress's
+  three presets ("Day and name", "Month and name", "Post name") and their
+  numeric forms. Date components are zero-padded exactly as WordPress
+  writes them, and a date path that contradicts the post's own
+  `post_date` returns `404` rather than serving the post at someone
+  else's date. Every non-canonical form that still identifies the post —
+  the flat `/{slug}` path, the wrong trailing-slash form — returns `301`
+  to the one canonical path, preserving the query string; the canonical
+  trailing slash follows whether `permalink_structure` itself ends in
+  `/`. The REST `link` field now returns that same canonical permalink
+  (the web layer still absolutises it against the request's scheme and
+  host). Zero schema changes: this milestone reads two additional option
+  rows and adds no column, table or index.
+
+  Deliberate edges:
+
+  - An empty `permalink_structure` (WordPress's "plain" setting) keeps the
+    pre-M9a flat `/{slug}` behavior, with no canonical redirects at all.
+  - A structure containing an unsupported token (`%category%`,
+    `%author%`) or no post-identifying token at all falls back to the flat
+    route and says so, loudly: a `WARN` at startup naming the offending
+    token and stating that published URLs will not resolve while the
+    fallback is active, plus a line in `grimoire-cli migrate -check` so
+    the condition is discoverable before the server is started. grimoire
+    reads a database it does not own, so an unparseable structure degrades
+    to a working flat site rather than refusing to boot.
+  - `commentLink` and `userLink` in the REST API keep their
+    plain-permalink-shaped fallbacks (`/?p={id}#comment-{id}`,
+    `/?author={id}`), because the routes they would otherwise point at do
+    not exist yet.
+
+  Divergent or still open after M9a:
+
+  - **Pages follow the post structure, where WordPress exempts them.** The
+    configured structure is applied to `page` rows as well as `post` rows,
+    so with a dated structure a page's canonical grimoire URL is
+    `/2024/05/17/about/` and `/about` `301`s to it — whereas WordPress
+    serves pages at `/about` regardless of `permalink_structure` (and
+    nests them under their parent page). This is the one place M9a's
+    canonical URL can differ from the URL the site published.
+  - **No tag, date or author archive routes** (roadmap group 9.C). M9a
+    registers the `tag`, `author` and `date` template kinds in the existing
+    template hierarchy (each resolving `{kind}` → `archive` → `index`) so
+    the follow-on adds route handlers only — but nothing serves those URLs
+    today.
+  - **No nested category paths** (roadmap group 9.D). The category archive
+    is still the flat `/category/{slug}`.
+  - **`category_base` and `tag_base` are read and resolved but not yet
+    honored by any route**, so an override configured in WordPress does
+    not change grimoire's category URL yet.
+  - Changing `permalink_structure` in WordPress requires restarting
+    grimoire, since the options are read once at startup rather than per
+    request. This mirrors WordPress's own rewrite-rule flush.
 
 ## Public read guarantees
 
@@ -153,7 +212,14 @@ go run ./cmd/grimoire -config configs/grimoire.mysql.yaml
 Then confirm in a browser / with `curl`:
 
 - `GET /` lists recent published posts, newest first.
-- `GET /<post-slug>` and `GET /<page-slug>` render single post / page HTML.
+- `GET /<canonical-permalink>` renders single post / page HTML, where the
+  canonical path is whatever the site's own `permalink_structure` describes
+  (`/2024/05/17/hello-world/` for the "Day and name" preset, `/hello-world`
+  when the structure is plain). The startup log line names the resolved
+  structure, and `grimoire-cli migrate -check` reports it without starting
+  the server.
+- `GET /<post-slug>` on a site with a non-plain structure returns `301` to
+  that canonical path rather than rendering, matching WordPress.
 - `GET /category/<slug>` renders that category's published posts.
 - Draft/private URLs return `404`, and the source database is unchanged.
 

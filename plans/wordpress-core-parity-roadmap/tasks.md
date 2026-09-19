@@ -4,9 +4,17 @@
 > work landed; they were reconciled retroactively against the merged
 > implementation in PR #22 and the status correction in PR #25.
 >
-> **M9 and M10 are deliberately unticked** — that is accurate, not drift. Neither
-> has been implemented, and both still require their own spec before any code, as
-> the M9/M10 sections below state.
+> **M9 partially ticked 2026-09-19, as the work landed.** Groups **9.A**, **9.B**
+> and **9.F** were refined into their own spec,
+> [`../09-permalinks-canonical-routing`](../09-permalinks-canonical-routing)
+> (M9a), and implemented there; their boxes below are ticked with a note naming
+> what shipped. Groups **9.C**, **9.D** and **9.E** remain unticked and still
+> require the follow-on spec the M9 section describes — 9.E because the
+> cross-vendor `Term.ParentID` coverage it asks for depends on 9.D.
+>
+> **M10 is deliberately unticked** — that is accurate, not drift. None of it has
+> been implemented, and it still requires its own spec before any code, as the
+> M10 section below states.
 
 This file is the actionable roadmap for M8/M9/M10. M8's tasks are
 implementation-ready: each cites exact files, exact existing symbols, and
@@ -546,33 +554,84 @@ permalink-token precedence, redirect-status-code choices per token, and
 the nested-category descendant-inclusion decision (flagged as open in
 `design.md`) all need their own review before code is written.
 
-- [ ] **9.A — Options-driven permalink structure.** Read
+Groups **9.A**, **9.B** and **9.F** have had that review: they are specified
+and implemented in
+[`../09-permalinks-canonical-routing`](../09-permalinks-canonical-routing)
+(M9a), which settled permalink-token precedence (`%postname%` first, else
+`%post_id%`) and the per-case redirect status codes, and also resolved 9.D's
+two open questions on its behalf — see that spec's `requirements.md` "Out of
+scope" table. Groups **9.C**, **9.D** and **9.E** still need the follow-on
+spec, which inherits those decisions rather than relitigating them.
+
+- [x] **9.A — Options-driven permalink structure.** Read
       `permalink_structure`/`category_base`/`tag_base` from
       `{prefix}options` (via the options-reading path M1–M7 already have);
       decide and document, in a dedicated design, where the resolver lives
       (`internal/content` vs. a new `internal/routing` package) and how it
       composes with the existing `internal/web` router.
-- [ ] **9.B — Core permalink tokens and canonical redirects.** Enumerate
+  - _Shipped in M9a._ The resolver is a new pure `internal/routing` package
+    (no DB, no HTTP). `cmd/grimoire/main.go` reads all three options **once at
+    startup** via `content.OptionService.Get`, calls `routing.Parse`, and
+    passes the resulting `Structure` to the `internal/web` server (which
+    registers the structure's chi patterns ahead of the existing `/{slug}`
+    route) and to the REST mapper. `category_base`/`tag_base` are parsed and
+    exposed but not yet consumed by any route — the category archive stays
+    flat `/category/{slug}` until 9.C/9.D — so an override configured in
+    WordPress does not change grimoire's category URL yet. Because the read is
+    once-at-startup, changing `permalink_structure` in WordPress requires
+    restarting grimoire; `grimoire-cli migrate -check` reports the resolved
+    structure and whether it is supported, so an unusable structure is
+    discoverable before the server starts.
+- [x] **9.B — Core permalink tokens and canonical redirects.** Enumerate
       the exact WordPress token set to support (`%postname%`, `%year%`,
       `%monthnum%`, `%day%`, at minimum, per Requirement 11.1); specify
       exact redirect status codes and canonicalization rules for each
       supported/unsupported combination before implementation.
+  - _Shipped in M9a._ Supported tokens: `%postname%`, `%post_id%`, `%year%`,
+    `%monthnum%`, `%day%`, in any order or combination, covering WordPress's
+    three presets. `%category%`/`%author%` are explicitly unsupported and
+    degrade to the flat route with a startup `WARN` naming the token rather
+    than refusing to boot. Canonical form is built in exactly one place
+    (`Structure.Canonical`), so the redirect target and the REST `link` field
+    cannot diverge; every other recognised form — the flat `/{slug}` path, the
+    wrong trailing-slash form — `301`s to it, preserving the query string, and
+    a date path contradicting the post's `post_date` `404`s. One divergence is
+    documented in `docs/compatibility.md`: the structure is applied to `page`
+    rows as well as `post` rows, where WordPress exempts pages.
 - [ ] **9.C — Tag, date, and author archives.** Specify the exact route
       shapes and pagination behavior (reusing M8's `Page` result type from
       Task 2.2), and whether/how they compose with M9.A's permalink
-      structure.
+      structure. _M9a pre-landed this group's template kinds (see 9.F), so
+      this group adds route handlers with no template plumbing left to
+      discover._
 - [ ] **9.D — Nested category hierarchy.** Add `ParentID` to `domain.Term`
       sourced from `term_taxonomy.parent`; explicitly decide (and record in
       that milestone's own design) whether a parent category's archive
       includes descendant categories' posts before writing the route
-      handler.
+      handler. _Both decisions were already taken in M9a's `requirements.md`
+      ("Out of scope"): a parent archive **does** include descendants (needing
+      a descendant-aware post count so pagination totals stay correct), and
+      nested routes are canonical with flat `/category/{slug}` `301`ing to
+      them. No code for this group has landed._
 - [ ] **9.E — M9 test coverage.** Cross-vendor contract tests for the new
       `Term.ParentID` read path; at least one fixture-based test against an
       imported real-WordPress-database export (mirroring
       `plans/02.1-wp-hash-real-db`'s validation approach) for permalink and
       nested-category behavior. This requirement extends to 9.F below.
-- [ ] **9.F — Template-hierarchy fidelity.** Folded in from M1's deferral,
-      recorded under "Open decisions" in [`../README.md`](../README.md):
+  - _Partly satisfied by M9a; stays open._ Landed: pure unit tests for parsing
+    and canonical construction in `internal/routing`, handler tests covering
+    every row of M9a's status-code table, a template-hierarchy test for the
+    three new kinds, a `PublishedByID` cross-vendor contract case, and two
+    env-gated real-WordPress-database checks
+    (`internal/routing/realdb_test.go`, `test/e2e/m9_permalinks_realdb_test.go`,
+    both on `GRIMOIRE_TEST_WP_DSN`) — though neither has yet been run against a
+    live WordPress database. Still missing: the cross-vendor `Term.ParentID`
+    contract tests and the nested-category half of the real-database check,
+    both of which depend on 9.D.
+- [x] **9.F — Template-hierarchy fidelity.** Folded in from M1's deferral,
+      recorded in [`../README.md`](../README.md)'s decisions list (under
+      "Open decisions" when this group was written, now under "Resolved
+      decisions"):
       M1 shipped a pragmatic template subset (`index`, `single`, `page`,
       `archive`, `category` — confirmed as the only templates in
       `themes/default/templates/`) and broader WordPress
@@ -586,6 +645,16 @@ the nested-category descendant-inclusion decision (flagged as open in
       which is a parity gap invented by omission rather than chosen.
       Specify how much of WordPress's lookup order to support, and where
       fallback stops, in the same dedicated design as 9.A's resolver.
+  - _Shipped in M9a, ahead of the routes that need it._ The existing
+    `hierarchy` map in `internal/render/engine.go` gained `tag`, `author` and
+    `date` kinds, each resolving `{kind}` → `archive` → `index`; no second
+    resolution mechanism was introduced, and a kind with none of its candidate
+    templates present still falls back to `index` rather than erroring.
+    Slug- and entity-specific candidates (`category-{slug}`, `tag-{slug}`,
+    `author-{nicename}`) are deliberately **out of scope** — no in-tree theme
+    uses them, and the existing mechanism makes them cheap to add later. That
+    is the answer to "where fallback stops"; the decision is recorded under
+    "Resolved decisions" in [`../README.md`](../README.md).
 
 ---
 

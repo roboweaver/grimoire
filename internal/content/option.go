@@ -17,6 +17,15 @@ const (
 	OptionHome            = "home"
 )
 
+// Permalink option names, read once at startup and handed to routing.Parse.
+// They live here beside the other well-known names so the startup path and
+// grimoire-cli's preflight report cannot drift on the spelling (M9a Req 1.1).
+const (
+	OptionPermalinkStructure = "permalink_structure"
+	OptionCategoryBase       = "category_base"
+	OptionTagBase            = "tag_base"
+)
+
 // OptionService reads site options with absent-as-empty semantics so a missing
 // option never breaks a page render.
 type OptionService struct {

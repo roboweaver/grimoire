@@ -55,9 +55,19 @@ demonstrate a later page.
 **Intentional differences:** Typography and theme chrome differ; no plugin
 rendering is implied.
 
-**Current limits:** grimoire's public router only supports flat `/{slug}`
-routes. It does not implement WordPress's configurable, date-based post
-permalink structures (for example WordPress's `/YYYY/MM/DD/slug/`).
+**Current limits:** The screenshot pair was captured when grimoire's public
+router only supported flat `/{slug}` routes and ignored WordPress's
+configurable, date-based permalink structures (for example
+`/YYYY/MM/DD/slug/`).
+
+**Permalinks (M9a):** That limit is gone. grimoire reads
+`permalink_structure` from the site's own options and serves the post at
+the same path WordPress does, for the `%postname%`, `%post_id%`, `%year%`,
+`%monthnum%` and `%day%` tokens — WordPress's three presets included —
+`301`ing the flat `/{slug}` path to it. `%category%` and `%author%`
+structures remain unsupported and fall back to the flat route with a
+startup warning. The screenshots have not been recaptured against a dated
+structure.
 
 ## Category archive
 

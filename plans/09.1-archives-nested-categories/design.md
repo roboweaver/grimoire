@@ -126,10 +126,18 @@ const (
 type DateRef struct{ Year, Month, Day int }
 
 // Range returns the half-open [start, end) interval the archive covers, and
-// false when the components do not form a real calendar date. The interval is
-// built in a fixed zone and carries naive wall-clock time, matching how
-// post_date is stored and how Canonical reads it -- converting to UTC would
-// move a post published just after local midnight into the previous day.
+// false when the components do not form a real calendar date.
+//
+// The interval is built with time.Date(..., time.UTC), which is what "no
+// timezone conversion" requires here: formatTS is
+// `return t.UTC().Format(tsLayout)` (internal/storage/wprepo/helpers.go:27), so
+// a UTC-constructed bound passes through it unchanged, and post_date itself is
+// UTC-based wall-clock time because parseTS reads it with
+// time.ParseInLocation(layout, s, time.UTC) followed by .UTC() (helpers.go:52).
+// Building the interval in time.Local instead would shift every bound by the
+// host's offset: on a UTC-7 host a May 2024 archive would query
+// 2024-05-01 07:00:00 .. 2024-06-01 07:00:00, dropping the first seven hours of
+// May 1 and including the last seven of April 30.
 func (d DateRef) Range() (start, end time.Time, ok bool)
 
 // Target is the classified meaning of one request path.
@@ -138,8 +146,10 @@ type Target struct {
     // Post is set when Kind is KindPost.
     Post Ref
     // Segments is the category path as given, base segment excluded, root
-    // first. Set when Kind is KindCategory. The handler compares it against the
-    // term's real ancestry and redirects on mismatch.
+    // first. Set when Kind is KindCategory. The handler walks it through the
+    // taxonomy graph (see "Category archives resolve by walking the segment
+    // path"); a walk that fails is what produces the 301 or the 404, so the
+    // classifier makes no claim about whether these segments name anything.
     Segments []string
     // Slug is the tag slug or the author nicename, per Kind.
     Slug string
@@ -168,12 +178,16 @@ func (s Structure) AuthorPath(nicename string) string
 // DatePath builds the archive path at the granularity d carries. It prepends
 // the front (always, for dates) and then WordPress's "date/" disambiguation
 // segment when the structure needs it -- see "Date disambiguation" below.
+// Returns "" for a Flat structure, which serves no date archives at all (Req
+// 6.8).
 func (s Structure) DatePath(d DateRef) string
 
 // ArchivePatterns returns every chi pattern the archive routes need, both slash
 // forms, derived from the resolved bases and the structure's front. Returned as
 // a slice for the same reason ChiPatterns is: the caller registers all of them
-// to one handler.
+// to one handler. A Flat structure yields no date patterns (Req 6.8); its
+// category, tag and author patterns are unchanged, since grimoire already serves
+// /category/{slug} under plain permalinks.
 func (s Structure) ArchivePatterns() []string
 ```
 
@@ -266,11 +280,61 @@ type Structure struct {
 Every existing call site keeps compiling, and the many tests that pass `"", ""`
 keep meaning "neither base configured" — which is what they mean today.
 
+#### `Parse` must also normalize the base, with one emptiness test
+
+`firstNonEmpty` (`internal/routing/routing.go:351`) trims whitespace and nothing
+else:
+
+```go
+func firstNonEmpty(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
+}
+```
+
+That was inert while no route consumed a base. M9b makes the base the seat of
+chi pattern registration, `Classify`'s segment comparison, path construction and
+the REST `link` field, so two representable values now break all four:
+
+- `/topics` — **realistic, not hypothetical.** WordPress's
+  `options-permalink.php` prefixes the submitted base with `/` before
+  `update_option`, so `get_option( 'category_base' )` plausibly returns `/topics`
+  on any site where the base was set through the admin UI. Unnormalized, it emits
+  `//topics/*` patterns and `Classify`'s first-segment comparison never matches.
+- `topics/news` — WordPress's permalink settings page accepts a multi-segment
+  base. Unnormalized, `CategoryPath` advertises `/topics/news/local` while
+  `Classify` compares one segment and never matches, so every category archive
+  `404`s against a link the REST API publishes.
+
+So `Parse` normalizes each base — trim whitespace, trim leading and trailing
+slashes, collapse repeated internal slashes (Req 4.11) — and a base that
+normalizes to more than one segment gets a `Notes()` entry while still being used
+consistently everywhere (Req 4.12). The normalized multi-segment value is
+carried as segments, so the patterns, the classifier and the constructors all
+agree by construction rather than by three implementations happening to match.
+
+The emptiness test is **shared** (Req 4.13): one predicate, applied to the
+normalized value, decides both whether the base falls back to its default and
+whether `CategoryBaseSet`/`TagBaseSet` is true. With two tests a base of `" "`
+resolves to `category` *and* counts as provided, which drops the front for a base
+that was effectively unset — the one combination neither behavior intends.
+
+The live reference database stores **both bases empty** (verified), and the
+in-tree tests use `"sections"` (`cmd/grimoire/permalinks_test.go:162`), so
+nothing in the tree or on the reference site exercises either shape today. That is
+the argument for specifying it in Phase 1 rather than finding it in Phase 7:
+normalization is a few lines here and a revisit of `Classify`, `ArchivePatterns`
+and all four constructors there.
+
 ### Base collisions are a diagnostic, not an error
 
 ```go
-// Notes carries non-fatal diagnostics about a parsed Structure -- currently
-// only base-segment collisions. Empty when nothing is wrong.
+// Notes carries non-fatal diagnostics about a parsed Structure: base-segment
+// collisions (with each other, with "author", or with a leading literal of the
+// permalink structure) and a base that normalizes to more than one segment.
+// Empty when nothing is wrong.
 //
 // Deliberately NOT reported through Parse's error return. M9a gives that error
 // exactly one meaning at every call site -- "unsupported structure, fall back to
@@ -293,7 +357,7 @@ and all reached only after `migrate.Preflight` reports a clean schema:
 |---|---|---|
 | the resolved `category_base` and `tag_base` | `Structure.CategoryBase`/`TagBase` | 4.6 |
 | base-segment collisions | `Structure.Notes()` | 4.6 |
-| duplicate `user_nicename` values | `UserRepository.DuplicateNicenames` | 7.8 |
+| duplicate `user_nicename` values | `NicenameAuditor.DuplicateNicenames` | 7.8 |
 
 The first two are pure — they add no query, since `reportPermalinks` already
 reads the three permalink options. The third adds **one** aggregate query over
@@ -425,17 +489,29 @@ type ArchiveFilter struct {
     // "no terms" and matches nothing -- it is NOT unfiltered.
     Taxonomy string
     TermIDs  []int64
-    AuthorID int64     // 0 = unfiltered
-    After    time.Time // inclusive lower bound on post_date; zero = unbounded
-    Before   time.Time // exclusive upper bound; zero = unbounded
-    Types    []string  // empty defaults to {"post"}
+    AuthorID int64 // 0 = unfiltered
+    // Start and End are a half-open range on post_date: [Start, End). Zero
+    // means unbounded on that side.
+    //
+    // They are deliberately NOT named After/Before. domain.MediaFilter, in this
+    // same package, already has After/Before, and its Before is an inclusive
+    // *day-end*: mediaWhere compares against formatTS(f.Before.AddDate(0, 0, 1))
+    // (internal/storage/wprepo/media.go:79-83), so MediaFilter's convention is
+    // [After, Before+1day). Two filter types in internal/domain with
+    // identically-named date fields meaning opposite things is a trap for
+    // whoever writes the third, so this one names its bounds for what they are.
+    Start time.Time
+    End   time.Time
+    Types []string // empty defaults to {"post"}
 }
 
 // PostRepository gains:
 PublishedArchive(ctx context.Context, f ArchiveFilter, limit, offset int) ([]Post, error)
 CountPublishedArchive(ctx context.Context, f ArchiveFilter) (int, error)
 
-// UserRepository gains:
+// UserRepository gains ByNicename -- and only ByNicename. It has a request-path
+// caller (the author archive route), so it belongs on the interface every
+// request path already holds.
 
 // ByNicename resolves a user by user_nicename, returning ErrNotFound when
 // absent. When more than one row shares the nicename it resolves to the lowest
@@ -449,11 +525,28 @@ type NicenameConflict struct {
     WinnerID int64 // the ID ByNicename resolves to
 }
 
-// DuplicateNicenames reports every user_nicename shared by more than one row.
-// Read-only, one aggregate query, called once by "grimoire-cli migrate -check"
-// and by nothing on the request path.
-DuplicateNicenames(ctx context.Context) ([]NicenameConflict, error)
+// NicenameAuditor is the operator-only read, declared as its own narrow
+// interface rather than added to UserRepository -- following this package's
+// established opt-in pattern (TermReader, PostCounter, MediaWriter are all
+// declared alongside the wide interface they narrow).
+//
+// UserRepository is held by auth.Sessions, auth.ApplicationPasswords,
+// content.UserService and the REST users path -- every request path. Putting an
+// operator-only diagnostic there would force both existing fakes
+// (internal/auth/session_test.go:30, internal/content/userservice_test.go:22) to
+// grow a method neither ever calls, to satisfy an interface neither needs it
+// from. The only consumer is "grimoire-cli migrate -check", so the only thing
+// that needs to name this method is the interface that command depends on.
+type NicenameAuditor interface {
+    // DuplicateNicenames reports every user_nicename shared by more than one
+    // row. Read-only, one aggregate query, called once by
+    // "grimoire-cli migrate -check" and by nothing on the request path.
+    DuplicateNicenames(ctx context.Context) ([]NicenameConflict, error)
+}
 ```
+
+`*wprepo.UserRepo` satisfies both `UserRepository` and `NicenameAuditor`, so the
+split costs no new concrete type — it only narrows what each caller has to know.
 
 Two methods rather than six (`ByTag`/`CountByTag`/`ByAuthor`/`CountByAuthor`/
 `ByDate`/`CountByDate`): the three archive kinds differ only in which predicate
@@ -480,12 +573,22 @@ WHERE p.post_status = 'publish'
   AND p.post_type IN (...)
   [AND EXISTS (SELECT 1 FROM {prefix}term_relationships tr
                  JOIN {prefix}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
-                WHERE tr.object_id = p.ID AND tt.taxonomy = ? AND tt.term_id IN (...))]
+                WHERE tr.object_id = p."ID" AND tt.taxonomy = ? AND tt.term_id IN (...))]
   [AND p.post_author = ?]
-  [AND p.post_date >= ? AND p.post_date < ?]
-ORDER BY p.post_date DESC, p.ID DESC
+  [AND p.post_date >= ?/* Start */ AND p.post_date < ?/* End */]
+ORDER BY p.post_date DESC, p."ID" DESC
 LIMIT ? OFFSET ?
 ```
+
+The `ID` column is **quoted**, and must be built with `bun.Ident("ID")` rather
+than interpolated as bare `p.ID`: Postgres declares the column as `"ID"`
+(`internal/storage/migrations/postgres/0001_init.up.sql:6`), so an unquoted
+`p.ID` folds to `p.id` and errors at runtime on that vendor only. Every existing
+read in `internal/storage/wprepo` already goes through `bun.Ident("ID")` (29 call
+sites). This is a live trap, not a theoretical one — the repo has already shipped
+two Postgres identifier-quoting defects
+([#40](https://github.com/roboweaver/grimoire/issues/40),
+[#43](https://github.com/roboweaver/grimoire/issues/43)).
 
 `EXISTS` is a semi-join, so it yields one row per post **by construction**. That
 matters more than it looks: the existing `ByTermSlug` joins the term tables
@@ -500,11 +603,12 @@ is both slower and differently supported across the three vendors.
 `CountPublishedArchive` is the identical predicate under `COUNT(*)`, so the count
 and the listing cannot describe different sets.
 
-The date bound is a half-open range on `post_date` formatted by the existing
-`formatTS` helper, exactly as `MediaFilter`'s `After`/`Before` already do in
-`internal/storage/wprepo/media.go` — no `YEAR()`/`EXTRACT`/`strftime`, so one
-statement serves MySQL, Postgres and SQLite (where `DATETIME` is ISO-8601 text
-and orders lexicographically).
+The date bound is a half-open range `[Start, End)` on `post_date` formatted by
+the existing `formatTS` helper — the same *formatting* route `MediaFilter` takes
+in `internal/storage/wprepo/media.go`, though not the same *semantics* (see
+`ArchiveFilter`'s field comment: `MediaFilter.Before` is an inclusive day-end).
+No `YEAR()`/`EXTRACT`/`strftime`, so one statement serves MySQL, Postgres and
+SQLite (where `DATETIME` is ISO-8601 text and orders lexicographically).
 
 Guard: a filter with a non-empty `Taxonomy` and an empty `TermIDs` returns an
 empty slice and `0` without issuing a query, because `IN ()` is not valid SQL on
@@ -569,7 +673,8 @@ that is nearly always absent — a permanent cost for a one-off diagnostic — a
 the handler has nothing useful to do with the answer anyway: it must still serve
 one of the two authors. `DuplicateNicenames` is called once, from `-check`, and
 is reachable from no request path. That trade-off is the reason the reporting
-lives where it does.
+lives where it does — and the reason the method is declared on the narrow
+`domain.NicenameAuditor` rather than on `UserRepository`.
 
 ## Hierarchy resolution
 
@@ -834,7 +939,7 @@ inherited decision.
 | 4 — bases take effect | `routing.Structure.CategoryBase`/`TagBase`/`AuthorBase`, `Structure.CategoryBaseSet`/`TagBaseSet`, `Structure.front`, the four archive path constructors, `Classify`'s per-row prefix, `ArchivePatterns`, `Structure.Notes`, `cmd/grimoire/permalinks.go`, `cmd/grimoire-cli/permalinks.go` |
 | 5 — tag archives | `routing.Structure.TagPath`, `content.TermService.TagArchive`, `web.tagArchive` |
 | 6 — date archives | `routing.DateRef`, `DatePath` (incl. the `date/` disambiguation prefix), `content.PostService.DateArchive`, `web.dateArchive` |
-| 7 — author archives | `routing.Structure.AuthorPath`, `domain.UserRepository.ByNicename` (`ORDER BY ID ASC LIMIT 1`), `domain.NicenameConflict`/`UserRepository.DuplicateNicenames`, `content.PostService.AuthorArchive`, `web.authorArchive`, `content.rest.go` `userLink`, `cmd/grimoire-cli/permalinks.go` |
+| 7 — author archives | `routing.Structure.AuthorPath`, `domain.UserRepository.ByNicename` (`ORDER BY ID ASC LIMIT 1`), `domain.NicenameConflict`/`domain.NicenameAuditor.DuplicateNicenames`, `content.PostService.AuthorArchive`, `web.authorArchive`, `content.rest.go` `userLink`, `cmd/grimoire-cli/permalinks.go` |
 | 8 — pagination | `content.Page`, `clamp`/`newPage`, `web.pageParam`, `ArchiveData.BaseURL`, `category.tmpl`/`archive.tmpl` |
 | 9 — precedence | `routing.Structure.Classify` + the precedence table, `web.resolve`, `router.go` |
 | 10 — REST parity | `web.rest_terms.go` `restTermLink`/`termToREST`, `content.rest.go` `userLink` |

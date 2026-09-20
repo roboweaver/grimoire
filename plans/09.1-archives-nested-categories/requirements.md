@@ -55,6 +55,16 @@ traceable from the decision to the criterion that implements it.
 | What happens to date archives when `%post_id%` leads the structure? | **Replicate WordPress's `date/` disambiguation prefix.** When `%post_id%` appears among the structure's first three tokens, date archives move under an extra `date/` segment. | 6.7 |
 | Does the author archive need a `user_nicename` uniqueness assumption? | **No assumption; deterministic resolution instead.** `ByNicename` resolves to the lowest `ID`, and `grimoire-cli migrate -check` reports duplicates so the condition is discoverable before serving. | 7.6–7.8 |
 
+Three further questions were raised by the spec review on PR #51 — each one an
+assumption the first draft made silently rather than a question it asked. The
+project lead has answered all three, and they are acceptance criteria here too:
+
+| Question | Answer | Criteria |
+|---|---|---|
+| How is a category archive resolved: leaf slug first, or the whole segment path? | **Walk the full segment path through the taxonomy graph.** The handler already loads the whole taxonomy per category request; matching segment-by-segment through that graph removes the unstated dependency on term slugs being unique within a taxonomy and drops `TermRepo.BySlug` from the category path. Tags still resolve by slug — `post_tag` is flat, so there is no path to walk — and that resolution is made deterministic instead. | 1.7, 2.10, 2.11, 5.6 |
+| Do date archives apply when `permalink_structure` is empty? | **No — they are gated off entirely.** WordPress with plain permalinks registers no rewrite rules at all; its date archives are `?m=2024`, not `/2024`. Gating is therefore the WordPress-faithful choice *and* it preserves Requirement 9.6 and today's flat `/{slug}` behavior, under which `/2024` serves a post slugged `2024`. | 6.8, 9.8 |
+| What wins when a base segment equals a leading literal of the permalink structure? | **The post interpretation, with a loud `Notes()` entry.** `category_base` = `archives` against WordPress's Numeric preset `/archives/%post_id%` would otherwise classify `/archives/123` as a category, resolve nothing, and `404` every post URL on the site. The milestone's premise is that an existing site's published URLs keep working, so a post URL is not sacrificed to an archive base. | 4.4, 9.7 |
+
 ## Requirements
 
 ### Requirement 1 — Read the taxonomy hierarchy
@@ -70,8 +80,24 @@ grimoire to see that nesting, so my hierarchy is not flattened away.
    used by `domain.Post.ParentID` and `domain.MediaFilter.ParentID`.
 2. Every existing read that returns a `domain.Term` SHALL populate `ParentID`:
    `TermRepo.BySlug`, `TermRepo.ListByTaxonomy` and `TermRepo.TermsByIDs` in
-   `internal/storage/wprepo/repo.go`. A term read through one path and the same
-   term read through another SHALL NOT disagree about its parent.
+   `internal/storage/wprepo/repo.go`. THE agreement guarantee — a term read
+   through one path and the same term read through another SHALL NOT disagree
+   about its parent — applies to the two **taxonomy-scoped** reads, `BySlug` and
+   `ListByTaxonomy`, and SHALL NOT be claimed for `TermsByIDs`.
+   `TermsByIDs` joins `term_taxonomy` on `term_id` alone
+   (`internal/storage/wprepo/repo.go:264-272`) and the table is unique on
+   `(term_id, taxonomy)`, so a `term_id` registered in both `category` and
+   `post_tag` yields two rows with different `taxonomy` **and** different
+   `parent`. `ParentID` is a property of the `(term_id, taxonomy)` pair, and
+   `TermsByIDs`'s signature cannot express which pair the caller means.
+   THE requirement is therefore **narrowed** rather than given a deterministic
+   tie-break, for two reasons: a rule such as "lowest `term_taxonomy_id` wins"
+   would read as a guarantee about a value that is simply the wrong term's
+   parent, and no path in this milestone reads `ParentID` through `TermsByIDs` —
+   category ancestry and descendants come from `ListByTaxonomy` (Requirement
+   1.6, 2.10). `TermsByIDs` SHALL still select `parent`, and its doc comment
+   SHALL state the ambiguity for shared term IDs so a future caller does not
+   assume otherwise.
 3. THE system SHALL require **no schema change** to do this.
    `term_taxonomy.parent` already exists in every vendor's
    `0001_init.up.sql` and is already populated in real WordPress databases; the
@@ -88,6 +114,24 @@ grimoire to see that nesting, so my hierarchy is not flattened away.
    explicitly not introduced: unlike M9a's permalink options, terms are mutable
    at runtime through M6's `TermWriteService`, so a cache would need
    invalidation this milestone does not need to own.
+7. THE term-slug uniqueness situation SHALL be stated explicitly rather than
+   assumed either way, because two archive kinds depend on it differently:
+   - WordPress enforces within-taxonomy slug uniqueness **on write**
+     (`wp_unique_term_slug()` suffixes a colliding slug), so a database
+     WordPress created normally has no duplicates.
+   - THE schema does **not** enforce it. `{prefix}terms.slug` carries a
+     **non-unique** index
+     (`internal/storage/migrations/sqlite/0001_init.up.sql:40`, with the
+     MySQL/Postgres equivalents), and `{prefix}term_taxonomy` is unique only on
+     `(term_id, taxonomy)`, so two `category` terms slugged `local` are
+     schema-legal.
+   - THE live reference WordPress database has **no** duplicate slug within a
+     taxonomy (verified).
+   THE consequence SHALL be that the category archive's `200` path does not
+   depend on slug uniqueness at all — it resolves by walking the segment path
+   through the taxonomy graph (Requirement 2.10) — while tag archives, which
+   have no path to walk, resolve by slug **deterministically** (Requirement
+   5.6). Both SHALL be recorded in `docs/compatibility.md` (Requirement 13.6).
 
 ### Requirement 2 — Nested category archive routes are canonical
 
@@ -100,22 +144,28 @@ hierarchy.
 1. THE system SHALL serve a category archive at the path formed by the archive
    base segment followed by the category's full ancestry, root first, ending in
    the category's own slug — for example `/category/news/local` for "Local"
-   nested under "News".
+   nested under "News". THAT path SHALL be resolved by walking the segments
+   through the taxonomy graph (Requirement 2.10), not by resolving the final
+   segment and checking its ancestry afterwards.
 2. THE canonical path for a category SHALL be constructed in exactly one place,
    `routing.Structure`, alongside `Structure.Canonical` — so the redirect
    target, the theme's pagination links and the REST `link` field cannot
    diverge. This preserves the single-construction-site property M9a
    established.
-3. WHEN a request arrives at a category path whose final segment resolves to a
-   category but whose preceding segments are not that category's ancestry THE
-   system SHALL respond `301` with `Location` set to the canonical nested path.
-   This covers the flat `/category/{slug}` case, which is simply the zero-ancestor
-   instance of it, and a wrong-ancestor path such as `/category/sport/local`.
+3. WHEN the segment walk of Requirement 2.10 fails but the path's final segment
+   names a category somewhere in the taxonomy THE system SHALL respond `301`
+   with `Location` set to that category's canonical nested path (Requirement
+   2.11). This covers the flat `/category/{slug}` case, which is simply the
+   zero-ancestor instance of it, and a wrong-ancestor path such as
+   `/category/sport/local`. THE redirect is therefore a direct consequence of
+   the walk failing rather than of an ancestry comparison performed after a leaf
+   lookup.
 4. WHEN a category is top-level THE canonical path SHALL equal the flat path,
    and the request SHALL render `200` with no redirect. The canonical path SHALL
    be a fixed point for every category, and this SHALL have an explicit test.
-5. WHEN the final path segment resolves to no category in the `category`
-   taxonomy THE system SHALL respond `404`.
+5. WHEN neither the walk nor the recovery of Requirement 2.11 finds a category —
+   that is, the final path segment names no term in the `category` taxonomy — THE
+   system SHALL respond `404`.
 6. WHEN a category exists but has no published posts THE system SHALL render an
    empty archive with `200`, not `404` — matching today's behavior and roadmap
    AC 12.4.
@@ -128,6 +178,35 @@ hierarchy.
    `404`. WordPress serves no such route, and inventing a category index here
    would be a surface this milestone has not specified.
 9. Redirects SHALL be `301` and SHALL preserve the query string, matching M9a.
+10. THE category archive's segment path SHALL be resolved by **walking the
+    taxonomy graph**: the first segment SHALL be matched against the slugs of the
+    taxonomy's **root** terms (`ParentID == 0`, or a parent absent from the
+    graph per Requirement 1.4), each subsequent segment against the slugs of the
+    **children of the term matched by the previous segment**, and the archive
+    SHALL be the term the last segment matched. THE walk SHALL read the taxonomy
+    graph exactly once per request (Requirement 1.6) — the same read the
+    ancestry and descendant sets come from — so this costs no extra query.
+    `TermRepo.BySlug` SHALL NOT be used on the category path at all. THE
+    consequences SHALL be that:
+    - THE `200` path does not depend on term slugs being unique within a
+      taxonomy (Requirement 1.7): two `category` terms slugged `local` under
+      different parents are each reachable at their own canonical path, and
+      neither shadows the other.
+    - WHEN two sibling terms under the same parent share a slug — the only case
+      the walk cannot separate — THE walk SHALL select the **lowest `term_id`**,
+      deterministically and identically on all three vendors.
+    - A wrong-ancestor path fails the walk by construction rather than by a
+      comparison performed afterwards (Requirement 2.3).
+11. WHEN the walk of Requirement 2.10 fails THE system SHALL attempt **recovery
+    on the final segment only**, so a published flat or wrong-ancestor URL still
+    redirects rather than `404`ing: it SHALL look for terms in the already-loaded
+    taxonomy graph whose slug equals the final segment, and
+    - IF exactly one matches THEN it SHALL `301` to that term's canonical path;
+    - IF more than one matches THEN it SHALL `301` to the canonical path of the
+      one with the **lowest `term_id`**, deterministically on all three vendors;
+    - IF none matches THEN it SHALL `404` (Requirement 2.5).
+    Slug ambiguity is therefore confined to the redirect-recovery path, where the
+    alternative is a `404`, and is absent from every path that returns `200`.
 
 ### Requirement 3 — Category archives include descendants
 
@@ -149,7 +228,17 @@ under "News > Local" too, the way WordPress shows them.
    that filter SHALL NOT be expressible as "off" by any caller. The public read
    guarantee documented in `docs/compatibility.md` applies unchanged.
 5. THE archive SHALL list `post_type='post'` rows only, matching
-   `PostRepository.RecentPosts` and WordPress's own archive queries.
+   `PostRepository.RecentPosts` (`internal/storage/wprepo/repo.go:93`) and
+   WordPress's own archive queries. THIS IS a **user-visible change to the
+   existing category archive**, not only a rule for the new ones, and SHALL be
+   recorded as such: `ByTermSlug` (`repo.go:168`) and
+   `CountPublishedByTermSlug` (`repo.go:230`) apply **no** post-type predicate
+   today, so a published `page` assigned to a category appears in the category
+   archive now and will stop appearing. THE change SHALL be listed in
+   `docs/compatibility.md` (Requirement 13.7). THE live reference database is
+   unaffected — only `post` rows carry categories there (verified) — so the
+   change is invisible on the site this milestone validates against, which is
+   exactly why it has to be written down rather than observed.
 
 ### Requirement 4 — `category_base` and `tag_base` take effect
 
@@ -167,9 +256,28 @@ grimoire to serve my archives at that base rather than at a hard-coded one.
    stores no `author_base` option — it is a `WP_Rewrite` property, not a row in
    `{prefix}options` — so there is nothing to read and nothing to make
    configurable here.
-4. IF `category_base` and `tag_base` resolve to the same segment, or either
-   resolves to `author`, THEN THE system SHALL keep the *category* meaning for
-   the colliding segment and emit a startup `WARN` naming the collision.
+4. THE collision check SHALL cover three cases, and SHALL emit a startup `WARN`
+   naming the collision in each:
+   a. IF `category_base` and `tag_base` resolve to the same segment, or either
+      resolves to `author`, THEN THE system SHALL keep the *category* meaning for
+      the colliding segment.
+   b. IF a resolved base equals a **leading literal segment of the permalink
+      structure** — the front, or its first segment when the front is longer than
+      one segment — THEN THE system SHALL keep the **post** meaning for that
+      segment. THE concrete case is WordPress's own "Numeric" preset,
+      `/archives/%post_id%`, on a site whose `category_base` is `archives` — a
+      rename an operator makes precisely *because* their URLs live under
+      `/archives/`. Giving the base priority there would classify
+      `/archives/123` as a category, resolve no category, and `404` **every post
+      URL on the site** from its own canonical permalink. THE milestone's premise
+      is that an existing site's published URLs keep working, so the post
+      interpretation wins and the archive base is the surface that degrades.
+      chi does **not** catch this: all colliding pattern pairs — including
+      `/archives/{post_id}` alongside `/archives/*` — register without panicking
+      (probed directly), so the failure is silent unless the classifier and the
+      note make it loud.
+   c. THE precedence in (a) and (b) SHALL be decided by the classifier
+      (Requirement 9.7), not by chi registration order.
    Degrading loudly matches M9a Requirement 4's posture: grimoire reads a
    database it does not own.
 5. THE collision from 4.4 SHALL NOT be reported through `routing.Parse`'s error
@@ -211,6 +319,32 @@ grimoire to serve my archives at that base rather than at a hard-coded one.
     M9a's token set and `ChiPatterns` have no such form — so that disjunct is
     unreachable here and SHALL NOT be implemented. THE reduction SHALL be stated
     in the design rather than left as a silent omission.
+11. `routing.Parse` SHALL **normalize** each base value before resolving it:
+    trim surrounding whitespace, trim leading and trailing slashes, and collapse
+    repeated internal slashes. `firstNonEmpty`
+    (`internal/routing/routing.go:351`) trims whitespace only, which was inert
+    while no route consumed a base and becomes load-bearing here — the base is
+    now the seat of chi pattern registration, `Classify`'s segment comparison,
+    path construction and the REST `link` field. `/topics` is a realistic stored
+    value, not a hypothetical: WordPress's `options-permalink.php` prefixes the
+    submitted base with `/` before `update_option`, so `get_option(
+    'category_base' )` plausibly returns `/topics` on any site where the base was
+    set through the admin UI — and unnormalized it would emit `//topics/*`
+    patterns. THE live reference database stores **both bases empty** (verified),
+    so nothing in the reference site exercises this today, and the in-tree tests
+    use `"sections"` — which is why normalization has to be specified rather than
+    discovered.
+12. IF a base normalizes to **more than one segment** (`topics/news`) THEN THE
+    system SHALL emit a `Notes()` entry naming it, and SHALL use the normalized
+    multi-segment value consistently in the patterns, the classifier and the path
+    constructors — so an unusual base degrades to a reported oddity rather than to
+    a category archive that `404`s while `CategoryPath` advertises it.
+13. THE emptiness test that decides whether a base fell back to its default
+    (`firstNonEmpty`) and the test that decides `CategoryBaseSet`/`TagBaseSet`
+    (Requirement 4.9) SHALL be **one shared test**, applied after the
+    normalization of 4.11. Otherwise a base of `" "` both resolves to the default
+    *and* counts as provided, dropping the front for a base that was effectively
+    unset.
 
 ### Requirement 5 — Tag archives
 
@@ -230,6 +364,20 @@ browse by category.
 5. THE tag archive SHALL render through the `tag` template kind, which M9a
    already registered in `render.hierarchy` as `tag` → `archive` → `index`. No
    template-resolution change is in scope.
+6. Tags resolve **by slug**, because `post_tag` is flat and there is no path to
+   walk — so the slug-uniqueness question Requirement 1.7 removes from the
+   category path does not disappear for tags. WHEN more than one `post_tag` term
+   shares a slug THE system SHALL resolve **deterministically to the lowest
+   `term_id`**, and SHALL NOT treat the duplicate as an error. `TermRepo.BySlug`
+   (`internal/storage/wprepo/repo.go:208`) is a `LIMIT 1` with **no `ORDER BY`**
+   today, so its winner can differ between SQLite, MySQL and Postgres; it SHALL
+   gain `ORDER BY t.term_id ASC`. THIS mirrors exactly how `ByNicename` is
+   handled (Requirement 7.6): the schema permits the duplicate, WordPress's own
+   read is arbitrary, grimoire picks a rule so that a cross-vendor contract test
+   can assert something. THE impact SHALL be stated rather than implied — one
+   `/{TagBase}/{slug}` URL can surface only one of the colliding tags, so the
+   other's posts are unreachable by that route — and SHALL be recorded in
+   `docs/compatibility.md` (Requirement 13.6).
 
 ### Requirement 6 — Date archives
 
@@ -248,12 +396,26 @@ browse by category.
 3. IF the components do not form a real calendar date (for example `2024/02/30`,
    `2024/13/01`) THEN THE system SHALL respond `404` rather than querying.
 4. THE date range SHALL be applied as a half-open `[start, end)` comparison on
-   `post_date`, not through a vendor-specific date function, following the
-   precedent already set by `domain.MediaFilter`'s `After`/`Before` and
-   `formatTS` in `internal/storage/wprepo`. Dates SHALL be compared in the
-   post's stored local time with no timezone conversion, for the same reason
-   M9a's `Canonical` does not convert: shifting to UTC would move a post
-   published just after local midnight into the previous day.
+   `post_date`, not through a vendor-specific date function. THE interval SHALL
+   be built **in UTC**, so that `formatTS` — which is
+   `return t.UTC().Format(tsLayout)`
+   (`internal/storage/wprepo/helpers.go:27`) — is the **identity** on it. That is
+   what "no timezone conversion" actually requires given that helper: `post.Date`
+   is UTC-based wall-clock time, because `parseTS` reads it with
+   `time.ParseInLocation(layout, s, time.UTC)` and then `.UTC()`
+   (`helpers.go:52`), which is the same basis M9a's `Canonical` reads it on.
+   Building the interval in any other zone would silently shift every boundary by
+   that zone's offset: on a UTC-7 host a May 2024 archive would query
+   `2024-05-01 07:00:00` to `2024-06-01 07:00:00`, missing the first seven hours
+   of May 1 and wrongly including the last seven of April 30 — plausible-looking
+   output, reported months later.
+   `domain.MediaFilter` SHALL NOT be cited as the half-open precedent, because it
+   is not one: `mediaWhere` compares against `formatTS(f.Before.AddDate(0, 0,
+   1))` (`internal/storage/wprepo/media.go:79-83`, with a comment saying so), so
+   its convention is `[After, Before+1day)` — an inclusive day-end. THE archive
+   filter's bounds SHALL therefore be named **`Start`/`End`** rather than
+   `After`/`Before`, so `internal/domain` does not carry two filter types whose
+   identically-named fields mean opposite things.
 5. WHEN a date archive matches zero published posts THE system SHALL render an
    empty archive with `200`. There is no entity to not-exist, so `404` has no
    meaning here.
@@ -272,6 +434,24 @@ browse by category.
    segment SHALL NOT be added for any other structure, so the common cases
    (`/%postname%/`, `/%year%/%monthnum%/%day%/%postname%/`) keep serving date
    archives at their bare paths exactly as WordPress does.
+8. WHEN `permalink_structure` is empty — a `Flat` `Structure` — THE system SHALL
+   register **no** date archive routes and SHALL classify no path as a date
+   archive. Date archives are gated entirely off, for three reasons that agree:
+   - **It is what WordPress does.** With plain permalinks WordPress registers no
+     rewrite rules at all; its date archives are `?m=2024`, `?m=202405`, not
+     `/2024`.
+   - **It preserves Requirement 9.6.** A flat `Structure` has no front, so every
+     archive prefix is empty, and an ungated date row would claim `/2024` as a
+     year archive ahead of the flat `/{slug}` route that 9.6 lists among the
+     routes whose behavior must not change — and that task 7.4 asserts by test.
+   - **It preserves a real URL.** Today `/2024` on a plain-permalink site
+     resolves a post slugged `2024`, which is the slug WordPress generates for a
+     post titled "2024". Ungated, that post becomes unreachable.
+   THE classifier SHALL therefore classify `/2024` under a `Flat` structure as
+   `KindPost` (Requirement 9.8), and `ArchivePatterns` SHALL emit no date
+   patterns for a `Flat` structure. Category, tag and author archives are **not**
+   gated — grimoire already serves `/category/{slug}` under plain permalinks, and
+   that behavior is preserved.
 
 ### Requirement 7 — Author archives
 
@@ -321,6 +501,18 @@ published.
    author archive route: that would add a `COUNT` to every author archive hit
    for a condition that is nearly always absent, and the reporting path already
    makes it discoverable.
+9. THE absence of an index on `user_nicename` in grimoire's own migrations SHALL
+   be recorded as a **known limitation**, not fixed. The column is declared at
+   `internal/storage/migrations/sqlite/0001_init.up.sql:65`, `mysql:69` and
+   `postgres:65`, and the only `users` index any of the three creates is on
+   `user_login` — so `/author/{nicename}` is a full table scan per request on a
+   **grimoire-created** database. WordPress-created databases carry WordPress's
+   own index, so the reference site and every real deployment this milestone
+   targets are unaffected. Adding an index would break the zero-migration
+   property this milestone leans on (Requirement 1.3), which is a worse trade than
+   a scan over the `users` table of a database that only grimoire's own tests and
+   fresh installs create. THE limitation SHALL be recorded in
+   `docs/compatibility.md` (Requirement 13.8).
 
 ### Requirement 8 — Pagination on every new archive
 
@@ -381,6 +573,18 @@ collide, without reading chi's internals.
    route: `/`, `/login`, `/comment`, `/healthz`, `/admin/*`, `/wp-json/*`,
    `/wp-content/uploads/*`, the permalink patterns and the flat `/{slug}`
    fallback. THE task list SHALL assert this with tests, not by inspection.
+7. WHERE a resolved archive base equals a leading literal segment of the
+   permalink structure (Requirement 4.4b) THE classifier SHALL resolve the path
+   as `KindPost`, and the archive interpretation of that segment SHALL be
+   unreachable. THE post row of the precedence table SHALL therefore be
+   **reachable** for a path whose first segment is a base that collides with the
+   structure's front — which is a property of the table's ordering and SHALL have
+   its own test row, since chi registers the colliding patterns without
+   complaint and would never surface the problem.
+8. WHERE the structure is `Flat` THE classifier SHALL never return `KindDate`
+   (Requirement 6.8). `/2024` SHALL classify as `KindPost` with
+   `Ref{Slug: "2024"}`, exactly as it resolves today, and this SHALL have an
+   explicit `Classify` test case rather than being inferred from the gate.
 
 ### Requirement 10 — REST parity for the new surfaces
 
@@ -392,7 +596,20 @@ collide, without reading chi's internals.
 2. `restTermLink` currently hard-codes `restAbs(r, "/category/"+slug)` for
    categories and `/?tag=` for tags. Both SHALL be built from
    `routing.Structure`'s archive-path constructors, so an advertised link is a
-   URL that returns `200` rather than one that `301`s or `404`s.
+   URL that returns `200` rather than one that `301`s or `404`s. A category's
+   link SHALL carry its full ancestry, resolved through the same graph walk the
+   archive route uses (Requirement 2.10), so the link is the canonical path
+   rather than the flat one that `301`s.
+   **One exception, stated rather than left to contradict Requirement 4.4:** when
+   `tag_base` collides with `category_base` the colliding segment keeps the
+   category meaning (4.4a), so `TagPath` advertises a link that classifies as a
+   category and does not return `200`; likewise a base that collides with the
+   structure's front keeps the post meaning (4.4b), so that archive's advertised
+   link does not return `200` either. In both cases the collision is already
+   reported by `Structure.Notes()` at startup and by `migrate -check`
+   (Requirement 4.6), which is the surface that tells an operator why. THE
+   `200` guarantee therefore holds for every configuration that `Notes()` reports
+   as clean.
 3. `userLink` SHALL return the author archive path (Requirement 7.5).
 4. `commentLink` SHALL remain on its `/?p={id}#comment-{id}` fallback. No route
    is added for it in this milestone, so changing it would advertise a URL that
@@ -425,9 +642,20 @@ collide, without reading chi's internals.
 1. `Term.ParentID` SHALL be covered by the cross-vendor contract suite in
    `internal/storage/storagetest`, exercised on SQLite, MySQL and Postgres, for
    each of the three term reads named in Requirement 1.2. `SeedFixtures`
-   currently inserts every `term_taxonomy` row with `parent` `0`, so the fixture
-   SHALL gain a nested category — a parent, a child and a grandchild — to make
-   the assertion meaningful.
+   currently inserts every `term_taxonomy` row with `parent` `0`, so a nested
+   category — a parent, a child and a grandchild — SHALL be seeded to make the
+   assertion meaningful. IT SHALL be seeded by a **separate helper** rather than
+   by extending `SeedFixtures`, and that helper SHALL add **no posts and no
+   category terms to the set `SeedFixtures` creates**, because several existing
+   assertions are absolute rather than relative: `contract.go:224-228` asserts
+   exactly 3 posts *and* their exact slug order, `contract.go:573` asserts a count
+   of 3, `internal/web/rest_terms_test.go:115` asserts "SeedFixtures seeds 3
+   category terms", and `internal/web/permalinks_test.go:17` documents the fixture
+   post set its expectations derive from. `SeedFixtures` is shared by
+   `internal/web/handlers_test.go:49`, `auth_test.go:77`, `rest_terms_test.go:62`,
+   `rest_router_test.go:56` and `rest_apppassword_comments_test.go:51`, so
+   changing what it seeds turns this phase into a cross-package test-update phase
+   for no gain.
 2. THE descendant-inclusive listing and count SHALL be covered by cross-vendor
    contract cases, including the duplicate-assignment case from Requirement 3.3
    and the unpublished-post exclusion from Requirement 3.4.
@@ -465,12 +693,49 @@ collide, without reading chi's internals.
    explicitly — **including when it is set to the default string**, which is the
    case that distinguishes 4.9 from a naive implementation; and a
    `%post_id%`-leading structure yields `date/`-prefixed date paths while a
-   `%postname%`-leading one does not.
+   `%postname%`-leading one does not. THE `date/` table SHALL include at least
+   one **literal-carrying** structure, because WordPress's rule counts `%...%`
+   **tokens** rather than path segments: `/archives/%year%/%monthnum%/%post_id%/`
+   has `%post_id%` at token 3 and therefore **does** fire the prefix, while an
+   implementation that counted segments would place it at 4 and not fire. A table
+   of token-only structures cannot catch that mistake.
 10. Duplicate-`user_nicename` resolution SHALL be covered on both surfaces: a
     cross-vendor `storagetest` case seeding two users with the same nicename and
     asserting the lowest `ID` wins on SQLite, MySQL and Postgres (Requirement
     7.6), and a test asserting `migrate -check` reports the duplicate
     (Requirement 7.8).
+11. Base **normalization** (Requirement 4.11–4.13) SHALL be covered by pure unit
+    tests in `internal/routing`: `/topics`, `topics/`, `//topics//` and
+    `" topics "` all resolve to the same base and to `CategoryBaseSet == true`;
+    `" "` resolves to the default **and** to `CategoryBaseSet == false`, which is
+    the case a second emptiness test gets wrong; a base normalizing to
+    `topics/news` yields a `Notes()` entry and still produces consistent patterns,
+    classification and constructed paths.
+12. THE `Flat` date gate (Requirement 6.8, 9.8) SHALL be covered by an explicit
+    `Classify` case asserting `/2024` under a `Flat` structure is `KindPost` with
+    `Ref{Slug: "2024"}` and **not** `KindDate`, and by an `ArchivePatterns` case
+    asserting a `Flat` structure emits no date patterns.
+13. THE base-vs-structure-literal collision (Requirement 4.4b, 9.7) SHALL be
+    covered by: a `Notes()` case for `category_base` = `archives` against
+    `/archives/%post_id%`; a `Classify` case asserting `/archives/123` under that
+    configuration is `KindPost` and not `KindCategory`; and an assertion that
+    `Parse` still returns a **nil error** and a usable non-flat `Structure`.
+14. Deterministic tag resolution (Requirement 5.6) SHALL be covered by a
+    cross-vendor `storagetest` contract case seeding **two `post_tag` terms
+    sharing a slug** and asserting `TermRepo.BySlug` returns the lower
+    `term_id` on SQLite, MySQL and Postgres. THE higher `term_id` SHALL be
+    inserted first, so an implementation relying on insertion order rather than
+    `ORDER BY` fails the case — mirroring how the duplicate-nicename case is
+    seeded (12.10).
+15. THE category segment walk (Requirement 2.10, 2.11) SHALL be covered by
+    service-level tests against a fake `TermReader`: a three-level path resolves
+    to the leaf; a wrong-ancestor path fails the walk and recovers to a `301`
+    target; **two categories slugged identically under different parents are each
+    reachable at their own canonical path**, which is the case leaf-first
+    resolution gets wrong; two siblings sharing a slug resolve to the lower
+    `term_id`; and a final segment matching no term yields `ErrNotFound`. No
+    database is needed for any of them, and `TermRepo.BySlug` SHALL NOT appear on
+    the category path at all.
 
 ### Requirement 13 — Correct the statements this milestone invalidates
 
@@ -498,6 +763,32 @@ describe what it does now, not what it did one milestone ago.
    to the lowest `ID`, the impact is identical either way (one of the colliding
    authors is unreachable at that URL), and `grimoire-cli migrate -check`
    reports the condition.
+6. `docs/compatibility.md` SHALL record the **term-slug** posture (Requirement
+   1.7): WordPress enforces within-taxonomy slug uniqueness on write and the
+   schema does not; category archives do not depend on it, because they resolve by
+   walking the segment path (Requirement 2.10); tag archives do, and resolve to
+   the lowest `term_id` (Requirement 5.6), with the same impact shape as the
+   nicename case — one of the colliding tags is unreachable at that URL.
+7. `docs/compatibility.md` SHALL record the **post-type filter change on the
+   existing category archive** (Requirement 3.5): a published `page` assigned to
+   a category appears in the category archive before this milestone and not
+   after. This is a user-visible removal on a route that already shipped, and it
+   is invisible on the reference database, so it is recorded rather than observed.
+8. `docs/compatibility.md` SHALL record the missing `user_nicename` index
+   (Requirement 7.9) as a known limitation: `/author/{nicename}` is a full scan on
+   a grimoire-created database, WordPress-created databases carry WordPress's own
+   index, and adding one would break the zero-migration property.
+9. `docs/compatibility.md` SHALL record the two precedence decisions that shape
+   which URL wins, with the right framing in each case:
+   - Date archives are **not served under plain permalinks** (Requirement 6.8).
+     This **matches** WordPress, whose plain-permalink date archives are `?m=`
+     query arguments, and it is what keeps `/2024` resolving a post slugged
+     `2024`.
+   - A base colliding with the structure's leading literal keeps the **post**
+     meaning (Requirement 4.4b), so the archive at that base is unreachable while
+     every published post URL still resolves. This is a grimoire decision, made
+     because the alternative `404`s an entire site, and `migrate -check` reports
+     the condition.
 
 ## Out of scope
 
@@ -533,4 +824,13 @@ describe what it does now, not what it did one milestone ago.
   `ORDER BY ID ASC LIMIT 1` read with no extra `COUNT`.
 - **De-duplicating `user_nicename`.** grimoire reads a database it does not own;
   it reports the condition and resolves it deterministically rather than
-  rewriting user rows.
+  rewriting user rows. The same posture applies to duplicate term slugs
+  (Requirement 1.7, 5.6): reported and resolved deterministically, never
+  rewritten.
+- **Date archives under plain permalinks.** Gated off by Requirement 6.8,
+  matching WordPress, whose plain-permalink date archives are `?m=` query
+  arguments rather than paths. `?m=` query-argument archives are not implemented
+  either — no query-argument route exists in grimoire.
+- **An index on `user_nicename`.** Recorded as a known limitation by Requirement
+  7.9 rather than fixed, because adding one would break the zero-migration
+  property.

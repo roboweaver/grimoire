@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -30,6 +31,25 @@ func newTestServer(t *testing.T) http.Handler {
 // newTestServer relies on, so the two share one fixture.
 func newTestServerWithPermalinks(t *testing.T, structure string) http.Handler {
 	t.Helper()
+	return newTestServerSeeded(t, structure, nil)
+}
+
+// seedFunc matches storagetest's seed helpers, so a caller can layer one of them
+// on the shared fixture without this file having to know what it seeds.
+type seedFunc func(ctx context.Context, db *sql.DB, vendor, prefix string) error
+
+// newTestServerSeeded is the single construction site for a test server. extra,
+// when non-nil, runs after storagetest.SeedFixtures and before the server is
+// built, which is how the archive tests layer the nested/empty fixture sets on
+// without growing the seed every other test in this package shares.
+//
+// The service wiring includes the archive dependencies — WithHierarchy for the
+// taxonomy graph the category archive walks, WithAuthors for the nicename
+// lookup — because without them the archive handlers panic on a nil dependency
+// rather than serving, which is a fixture failure wearing a handler bug's
+// clothes.
+func newTestServerSeeded(t *testing.T, structure string, extra seedFunc) http.Handler {
+	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "grimoire.db")
 	cfg := config.DatabaseConfig{Vendor: "sqlite", DSN: dsn, TablePrefix: "wp_"}
@@ -49,6 +69,11 @@ func newTestServerWithPermalinks(t *testing.T, structure string) http.Handler {
 	if err := storagetest.SeedFixtures(ctx, repos.DB(), cfg.Vendor, cfg.TablePrefix); err != nil {
 		t.Fatalf("SeedFixtures: %v", err)
 	}
+	if extra != nil {
+		if err := extra(ctx, repos.DB(), cfg.Vendor, cfg.TablePrefix); err != nil {
+			t.Fatalf("extra seed: %v", err)
+		}
+	}
 
 	eng, err := render.Load(filepath.Join("..", "..", "themes"), "default")
 	if err != nil {
@@ -59,10 +84,12 @@ func newTestServerWithPermalinks(t *testing.T, structure string) http.Handler {
 	if err != nil {
 		t.Fatalf("routing.Parse(%q): %v", structure, err)
 	}
-	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
+	posts := content.NewPostService(repos.Posts).
+		WithCounter(repos.PostCounter).
+		WithAuthors(repos.Users)
 	srv := web.NewServer(
 		posts,
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,

@@ -118,10 +118,18 @@ func main() {
 	termWrite := content.NewTermWriteService(termRW)
 	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
 
-	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
+	// The archive routes M9b registers need two opt-in dependencies beyond the
+	// M8 counter: WithHierarchy supplies the taxonomy read CategoryArchive's
+	// segment walk, ancestry and descendant set all derive from (Req 1.6), and
+	// WithAuthors supplies the user_nicename resolution AuthorArchive needs
+	// (Req 7.2). Both panic when unwired -- matching RecentPage's posture for a
+	// missing PostCounter -- and both are now reachable from a request, so this
+	// is where they get supplied.
+	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter).WithAuthors(repos.Users)
+	terms := content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader)
 	handler := web.NewServer(
 		posts,
-		content.NewTermService(repos.Terms, repos.Posts),
+		terms,
 		options,
 		eng,
 		log,

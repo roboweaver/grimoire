@@ -84,8 +84,8 @@ func newRESTTermsWriteRouter(t *testing.T) (http.Handler, *storage.Repositories,
 	ap := &auth.ApplicationPasswords{Users: repos.Users, Meta: repos.UserMeta, Prefix: cfg.TablePrefix}
 	termWrite := content.NewTermWriteService(termReadWriter{TermWriter: repos.TermWriter, TermReader: repos.TermReader})
 	srv := web.NewServer(
-		content.NewPostService(repos.Posts),
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewPostService(repos.Posts).WithAuthors(repos.Users),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,
@@ -125,8 +125,12 @@ func TestRESTCategoriesCollection(t *testing.T) {
 		if term["taxonomy"] != "category" {
 			t.Fatalf("taxonomy = %v, want category", term["taxonomy"])
 		}
+		// parent carries Term.ParentID (Req 10.1). Every category SeedFixtures
+		// seeds is top-level, so 0 here is the real hierarchy rather than a
+		// placeholder -- the nested-chain assertions live in
+		// rest_terms_link_test.go, which seeds SeedNestedCategories too.
 		if term["parent"].(float64) != 0 {
-			t.Fatalf("parent = %v, want placeholder 0", term["parent"])
+			t.Fatalf("parent = %v, want 0 (SeedFixtures' categories are all top-level)", term["parent"])
 		}
 	}
 }

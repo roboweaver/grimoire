@@ -1,21 +1,26 @@
 package content
 
+// This file holds the TermService test fake. Its own tests are gone: the two
+// methods they covered, Category and CategoryPage, were removed in M9b, and the
+// service's remaining reads are asserted in archive_test.go. The fake stays here
+// rather than moving, because every TermService test constructs one and
+// post_test.go keeps fakePostRepo the same way.
 import (
 	"context"
-	"errors"
-	"testing"
 
 	"github.com/roboweaver/grimoire/internal/domain"
 )
 
 type fakeTermRepo struct {
-	tax, slug      string
-	term           domain.Term
-	err            error
-	called         bool
-	countCalled    bool
-	countPublished int
+	tax, slug string
+	term      domain.Term
+	err       error
+	called    bool
 }
+
+// domain.TermRepository is what TermService holds, and BySlug is now the whole
+// of that interface: CountPublishedByTermSlug lost its last content-layer caller
+// with CategoryPage (M9b task 7.7) and has since been removed from the port.
 
 func (f *fakeTermRepo) BySlug(ctx context.Context, taxonomy, slug string) (domain.Term, error) {
 	f.called = true
@@ -23,74 +28,9 @@ func (f *fakeTermRepo) BySlug(ctx context.Context, taxonomy, slug string) (domai
 	return f.term, f.err
 }
 
-func (f *fakeTermRepo) CountPublishedByTermSlug(ctx context.Context, taxonomy, termSlug string) (int, error) {
-	f.countCalled = true
-	return f.countPublished, f.err
-}
-
-func TestTermServiceCategoryUnknownReturnsNotFound(t *testing.T) {
-	terms := &fakeTermRepo{err: domain.ErrNotFound}
-	posts := &fakePostRepo{}
-	svc := NewTermService(terms, posts)
-
-	_, _, err := svc.Category(context.Background(), "nope", 1, 10)
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("want ErrNotFound, got %v", err)
-	}
-	if posts.termTax != "" || posts.termSlug != "" {
-		t.Fatalf("posts repo should not be called on unknown term")
-	}
-	if terms.tax != "category" {
-		t.Fatalf("taxonomy=%q, want category", terms.tax)
-	}
-}
-
-func TestTermServiceCategoryKnownListsPosts(t *testing.T) {
-	terms := &fakeTermRepo{term: domain.Term{ID: 10, Slug: "news", Taxonomy: "category"}}
-	posts := &fakePostRepo{termPosts: []domain.Post{{Slug: "a"}, {Slug: "b"}}}
-	svc := NewTermService(terms, posts)
-
-	term, list, err := svc.Category(context.Background(), "news", 2, 5)
-	if err != nil {
-		t.Fatalf("Category: %v", err)
-	}
-	if term.Slug != "news" || len(list) != 2 {
-		t.Fatalf("term=%v posts=%d", term, len(list))
-	}
-	if posts.termTax != "category" || posts.termSlug != "news" {
-		t.Fatalf("forwarded tax=%q slug=%q", posts.termTax, posts.termSlug)
-	}
-	if posts.termLimit != 5 || posts.termOffset != 5 {
-		t.Fatalf("paging limit=%d offset=%d, want 5/5", posts.termLimit, posts.termOffset)
-	}
-}
-
-func TestTermServiceCategoryPageReturnsTotal(t *testing.T) {
-	terms := &fakeTermRepo{term: domain.Term{ID: 10, Slug: "news"}, countPublished: 25}
-	posts := &fakePostRepo{termPosts: []domain.Post{{ID: 1}, {ID: 2}}}
-	svc := NewTermService(terms, posts)
-
-	_, got, page, err := svc.CategoryPage(context.Background(), "news", 2, 10)
-	if err != nil {
-		t.Fatalf("CategoryPage: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("posts = %d, want 2", len(got))
-	}
-	if page.Page != 2 || page.PerPage != 10 || page.Total != 25 || page.TotalPages != 3 {
-		t.Fatalf("page = %+v, want {2 10 25 3}", page)
-	}
-}
-
-func TestTermServiceCategoryPageNotFoundSkipsCount(t *testing.T) {
-	terms := &fakeTermRepo{err: domain.ErrNotFound}
-	posts := &fakePostRepo{}
-	svc := NewTermService(terms, posts)
-	_, _, _, err := svc.CategoryPage(context.Background(), "missing", 1, 10)
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("want ErrNotFound, got %v", err)
-	}
-	if terms.countCalled {
-		t.Fatalf("CountPublishedByTermSlug should not be called when term lookup fails")
-	}
-}
+// TermService.Category and TermService.CategoryPage are both gone. Category had
+// no production caller (M9b task 5.7); CategoryPage's only one was web.category,
+// which task 7.7 replaces with the four archive handlers, so it went with it.
+// Their cases are covered by CategoryArchive and TagArchive in archive_test.go,
+// which assert the same resolve-then-list and not-found-skips-query behavior
+// against the segment walk that superseded the slug lookup (Req 2.10).

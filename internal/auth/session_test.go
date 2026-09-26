@@ -34,6 +34,25 @@ func (f *fakeUsers) ByLogin(_ context.Context, login string) (domain.User, error
 	}
 	return u, nil
 }
+
+// ByNicename mirrors the repository's lowest-ID-wins resolution (Req 7.6). No
+// auth path calls it; it is here to satisfy domain.UserRepository.
+func (f *fakeUsers) ByNicename(_ context.Context, nicename string) (domain.User, error) {
+	var found domain.User
+	ok := false
+	for _, u := range f.byID {
+		if u.Nicename != nicename {
+			continue
+		}
+		if !ok || u.ID < found.ID {
+			found, ok = u, true
+		}
+	}
+	if !ok {
+		return domain.User{}, domain.ErrNotFound
+	}
+	return found, nil
+}
 func (f *fakeUsers) ByID(_ context.Context, id int64) (domain.User, error) {
 	u, ok := f.byID[id]
 	if !ok {

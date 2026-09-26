@@ -28,18 +28,71 @@ type PostRepository interface {
 	// method named ByID sitting next to one that ignores status is a trap; this
 	// name makes the difference unmissable at every call site.
 	PublishedByID(ctx context.Context, id int64, types ...string) (Post, error)
-	// ByTermSlug returns published posts related to a taxonomy term, newest first.
-	ByTermSlug(ctx context.Context, taxonomy, termSlug string, limit, offset int) ([]Post, error)
+	// PublishedArchive returns published posts matching f, newest first
+	// (post_date DESC, ID DESC). It is the descendant-inclusive archive read
+	// backing the category, tag, author and date archives: the caller resolves
+	// a category's descendant set and passes the whole set in
+	// ArchiveFilter.TermIDs, so this method does not walk the taxonomy itself
+	// (Req 1.6, 3.1).
+	//
+	// A post matching more than one of f.TermIDs -- one filed under both a
+	// parent and a child -- appears exactly once (Req 3.3).
+	PublishedArchive(ctx context.Context, f ArchiveFilter, limit, offset int) ([]Post, error)
+	// CountPublishedArchive returns the number of published posts matching f,
+	// ignoring limit/offset. It counts the same set PublishedArchive lists,
+	// distinct on post ID, so M8's Page.Total and Page.TotalPages describe the
+	// rows actually listed (Req 3.2, 3.3).
+	CountPublishedArchive(ctx context.Context, f ArchiveFilter) (int, error)
+}
+
+// ArchiveFilter selects published posts for an archive listing. One filter type
+// covers all four archive kinds (category, tag, author, date), following
+// AdminPostFilter/MediaFilter's established zero-value-means-unfiltered
+// convention.
+//
+// post_status='publish' is deliberately NOT a field. It is applied
+// unconditionally by every implementation, so no caller can turn it off: these
+// reads serve anonymous visitors, and the public read guarantee in
+// docs/compatibility.md holds by construction rather than by every call site
+// remembering to ask for it (Req 3.4).
+type ArchiveFilter struct {
+	// Taxonomy and TermIDs select by term. TermIDs is a set -- a category plus
+	// its descendants -- so an empty TermIDs with a non-empty Taxonomy means
+	// "no terms" and matches nothing; it is NOT unfiltered. Degrading an empty
+	// descendant set to unfiltered would serve the whole site at a category
+	// URL. Both empty means unfiltered by term.
+	Taxonomy string
+	TermIDs  []int64
+
+	// AuthorID selects by post_author; 0 means unfiltered.
+	AuthorID int64
+
+	// Start and End are a half-open range on post_date: [Start, End). A zero
+	// value means unbounded on that side.
+	//
+	// They are deliberately NOT named After/Before. MediaFilter, in this same
+	// package, already carries After/Before, and its Before is an inclusive
+	// *day-end*: mediaWhere compares against formatTS(f.Before.AddDate(0, 0, 1))
+	// (internal/storage/wprepo/media.go:79-83, with a comment saying so), which
+	// makes MediaFilter's convention [After, Before+1day). Two filter types in
+	// internal/domain whose identically-named date fields meant opposite things
+	// would be a trap for whoever writes the third, so this one names its bounds
+	// for what they are. MediaFilter is left alone: renaming its fields would
+	// churn a tested read path for no behavioral gain (Req 6.4).
+	Start time.Time
+	End   time.Time
+
+	// Types selects by post_type. Empty defaults to {"post"}, matching
+	// RecentPosts and WordPress's own archive queries, so a published page
+	// assigned to a category does not appear in that category's archive
+	// (Req 3.5).
+	Types []string
 }
 
 // TermRepository resolves taxonomy terms.
 type TermRepository interface {
 	// BySlug returns the term for a taxonomy/slug pair, or ErrNotFound.
 	BySlug(ctx context.Context, taxonomy, slug string) (Term, error)
-	// CountPublishedByTermSlug returns the number of published posts related
-	// to a taxonomy term (Req 8.1's Total for the category page). Pure
-	// COUNT(*); no writes.
-	CountPublishedByTermSlug(ctx context.Context, taxonomy, termSlug string) (int, error)
 }
 
 // PostTermsRepository resolves the taxonomy terms related to a post. It is
@@ -207,6 +260,13 @@ type PostMetaRepository interface {
 type UserRepository interface {
 	// ByLogin returns a user by user_login, or ErrNotFound.
 	ByLogin(ctx context.Context, login string) (User, error)
+	// ByNicename returns a user by user_nicename, or ErrNotFound. It backs the
+	// author archive route, which is why it lives on this interface rather than
+	// on a narrower one. When more than one row shares the nicename it resolves
+	// deterministically to the lowest ID — schema-legal duplicates are not an
+	// error; see the implementation's doc comment for the divergence from
+	// WordPress this entails.
+	ByNicename(ctx context.Context, nicename string) (User, error)
 	// ByID returns a user by ID, or ErrNotFound.
 	ByID(ctx context.Context, id int64) (User, error)
 	// Create inserts a new user and returns its generated ID.
@@ -219,6 +279,43 @@ type UserRepository interface {
 	// Count returns the total number of users, ignoring limit/offset (used
 	// for pagination totals).
 	Count(ctx context.Context) (int64, error)
+}
+
+// NicenameConflict is one duplicated user_nicename: the value, how many rows
+// share it, and the ID UserRepository.ByNicename resolves it to (Req 7.8).
+type NicenameConflict struct {
+	Nicename string
+	Count    int   // rows sharing it, always >= 2
+	WinnerID int64 // the ID ByNicename resolves to (the lowest of them)
+}
+
+// NicenameAuditor is the operator-only duplicate-nicename read, declared as its
+// own narrow interface rather than added to UserRepository — following this
+// package's established opt-in pattern (TermReader, PostCounter and MediaWriter
+// are all declared alongside the wide interface they narrow).
+//
+// UserRepository is held by auth.Sessions, auth.ApplicationPasswords,
+// content.UserService and the REST users path — every request path. Putting an
+// operator-only diagnostic there would force both existing fakes
+// (internal/auth/session_test.go:30, internal/content/userservice_test.go:22) to
+// grow a method neither ever calls, to satisfy an interface neither needs it
+// from. ByNicename stays on UserRepository because it has a request-path caller
+// (the author archive route); this does not.
+//
+// The only consumer is "grimoire-cli migrate -check", so the only thing that
+// needs to name this method is the interface that command depends on. No request
+// path calls it: a per-request duplicate check would add a COUNT to every author
+// archive hit for a condition that is nearly always absent, and the handler must
+// still serve one of the two colliding authors either way.
+//
+// *wprepo.UserRepo satisfies both this and UserRepository, so the split costs no
+// new concrete type — it only narrows what each caller has to know.
+type NicenameAuditor interface {
+	// DuplicateNicenames reports every user_nicename shared by more than one
+	// row, ordered by nicename. Read-only, one aggregate query, called once by
+	// "grimoire-cli migrate -check" and by nothing on the request path. No
+	// duplicates is the common case and yields an empty result, not an error.
+	DuplicateNicenames(ctx context.Context) ([]NicenameConflict, error)
 }
 
 // UserMetaRepository reads and writes user metadata ({prefix}usermeta). It

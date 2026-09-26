@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M9a)
+# WordPress Compatibility (M1-M9b)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -39,7 +39,7 @@ Type mappings from the WordPress MySQL schema are translated per vendor
 `DATETIME`→`TIMESTAMP`/ISO-8601 `TEXT`, prefix-length keys→plain indexes). See
 `internal/storage/migrations/<vendor>/0001_init.up.sql`.
 
-## What's implemented (M1-M9a)
+## What's implemented (M1-M9b)
 
 - **M1 — Content core:** switchable database vendor (MySQL/PostgreSQL/
   SQLite), WordPress-compatible schema, public read rendering of posts,
@@ -106,10 +106,11 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     the condition is discoverable before the server is started. grimoire
     reads a database it does not own, so an unparseable structure degrades
     to a working flat site rather than refusing to boot.
-  - `commentLink` and `userLink` in the REST API keep their
-    plain-permalink-shaped fallbacks (`/?p={id}#comment-{id}`,
-    `/?author={id}`), because the routes they would otherwise point at do
-    not exist yet.
+  - `commentLink` in the REST API keeps its plain-permalink-shaped
+    fallback (`/?p={id}#comment-{id}`), because no comment route exists to
+    point it at. `userLink` kept its `/?author={id}` fallback for the same
+    reason until M9b added the author archive; it now returns
+    `/author/{nicename}`.
 
   Divergent or still open after M9a:
 
@@ -120,19 +121,216 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     serves pages at `/about` regardless of `permalink_structure` (and
     nests them under their parent page). This is the one place M9a's
     canonical URL can differ from the URL the site published.
-  - **No tag, date or author archive routes** (roadmap group 9.C). M9a
-    registers the `tag`, `author` and `date` template kinds in the existing
-    template hierarchy (each resolving `{kind}` → `archive` → `index`) so
-    the follow-on adds route handlers only — but nothing serves those URLs
-    today.
-  - **No nested category paths** (roadmap group 9.D). The category archive
-    is still the flat `/category/{slug}`.
-  - **`category_base` and `tag_base` are read and resolved but not yet
-    honored by any route**, so an override configured in WordPress does
-    not change grimoire's category URL yet.
   - Changing `permalink_structure` in WordPress requires restarting
     grimoire, since the options are read once at startup rather than per
     request. This mirrors WordPress's own rewrite-rule flush.
+
+  M9a additionally listed three gaps here — no tag/date/author archive
+  routes (roadmap group 9.C), no nested category paths (9.D), and
+  `category_base`/`tag_base` read and resolved but honored by no route.
+  All three are closed by M9b below.
+
+- **M9b — Archives and nested categories:** the four archive routes M9a
+  left unserved — nested category, tag, author and date — are served, and
+  `category_base`/`tag_base` now take effect. Zero schema changes:
+  `term_taxonomy.parent` already exists in every vendor's
+  `0001_init.up.sql` and is populated by WordPress itself, so this
+  milestone reads a column it does not create.
+
+  - **Nested category archives are canonical.** A category is served at
+    its base segment followed by its full ancestry, root first
+    (`/category/news/local`). The path is resolved by walking the
+    taxonomy graph — first segment against the taxonomy's root terms, each
+    later segment against the children of the term the previous one
+    matched — from a single read of the taxonomy's terms per request, so
+    two categories sharing a slug under different parents are each
+    reachable at their own path and neither shadows the other. A flat,
+    wrong-ancestor or skipped-level path whose final segment names a
+    category `301`s to that category's canonical path, preserving the
+    query string; a top-level category's canonical path is the flat path,
+    so it renders `200` rather than redirecting to itself. A final segment
+    naming no category `404`s, and so does the bare base segment
+    (`/category`) — WordPress serves no category index.
+  - **A category archive lists and counts its descendants' posts.** The
+    listing and the pagination total describe the same
+    descendant-inclusive set, and a post filed under both a parent and one
+    of its descendants appears once and is counted once (an `EXISTS`
+    semi-join, not a join).
+  - **Tag archives** serve at `/{tag_base}/{slug}`. `post_tag` is flat in
+    WordPress, so there is no ancestry to walk and `term_taxonomy.parent`
+    is ignored for that taxonomy.
+  - **Author archives** serve at `/author/{user_nicename}`, resolving by
+    `user_nicename` and rendering `display_name`. `user_login` is never
+    rendered, so the archive publishes no login name the site had not
+    already exposed. The base segment is the literal `author`: WordPress
+    stores no `author_base` option — it is a `WP_Rewrite` property, not a
+    row in `options` — so there is nothing to read and nothing to
+    configure.
+  - **Date archives** serve at year, year/month and year/month/day
+    granularity, with WordPress's own widths (4-digit year, zero-padded
+    2-digit month and day, so a 1-digit month does not match). The range
+    is a half-open `[start, end)` comparison on `post_date` built in UTC —
+    no vendor-specific date function, so one statement serves MySQL,
+    PostgreSQL and SQLite — and a path that names no real calendar date
+    (`2024/02/30`, `2024/13/01`) `404`s without querying.
+  - **`category_base` and `tag_base` are honored** in route registration,
+    path classification, the theme's archive and pagination links and the
+    REST `link` fields. Each value is normalized first — surrounding
+    whitespace trimmed, leading and trailing slashes trimmed, repeated
+    internal slashes collapsed — because WordPress's
+    `options-permalink.php` prefixes the submitted base with `/` before
+    storing it, so `get_option( 'category_base' )` plausibly returns
+    `/topics`. `grimoire-cli migrate -check` now reports both resolved
+    bases and whether each came from the option or from the WordPress
+    default, replacing the pre-M9b silence that was argued on the grounds
+    that no route honored either.
+  - **Collisions between bases degrade loudly rather than silently.** If
+    `category_base` and `tag_base` resolve to the same segment, or either
+    resolves to `author`, the category meaning wins; if a base equals a
+    leading literal of the permalink structure, the post meaning wins (see
+    the divergences below). Every such case is named in a startup `WARN`
+    and in `migrate -check`, and none of them is an error from
+    `routing.Parse` — a renamed base is no reason to stop serving
+    permalinks.
+  - **Pagination is M8's contract, unchanged.** Every archive returns the
+    same `Page`/`PerPage`/`Total`/`TotalPages` shape, selected by `?page=N`
+    with the same page size as the home page. An archive whose entity
+    exists but holds no published posts renders empty with `200`; a page
+    number past the last page `404`s, matching the home and category rule.
+    Theme pagination links are built from the archive's canonical path
+    rather than from a hard-coded `/category/{slug}`, which was wrong the
+    moment a category was nested or a base was overridden.
+  - **Route precedence lives in one pure, exported function**,
+    `routing.Structure.Classify`, with a documented precedence table and a
+    unit test per row — not in chi registration order, which resolves a
+    parameter-node collision silently in favour of whichever pattern was
+    registered last.
+  - **REST parity for the new surfaces.** `parent` on a term now carries
+    `term_taxonomy.parent` instead of a hard-coded `0`; a category's and a
+    tag's `link` are the real archive paths (a category's carrying its full
+    ancestry, so the advertised URL is the one that returns `200` rather
+    than the flat one that `301`s); a user's `link` is
+    `/author/{nicename}`. `commentLink` deliberately stays on
+    `/?p={id}#comment-{id}`, because no comment route exists and changing
+    it would advertise a URL that `404`s.
+
+  Matches WordPress rather than diverging — listed because the behavior
+  looks arbitrary without the provenance:
+
+  - **The permalink front is applied asymmetrically.** The structure's
+    leading literal segment(s) — `blog` in
+    `/blog/%year%/%monthnum%/%postname%/` — are prepended to date and
+    author archives always, but to category and tag archives only when the
+    corresponding base option is unset. This is WordPress's own condition,
+    `with_front => ! get_option( '{taxonomy}_base' )`. "Unset" means empty,
+    matching WordPress's truthiness test on `get_option()`, so a base set
+    explicitly to the same string as the default (`category_base` =
+    `category`) counts as **set** and drops the front.
+  - **Date archives move under a `date/` segment when `%post_id%` appears
+    among the structure's first three tokens**, so a bare `/%post_id%/`
+    structure serves `/date/2024` and leaves `/2024` to post 2024's own
+    canonical permalink. This is
+    `WP_Rewrite::get_date_permastruct()`'s rule verbatim, keyed on the
+    token index rather than on path segments, and it fires for no other
+    structure — `/%postname%/` and `/%year%/%monthnum%/%day%/%postname%/`
+    keep serving date archives at their bare paths, exactly as WordPress
+    does.
+  - **A date archive beats a post whose slug has a date's shape.** Under a
+    `/%postname%/` structure a post slugged `2024` is unreachable at
+    `/2024`, and under `/%year%/%monthnum%/%postname%/` a post slugged with
+    a bare 2-digit number is unreachable at the day position. WordPress's
+    rewrite-rule ordering resolves both the same way.
+  - **An archive base beats a post slugged identically to it.** Under a
+    single-segment structure, a post slugged exactly `category`, `tag`,
+    `author` or a configured base is unreachable, because a path rooted at
+    a base segment names that archive or names nothing and never falls
+    through to the post interpretation.
+  - **Date archives are not served under plain permalinks.** With an empty
+    `permalink_structure` no date routes are registered and no path
+    classifies as a date archive, which is what WordPress does — its
+    plain-permalink date archives are the `?m=2024` query argument, not
+    `/2024` — and it is what keeps `/2024` resolving a post slugged `2024`.
+    The `?m=` query-argument form is not implemented either; grimoire has
+    no query-argument route.
+
+  Divergent or still open after M9b:
+
+  - **Pagination is `?page=N`, where WordPress uses `/page/{n}/`.** This is
+    deliberate rather than pending: `/category/news/page/2` is
+    indistinguishable from a child category slugged `page`, so adopting
+    WordPress's path form would mean reserving `page` as a category slug.
+  - **A base that collides with the permalink structure's leading literal
+    keeps the post meaning.** `category_base` = `archives` against
+    WordPress's "Numeric" preset `/archives/%post_id%` — a rename an
+    operator makes precisely *because* their URLs live under `/archives/` —
+    would otherwise classify `/archives/123` as a category, resolve
+    nothing, and `404` every post URL on the site from its own canonical
+    permalink. grimoire keeps every published post URL resolving and lets
+    the archive at that base be the surface that degrades. The condition is
+    reported at startup and by `migrate -check`, which is also the surface
+    that explains why that archive's advertised REST `link` does not
+    return `200`.
+  - **A duplicate `user_nicename` resolves to the lowest `ID`.**
+    `user_nicename` carries a **non-unique** index in WordPress's schema
+    (verified against the live database: `Non_unique = 1`), so duplicates
+    are schema-legal even though `wp_insert_user()` suffixes a colliding
+    nicename on write — direct SQL, imports, multisite merges and
+    pre-suffix-era WordPress all produce them. WordPress's own read
+    resolves such a duplicate **arbitrarily**: a `LIMIT 1` with no
+    `ORDER BY`, behind an object cache, so the winner can flip on a cache
+    flush. grimoire orders by `ID` ascending instead, so the three vendors
+    agree with each other and a contract test has something stable to
+    assert. **The impact is identical either way:** one
+    `/author/{nicename}` URL can surface only one of the colliding authors,
+    so the other's posts are unreachable at that URL. There is no error and
+    no wrong data — one author is invisible there.
+    `grimoire-cli migrate -check` reports the condition, naming each
+    duplicated nicename, how many rows share it and which `ID` wins, so it
+    is discoverable before the site serves rather than after.
+  - **A duplicate term slug within a taxonomy resolves deterministically
+    too, and the category archive does not depend on the question at all.**
+    WordPress enforces within-taxonomy slug uniqueness on write
+    (`wp_unique_term_slug()` suffixes a collision) but the schema does not:
+    `terms.slug` carries a non-unique index. Category archives resolve by
+    walking the segment path, so a duplicate slug under a different parent
+    costs nothing; where the walk genuinely cannot separate two candidates —
+    sibling terms sharing a slug, or the redirect recovery that matches a
+    path's final segment — the lowest `term_id` wins. Tags have no path to
+    walk and so resolve by slug, also to the lowest `term_id`, with the
+    same impact shape as the nicename case: one of the colliding tags is
+    unreachable at that URL. (The reference WordPress database has no
+    duplicate slug within a taxonomy.)
+  - **The category archive now lists `post` rows only.** `ByTermSlug` and
+    `CountPublishedByTermSlug` applied no post-type predicate before M9b,
+    so a published `page` assigned to a category appeared in that
+    category's archive and no longer does — matching `RecentPosts` and
+    WordPress's own archive queries. This is a user-visible removal on a
+    route that already shipped, and it is invisible on the reference
+    database (only `post` rows carry categories there), which is why it is
+    recorded here rather than observed.
+  - **No index on `user_nicename` in grimoire's own migrations** (a known
+    limitation, not a pending fix). The only `users` index any of the three
+    vendors' `0001_init.up.sql` creates is on `user_login`, so
+    `/author/{nicename}` is a full table scan on a **grimoire-created**
+    database. WordPress-created databases carry WordPress's own index, so
+    the reference site and every real deployment this milestone targets are
+    unaffected; adding one would break the zero-migration property, which
+    is a worse trade than a scan over the `users` table of a database only
+    grimoire's own tests and fresh installs create.
+  - Custom taxonomies beyond `category` and `post_tag`, custom post types,
+    the `%category%`/`%author%` permalink tokens, plugin-registered rewrite
+    rules, hierarchical *page* URLs and term-hierarchy *editing* remain out
+    of scope, unchanged by this milestone. Editing a term's parent is still
+    not possible: M9b adds a read path.
+
+  Validated read-only against the reference WordPress database (the
+  `accuweaverllc/scripts` podman stack, MySQL 8.0, `permalink_structure`
+  `/%year%/%monthnum%/%day%/%postname%/`, `category_base` empty): **33
+  category terms, 28 of them nested**, every one of the 33 derived paths
+  round-tripping back through the classifier to the same segments and the
+  same trailing-slash form, and five nested archives checked end to end
+  over real HTTP — canonical path `200`, flat form `301` to it, query
+  string preserved.
 
 ## Public read guarantees
 
@@ -220,7 +418,15 @@ Then confirm in a browser / with `curl`:
   the server.
 - `GET /<post-slug>` on a site with a non-plain structure returns `301` to
   that canonical path rather than rendering, matching WordPress.
-- `GET /category/<slug>` renders that category's published posts.
+- `GET /<category-base>/<ancestry>/<slug>` renders that category's published
+  posts, including those filed under its descendants. On a nested category
+  the flat `/<category-base>/<slug>` form `301`s to that path instead of
+  rendering; on a top-level one the two are the same URL. `migrate -check`
+  names the resolved category and tag bases without starting the server.
+- `GET /<tag-base>/<slug>` and `GET /author/<user_nicename>` render the tag
+  and author archives; `GET /2024/05` (in whichever trailing-slash form the
+  structure implies) renders that month's posts, on any site whose
+  `permalink_structure` is not plain.
 - Draft/private URLs return `404`, and the source database is unchanged.
 
 **Result:** With `parseTime=true` and a matching `table_prefix`, grimoire renders

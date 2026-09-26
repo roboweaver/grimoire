@@ -92,10 +92,10 @@ func newM5Env(t *testing.T) *m5Env {
 	restMapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, dbcfg.TablePrefix)
 	appPasswords := &auth.ApplicationPasswords{Users: repos.Users, Meta: repos.UserMeta, Prefix: dbcfg.TablePrefix}
 
-	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
+	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter).WithAuthors(repos.Users)
 	srv := web.NewServer(
 		posts,
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,

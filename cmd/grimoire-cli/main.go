@@ -140,10 +140,11 @@ func runMigrate(args []string) error {
 }
 
 // reportPreflight prints the -check summary: schema compatibility, the resolved
-// permalink structure and whether grimoire can serve it, and any pending
-// grimoire-owned migrations. It reads only -- zero-row SELECTs for the schema
-// probe and three single-row option reads for the permalink report -- so it is
-// safe to point at a production database.
+// permalink structure and whether grimoire can serve it, any duplicate
+// user_nicename values, and any pending grimoire-owned migrations. It reads only
+// -- zero-row SELECTs for the schema probe, three single-row option reads for the
+// permalink report and one aggregate over {prefix}users for the nicename report
+// -- so it is safe to point at a production database.
 func reportPreflight(ctx context.Context, db *sql.DB, vendor, prefix string) error {
 	report, err := migrate.Preflight(ctx, db, vendor, prefix)
 	if err != nil {
@@ -168,6 +169,15 @@ func reportPreflight(ctx context.Context, db *sql.DB, vendor, prefix string) err
 		return err
 	}
 	reportPermalinks(ctx, os.Stdout, content.NewOptionService(wprepo.NewOptionRepo(bunDB, prefix)))
+
+	// Duplicate user_nicename values, for the same reasons and under the same
+	// conditions (Req 7.8): read-only, reached only after the clean schema
+	// report above, so {prefix}users is known to exist. One aggregate query, run
+	// once -- which is what makes it acceptable here and not on the author
+	// archive route. A read error is not fatal for the same reason it is not
+	// above: the pending-migration summary below is worth more than a
+	// diagnostic line, so reportDuplicateNicenames absorbs it.
+	reportDuplicateNicenames(ctx, os.Stdout, wprepo.NewUserRepo(bunDB, prefix))
 
 	overlayFS, err := storage.OverlayMigrationsFS(vendor)
 	if err != nil {

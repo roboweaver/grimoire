@@ -111,9 +111,27 @@ func TestPermalinkStatusCodes(t *testing.T) {
 			wantStatus: http.StatusNotFound,
 		},
 		{
-			// Req 2.6: unchanged from today's behavior.
+			// This was "path matching no route 404s" through M9a. From M9b it
+			// matches one: three numeric segments at WordPress's widths are a
+			// day archive (Req 6.1), and the classifier resolves a date ahead of
+			// a post exactly as WordPress's rewrite rules do (Req 9.3). So the
+			// slashless form is now the non-canonical form of a real archive
+			// rather than a path that addresses nothing, and it redirects. The
+			// archive itself is covered in archives_test.go; the row is kept
+			// here to record that this structure's 3-segment shape stopped being
+			// a 404 and to pin which answer replaced it.
+			name:         "three numeric segments are a day archive, not a 404",
+			path:         "/2024/01/01",
+			wantStatus:   http.StatusMovedPermanently,
+			wantLocation: "/2024/01/01/",
+		},
+		{
+			// The case the row above used to carry: a path this structure cannot
+			// produce and no archive claims. Three segments, so the flat
+			// fallback does not apply; the last one is not a 2-digit number, so
+			// the date rows decline it (Req 2.6).
 			name:       "path matching no route 404s",
-			path:       "/2024/01/01",
+			path:       "/2024/01/hello-1",
 			wantStatus: http.StatusNotFound,
 		},
 		{
@@ -253,6 +271,21 @@ func TestNumericPermalinkResolvesByID(t *testing.T) {
 	}
 }
 
+// categoryArchivePath is the slashless form of where each structure serves the
+// "news" category. Three of the four root it at /category/news, unchanged from
+// M9a. The Numeric preset is the exception: its front is the literal "archives",
+// and with category_base unset WordPress prepends the front to the category
+// archive as well (Req 4.7, 4.8), so the archive moves under it.
+//
+// Spelled out per structure rather than derived from routing.Structure's own
+// constructor, so a defect there cannot make this test agree with it.
+var categoryArchivePath = map[string]string{
+	structDayAndName:   "/category/news",
+	structMonthAndName: "/category/news",
+	structPostName:     "/category/news",
+	structNumeric:      "/archives/category/news",
+}
+
 // TestPermalinksDoNotShadowOtherRoutes guards the registration-order claim in
 // task 3.5: adding the structure routes must leave the existing routes reachable.
 func TestPermalinksDoNotShadowOtherRoutes(t *testing.T) {
@@ -264,7 +297,15 @@ func TestPermalinksDoNotShadowOtherRoutes(t *testing.T) {
 				want int
 			}{
 				{"/", http.StatusOK},
-				{"/category/news", http.StatusOK},
+				// Every structure in this table ends in "/", so from M9b the
+				// canonical category path does too (Req 2.7) and the slashless
+				// form is the one that redirects to it. The row is kept rather
+				// than dropped: what it guards is that the category route is
+				// still *reached* under each structure rather than shadowed by a
+				// permalink pattern, and a 301 from the archive handler shows
+				// that as well as a 200 did. The exact Location, and the 200 at
+				// the canonical form, belong to archives_test.go.
+				{categoryArchivePath[structure], http.StatusMovedPermanently},
 				{"/healthz", http.StatusOK},
 			} {
 				if rec := get(t, srv, tc.path); rec.Code != tc.want {

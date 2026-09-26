@@ -60,9 +60,21 @@ func TestRunSeedsContent(t *testing.T) {
 		t.Errorf("want about type page, got %q", page.Type)
 	}
 
-	catPosts, err := repos.Posts.ByTermSlug(ctx, "category", "news", 10, 0)
+	// The seeded term_relationships rows are what this asserts: two of the three
+	// seeded posts are filed under the "news" category. Read back through
+	// PublishedArchive, the surviving non-recursive term read -- the seed inserts
+	// no child categories, so a single-term filter with no descendant expansion
+	// describes exactly the same set the removed ByTermSlug did.
+	newsTerm, err := repos.Terms.BySlug(ctx, "category", "news")
 	if err != nil {
-		t.Fatalf("ByTermSlug: %v", err)
+		t.Fatalf("Terms.BySlug news: %v", err)
+	}
+	catPosts, err := repos.Posts.PublishedArchive(ctx, domain.ArchiveFilter{
+		Taxonomy: "category",
+		TermIDs:  []int64{newsTerm.ID},
+	}, 10, 0)
+	if err != nil {
+		t.Fatalf("PublishedArchive news: %v", err)
 	}
 	if len(catPosts) != 2 {
 		t.Errorf("want 2 posts in news category, got %d", len(catPosts))

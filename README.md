@@ -2,7 +2,7 @@
 
 **A Go-native, WordPress-schema-compatible CMS with a working embedded Adobe React Spectrum admin — no PHP, a swappable database backend, and WordPress-compatible content, auth, and REST surfaces.**
 
-> **Current state:** M1-M8 and M9a are implemented. The public site, embedded Adobe React Spectrum admin, WordPress-compatible content/auth/REST surfaces, revisions/autosave, scheduled publishing, WordPress-equivalent content browsing (public and admin pagination, admin post/media filters), and WordPress permalinks with canonical redirects all work today. REST write coverage includes posts/pages, comments, and taxonomy terms; media and user writes are not exposed.
+> **Current state:** M1-M8, M9a and M9b are implemented. The public site, embedded Adobe React Spectrum admin, WordPress-compatible content/auth/REST surfaces, revisions/autosave, scheduled publishing, WordPress-equivalent content browsing (public and admin pagination, admin post/media filters), WordPress permalinks with canonical redirects, and nested category, tag, author and date archives all work today. REST write coverage includes posts/pages, comments, and taxonomy terms; media and user writes are not exposed.
 
 > ## What's a grimoire?
 > A *grimoire* is a wizard's book of spells and knowledge — a single authoritative
@@ -180,28 +180,25 @@ full specification.
 - ✅ **M7:** [Revisions and scheduler](./plans/07-revisions-scheduler) — delivers revision history, autosave, and scheduled publishing.
 - ✅ **M8:** [Content browsing parity](./plans/wordpress-core-parity-roadmap) — delivers public and admin pagination with out-of-range 404s, admin post `search`/`status`/`author` filters, and a media library with filters and a grid/list toggle.
 - ✅ **M9a:** [Permalinks and canonical routing](./plans/09-permalinks-canonical-routing) — delivers `permalink_structure`/`category_base`/`tag_base` reads, the `%postname%`/`%post_id%`/`%year%`/`%monthnum%`/`%day%` token set (WordPress's three presets), `301` canonical redirects from every other recognised form, canonical REST `link` values, and the `tag`/`author`/`date` template kinds. Unsupported structures fall back to the flat route with a startup `WARN`.
-- 📝 **M9 (remainder):** [Taxonomy and archive parity](./plans/wordpress-core-parity-roadmap) — roadmap-level only. Covers tag/date/author archive routes (9.C) and nested categories (9.D), neither of which M9a serves. Requires its own spec before implementation.
+- ✅ **M9b:** [Archives and nested categories](./plans/09.1-archives-nested-categories) — delivers the four archive routes M9a left unserved: nested category archives at their full ancestry (`/category/news/local`), with `301` recovery from the flat and wrong-ancestor forms, plus tag, author and date archives. `category_base`/`tag_base` are honored in route registration, path classification, theme links and REST `link` values; a category archive lists and counts its descendants' posts; REST `parent` carries `term_taxonomy.parent`, category/tag `link` values are real archive paths, and a user's `link` is `/author/{nicename}`. Zero schema changes.
 - 📝 **M10:** [REST write and content safety parity](./plans/wordpress-core-parity-roadmap) — roadmap-level only. Covers a capability-aware write-boundary sanitization policy, then REST media/user writes and `content.rendered` fidelity. Requires its own spec before implementation.
 
 ## Status
 
-✅ M1-M8 and M9a are implemented.
+✅ M1-M8, M9a and M9b are implemented.
 
-📝 The rest of M9 (tag/date/author archives, nested categories) and all of M10
-are scoped at roadmap level in
+📝 M10 is scoped at roadmap level in
 [`plans/wordpress-core-parity-roadmap`](./plans/wordpress-core-parity-roadmap)
-but not implemented; each needs its own spec first.
+but not implemented; it needs its own spec first.
 
 Known gaps worth knowing before adopting an existing WordPress site:
 
-- **Archive routes.** There are no tag, date or author archive routes. M9a
-  registers their template kinds, but nothing serves those URLs yet; roadmap
-  group 9.C adds the handlers.
-- **Nested categories.** Category archives are served only at the flat
-  `/category/{slug}`, and a `category_base`/`tag_base` override configured in
-  WordPress is read but not yet honored by any route. Roadmap group 9.D.
 - **REST writes** for media and users are not exposed (they return `501`).
   Addressed by M10, which lands write-boundary sanitization first.
+- **Taxonomies and post types.** Only `category` and `post_tag` are served, and
+  archives list `post` rows only — custom taxonomies and custom post types are
+  out of scope. Term hierarchy is read-only: M9b reads `term_taxonomy.parent`,
+  but nothing re-parents a term.
 
 Permalinks are no longer a gap. M9a serves `permalink_structure` — the
 `%postname%`, `%post_id%`, `%year%`, `%monthnum%` and `%day%` tokens, covering
@@ -216,6 +213,21 @@ restart, since the options are read once at startup. One divergence to know:
 grimoire applies the structure to pages as well as posts, where WordPress serves
 pages at `/{slug}` regardless — see
 [`docs/compatibility.md`](./docs/compatibility.md).
+
+Archives and nested categories are no longer gaps either. M9b serves a category
+at its full ancestry (`/category/news/local`), `301`s the flat and
+wrong-ancestor forms to it, lists and counts its descendants' posts, and adds
+tag, author and date archives; `category_base` and `tag_base` now take effect
+everywhere a path is built or classified, and a base that collides with another
+base or with the permalink structure is named in a startup `WARN` and by
+`grimoire-cli migrate -check`. One divergence to know: archive pagination is
+`?page=N` rather than WordPress's `/page/{n}/`, deliberately —
+`/category/news/page/2` is indistinguishable from a child category slugged
+`page`. Precedence is worth knowing too: a path rooted at an archive base, or
+shaped like a date, wins over a post slugged the same way, as it does in
+WordPress. Hierarchical *page* URLs remain out of scope.
+[`docs/compatibility.md`](./docs/compatibility.md) has the full list, including
+the behaviors grimoire matches that look arbitrary without the provenance.
 
 ## Licensing note
 

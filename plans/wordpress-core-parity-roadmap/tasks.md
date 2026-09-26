@@ -8,9 +8,14 @@
 > and **9.F** were refined into their own spec,
 > [`../09-permalinks-canonical-routing`](../09-permalinks-canonical-routing)
 > (M9a), and implemented there; their boxes below are ticked with a note naming
-> what shipped. Groups **9.C**, **9.D** and **9.E** remain unticked and still
-> require the follow-on spec the M9 section describes — 9.E because the
-> cross-vendor `Term.ParentID` coverage it asks for depends on 9.D.
+> what shipped.
+>
+> **M9 completed 2026-09-20, as the work landed.** Groups **9.C**, **9.D** and
+> **9.E** were refined into the follow-on spec the M9 section asked for,
+> [`../09.1-archives-nested-categories`](../09.1-archives-nested-categories)
+> (M9b), and implemented there; their boxes below are ticked with a note naming
+> what shipped. 9.E was ticked last, after 9.D, because the cross-vendor
+> `Term.ParentID` coverage it asks for depends on it. M9 now has no open group.
 >
 > **M10 is deliberately unticked** — that is accurate, not drift. None of it has
 > been implemented, and it still requires its own spec before any code, as the
@@ -560,8 +565,11 @@ and implemented in
 (M9a), which settled permalink-token precedence (`%postname%` first, else
 `%post_id%`) and the per-case redirect status codes, and also resolved 9.D's
 two open questions on its behalf — see that spec's `requirements.md` "Out of
-scope" table. Groups **9.C**, **9.D** and **9.E** still need the follow-on
-spec, which inherits those decisions rather than relitigating them.
+scope" table. Groups **9.C**, **9.D** and **9.E** have since had their own
+review too: they are specified and implemented in
+[`../09.1-archives-nested-categories`](../09.1-archives-nested-categories)
+(M9b), which inherited M9a's two settled decisions rather than relitigating
+them. Every group in this section is therefore closed.
 
 - [x] **9.A — Options-driven permalink structure.** Read
       `permalink_structure`/`category_base`/`tag_base` from
@@ -574,14 +582,33 @@ spec, which inherits those decisions rather than relitigating them.
     startup** via `content.OptionService.Get`, calls `routing.Parse`, and
     passes the resulting `Structure` to the `internal/web` server (which
     registers the structure's chi patterns ahead of the existing `/{slug}`
-    route) and to the REST mapper. `category_base`/`tag_base` are parsed and
-    exposed but not yet consumed by any route — the category archive stays
-    flat `/category/{slug}` until 9.C/9.D — so an override configured in
-    WordPress does not change grimoire's category URL yet. Because the read is
+    route) and to the REST mapper. `category_base`/`tag_base` were parsed and
+    exposed but not yet consumed by any route at that point — the category
+    archive stayed flat `/category/{slug}` until 9.C/9.D. Because the read is
     once-at-startup, changing `permalink_structure` in WordPress requires
     restarting grimoire; `grimoire-cli migrate -check` reports the resolved
     structure and whether it is supported, so an unusable structure is
     discoverable before the server starts.
+  - _Base honoring completed in M9b._ The inert half of this group is closed:
+    `category_base` and `tag_base` now take effect in route **registration**
+    (`Structure.ArchivePatterns`), **classification** (`Structure.Classify`),
+    the theme's archive and pagination **links** (built from
+    `CategoryPath`/`TagPath`, not a hard-coded `/category/…`) and the REST term
+    **`link`** field, which had been advertising URLs that would `301`. Values
+    are normalized once at parse time — the admin-UI shape `/sections/` and the
+    bare `sections` resolve to the same base, and the normalized value is what
+    every consumer sees — and collisions are reported as non-fatal startup
+    diagnostics through `Structure.Notes()` rather than through `Parse`'s error
+    channel: the two bases resolving to each other, either resolving to the
+    `author` base, a base spanning more than one segment, and a base equal to a
+    leading literal of the permalink structure. Each note names the option, the
+    resolved value and which of the two competing meanings won, because the base
+    colliding with the structure's front keeps the **post** meaning — every post
+    URL resolves and that one archive base is unreachable instead, which is the
+    half an operator cannot see from the outside. `grimoire-cli migrate -check`
+    reports both resolved bases and the notes, so the condition is discoverable
+    before serving; the comment in `cmd/grimoire-cli/permalinks.go` explaining
+    why the bases were deliberately *not* reported went away with the behavior.
 - [x] **9.B — Core permalink tokens and canonical redirects.** Enumerate
       the exact WordPress token set to support (`%postname%`, `%year%`,
       `%monthnum%`, `%day%`, at minimum, per Requirement 11.1); specify
@@ -598,12 +625,40 @@ spec, which inherits those decisions rather than relitigating them.
     a date path contradicting the post's `post_date` `404`s. One divergence is
     documented in `docs/compatibility.md`: the structure is applied to `page`
     rows as well as `post` rows, where WordPress exempts pages.
-- [ ] **9.C — Tag, date, and author archives.** Specify the exact route
+- [x] **9.C — Tag, date, and author archives.** Specify the exact route
       shapes and pagination behavior (reusing M8's `Page` result type from
       Task 2.2), and whether/how they compose with M9.A's permalink
       structure. _M9a pre-landed this group's template kinds (see 9.F), so
       this group adds route handlers with no template plumbing left to
       discover._
+  - _Shipped in M9b._ All three archives are served: `tagArchive`,
+    `dateArchive` and `authorArchive` in `internal/web/handlers.go`, each
+    reached through one `Server.resolve` entry point rather than its own
+    pattern-matching. Route shapes are built in `internal/routing` next to
+    M9a's `Canonical` — `TagPath`, `DatePath`, `AuthorPath` — and every one
+    round-trips: the constructed path classifies back to the same target, which
+    is asserted as a fixed-point property per kind. Pagination is M8's `Page`
+    verbatim: the shared `content.Archive` result type carries a `Page`, so the
+    out-of-range `404` and the totals behave as they already did on home and
+    category, and the theme's prev/next links are built from the canonical
+    archive path rather than a hard-coded prefix. The query form stays
+    `?page=N` rather than WordPress's `/page/{n}/` — a deliberate divergence
+    recorded in `docs/compatibility.md`, because `/category/news/page/2` is
+    indistinguishable from a child category slugged `page`. Date archives cover
+    year/month/day granularity over a **half-open UTC interval**
+    (`DateRef.Range`), so a post never lands in two adjacent archives; a
+    day-without-month path and an impossible calendar date (`2024/02/30`) both
+    `404` rather than widening to something that returns `200`, and a real leap
+    day is accepted by the same check. Composition with 9.A's structure is
+    explicit, not incidental: the permalink front is prepended to date and
+    author archives always, dates move under an extra `date/` segment when
+    `%post_id%` is among the structure's first three tokens (without which
+    `/2024` would shadow post 2024's own canonical permalink), and a plain
+    structure serves no date archives at all — matching WordPress, whose
+    plain-permalink date archives are `?m=` query arguments, and keeping `/2024`
+    resolving a post slugged `2024`. `UserRepository.ByNicename` backs the
+    author archive with a deliberate `ORDER BY ID ASC LIMIT 1` divergence
+    (documented, and reported by `grimoire-cli migrate -check`).
 - [ ] **9.D — Nested category hierarchy.** Add `ParentID` to `domain.Term`
       sourced from `term_taxonomy.parent`; explicitly decide (and record in
       that milestone's own design) whether a parent category's archive
@@ -612,13 +667,39 @@ spec, which inherits those decisions rather than relitigating them.
       ("Out of scope"): a parent archive **does** include descendants (needing
       a descendant-aware post count so pagination totals stay correct), and
       nested routes are canonical with flat `/category/{slug}` `301`ing to
-      them. No code for this group has landed._
-- [ ] **9.E — M9 test coverage.** Cross-vendor contract tests for the new
+      them._
+  - _Shipped in M9b._ `domain.Term` gained `ParentID int64`, sourced from
+    `term_taxonomy.parent` and populated on all three reads that return a term
+    (`TermRepository.BySlug`, `TermReader.ListByTaxonomy`,
+    `TermReader.TermsByIDs`) —
+    **zero schema change**, because the column already exists in every vendor's
+    `0001_init.up.sql` and WordPress itself populates it. Category archives
+    serve the full ancestry path, resolved by a **segment walk** in
+    `content.TermHierarchy.ResolvePath` over one `ListByTaxonomy` read per
+    request: each segment is matched against the children of the term the
+    previous segment matched, so two categories sharing a slug under different
+    parents are each reachable at their own path and neither shadows the other.
+    A failed walk recovers rather than 404ing — the flat `/category/{slug}`
+    form, a wrong-ancestor path and a skipped-level path each `301` to the
+    canonical nested path via `content.CategoryMovedError`, which deliberately
+    does not wrap `domain.ErrNotFound` so a caller cannot 404 every legacy
+    category URL while looking correct. Descendant inclusion landed as decided:
+    `TermHierarchy.DescendantIDs` feeds `domain.ArchiveFilter.TermIDs`, and the
+    new `PublishedByArchive`/`CountPublishedByArchive` pair uses one `EXISTS`
+    semi-join, so a post filed under both a parent and its child appears **once**
+    and M8's pagination totals stay correct. Two imported-database corruptions
+    degrade rather than break: an orphaned parent terminates the ancestry walk
+    and yields the shorter path, and a parent cycle terminates on the first
+    already-visited term instead of hanging the request. REST parity came with
+    it — `restTerm.Parent` stops being hard-coded `0`, and term and user `link`
+    fields stop advertising URLs that would `301` or `404`.
+- [x] **9.E — M9 test coverage.** Cross-vendor contract tests for the new
       `Term.ParentID` read path; at least one fixture-based test against an
       imported real-WordPress-database export (mirroring
       `plans/02.1-wp-hash-real-db`'s validation approach) for permalink and
       nested-category behavior. This requirement extends to 9.F below.
-  - _Partly satisfied by M9a; stays open._ Landed: pure unit tests for parsing
+  - _Partly satisfied by M9a, which is why this box stayed unticked then._
+    Landed: pure unit tests for parsing
     and canonical construction in `internal/routing`, handler tests covering
     every row of M9a's status-code table, a template-hierarchy test for the
     three new kinds, a `PublishedByID` cross-vendor contract case, and two
@@ -628,9 +709,49 @@ spec, which inherits those decisions rather than relitigating them.
     live WordPress database (the `accuweaverllc/scripts` podman stack: MySQL 8.0,
     prefix `accuweaver`, structure `/%year%/%monthnum%/%day%/%postname%/`, 145
     published posts; 25 real permalinks validated in the routing check, 5
-    end-to-end). Still missing: the cross-vendor `Term.ParentID` contract tests
-    and the nested-category half of the real-database check, both of which
-    depend on 9.D.
+    end-to-end). Still missing at that point: the cross-vendor `Term.ParentID`
+    contract tests and the nested-category half of the real-database check, both
+    of which depended on 9.D.
+  - _Closed by M9b._ The two gaps above are filled. `RunTermParentContract`
+    (`internal/storage/storagetest/termparent_contract.go`) asserts `ParentID`
+    on **each** of the three reads that return a term — `BySlug`,
+    `ListByTaxonomy`, `TermsByIDs` — plus a case asserting the first two agree,
+    and runs against all three vendors
+    from `sqlite_test.go`, `mysql_test.go` and `postgres_test.go`; it is driven
+    by a nested category chain added to the shared fixtures, and it asserts
+    against a per-slug expected-parent map rather than "some term has a
+    non-zero parent", so a repository that populated one read and not another
+    fails. Three further contract suites land alongside it on the same
+    three-vendor footing: `RunArchiveContract` (descendant-inclusive
+    `PublishedByArchive`/`CountPublishedByArchive`, including the
+    filed-under-parent-and-child case that must count once),
+    `RunNicenameContract` (`ByNicename`, lowest `ID` on a duplicate) and
+    `RunNicenameAuditorContract` (`DuplicateNicenames`). The nested-category
+    half of the real-database check landed as
+    `internal/routing.TestRealWordPressNestedCategories` plus
+    `test/e2e.TestM9bNestedCategoriesRealDBE2E`, on M9a's existing
+    `GRIMOIRE_TEST_WP_DSN`/`GRIMOIRE_TEST_WP_PREFIX` gating — no new mechanism —
+    and both **have now passed against the live WordPress database** (same
+    `accuweaverllc/scripts` podman stack, MySQL 8.0, prefix `accuweaver`,
+    structure `/%year%/%monthnum%/%day%/%postname%/`, `category_base` empty so
+    it resolves to the default `category`): **33 category terms, 28 nested, all
+    33 derived paths round-tripped through `Classify`** — each derived
+    independently of `CategoryPath` so the implementation cannot merely agree
+    with itself — including three-level chains and a four-segment path whose
+    leaf slug repeats one of its own ancestors, which is the case a
+    slug-matching-globally walk gets wrong. Five nested archives were checked
+    end-to-end over real HTTP: canonical path `200` with the term name in the
+    heading, flat form `301` with a byte-equal `Location`, query string
+    preserved, and one hop only. Both checks **skip with a message naming the
+    precondition** when the target carries no category with `parent <> 0` rather
+    than passing vacuously, and the skip logic has its own local tests
+    (`test/e2e/m9b_realdb_census_test.go`). The mechanism is the env-gated live
+    read that `plans/02.1-wp-hash-real-db` established, not a committed export
+    fixture; with the variables unset the tree still builds clean and the whole
+    suite is green with both checks reporting `SKIP`. Coverage for 9.F was
+    already in place from M9a (the template-hierarchy test for the three new
+    kinds), and M9b's per-kind handler tests now exercise those kinds through
+    real routes.
 - [x] **9.F — Template-hierarchy fidelity.** Folded in from M1's deferral,
       recorded in [`../README.md`](../README.md)'s decisions list (under
       "Open decisions" when this group was written, now under "Resolved

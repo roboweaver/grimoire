@@ -659,7 +659,7 @@ them. Every group in this section is therefore closed.
     resolving a post slugged `2024`. `UserRepository.ByNicename` backs the
     author archive with a deliberate `ORDER BY ID ASC LIMIT 1` divergence
     (documented, and reported by `grimoire-cli migrate -check`).
-- [ ] **9.D — Nested category hierarchy.** Add `ParentID` to `domain.Term`
+- [x] **9.D — Nested category hierarchy.** Add `ParentID` to `domain.Term`
       sourced from `term_taxonomy.parent`; explicitly decide (and record in
       that milestone's own design) whether a parent category's archive
       includes descendant categories' posts before writing the route
@@ -685,7 +685,7 @@ them. Every group in this section is therefore closed.
     does not wrap `domain.ErrNotFound` so a caller cannot 404 every legacy
     category URL while looking correct. Descendant inclusion landed as decided:
     `TermHierarchy.DescendantIDs` feeds `domain.ArchiveFilter.TermIDs`, and the
-    new `PublishedByArchive`/`CountPublishedByArchive` pair uses one `EXISTS`
+    new `PublishedArchive`/`CountPublishedArchive` pair uses one `EXISTS`
     semi-join, so a post filed under both a parent and its child appears **once**
     and M8's pagination totals stay correct. Two imported-database corruptions
     degrade rather than break: an orphaned parent terminates the ancestry walk
@@ -723,7 +723,7 @@ them. Every group in this section is therefore closed.
     non-zero parent", so a repository that populated one read and not another
     fails. Three further contract suites land alongside it on the same
     three-vendor footing: `RunArchiveContract` (descendant-inclusive
-    `PublishedByArchive`/`CountPublishedByArchive`, including the
+    `PublishedArchive`/`CountPublishedArchive`, including the
     filed-under-parent-and-child case that must count once),
     `RunNicenameContract` (`ByNicename`, lowest `ID` on a duplicate) and
     `RunNicenameAuditorContract` (`DuplicateNicenames`). The nested-category

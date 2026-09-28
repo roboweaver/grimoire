@@ -83,8 +83,8 @@ func newAuthServer(t *testing.T, fake web.Sessions) *web.Server {
 		t.Fatalf("render.Load: %v", err)
 	}
 	srv := web.NewServer(
-		content.NewPostService(repos.Posts),
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewPostService(repos.Posts).WithAuthors(repos.Users),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,

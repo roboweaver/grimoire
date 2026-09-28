@@ -100,8 +100,8 @@ func TestM9PermalinksE2E(t *testing.T) {
 		t.Fatalf("render.Load: %v", err)
 	}
 	srv := web.NewServer(
-		content.NewPostService(repos.Posts).WithCounter(repos.PostCounter),
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewPostService(repos.Posts).WithCounter(repos.PostCounter).WithAuthors(repos.Users),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		options,
 		eng,
 		nil,

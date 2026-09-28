@@ -81,8 +81,8 @@ func adminE2EServer(t *testing.T) (*httptest.Server, *auth.SessionManager, strin
 		repos.UserCounter, repos.TermCounter, repos.Users,
 	)
 	srv := web.NewServer(
-		content.NewPostService(repos.Posts),
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewPostService(repos.Posts).WithAuthors(repos.Users),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,

@@ -12,6 +12,7 @@ import (
 // compile-time interface checks.
 var (
 	_ domain.UserRepository     = (*UserRepo)(nil)
+	_ domain.NicenameAuditor    = (*UserRepo)(nil)
 	_ domain.UserMetaRepository = (*UserMetaRepo)(nil)
 )
 
@@ -78,6 +79,91 @@ func (r *UserRepo) selectOne(ctx context.Context, col string, val any) (domain.U
 // ByLogin returns a user by user_login, or ErrNotFound.
 func (r *UserRepo) ByLogin(ctx context.Context, login string) (domain.User, error) {
 	return r.selectOne(ctx, "user_login", login)
+}
+
+// ByNicename returns a user by user_nicename, or ErrNotFound.
+//
+// The ORDER BY "ID" ASC is a deliberate divergence from WordPress.
+// WP_User::get_data_by( 'slug', ... ) issues the same LIMIT 1 with no ORDER BY
+// at all, behind an object cache, so its winner among duplicates is arbitrary
+// and can flip on a cache flush with nothing in the database having changed.
+// Duplicates are schema-legal: user_nicename carries a *non-unique* index
+// (verified against the live WordPress database: Non_unique = 1), even though
+// wp_insert_user() prevents them on write by appending numeric suffixes
+// (alice, alice-2). Direct SQL, imports, multisite merges, pre-suffix-era
+// WordPress and plugins all bypass that write path. grimoire therefore picks
+// the lowest ID: there is no shared object cache here to copy WordPress's
+// nondeterminism from, unordered row order diverges far more across SQLite,
+// MySQL and Postgres than inside WordPress's MySQL-only world, and a
+// cross-vendor contract test needs a stable winner to assert. A duplicate is
+// not an error — the consequence is the same as WordPress's either way: one
+// /author/{nicename} URL can surface only one of the colliding authors, so the
+// other's posts are unreachable by that route. grimoire-cli migrate -check
+// reports the condition so it is discoverable before the site serves.
+func (r *UserRepo) ByNicename(ctx context.Context, nicename string) (domain.User, error) {
+	var row userRow
+	err := r.db.NewSelect().
+		TableExpr("?", bun.Ident(r.prefix+"users")).
+		Column(userColumns...).
+		Where("user_nicename = ?", nicename).
+		// bun.Ident("ID"), never a bare ID: Postgres declares the column
+		// quoted as "ID", so unquoted it folds to id and fails on that vendor
+		// alone (issues #40/#43 were both this defect).
+		OrderExpr("? ASC", bun.Ident("ID")).
+		Limit(1).
+		Scan(ctx, &row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.User{}, domain.ErrNotFound
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+	return row.toDomain(), nil
+}
+
+// DuplicateNicenames reports every user_nicename shared by more than one row,
+// ordered by nicename. It satisfies domain.NicenameAuditor — the narrow,
+// operator-only interface — and is deliberately not part of
+// domain.UserRepository: its only caller is "grimoire-cli migrate -check", while
+// UserRepository is held by every request path.
+//
+// One aggregate statement, identical on all three vendors: the winner is
+// MIN(ID), which is exactly what ByNicename's ORDER BY "ID" ASC LIMIT 1 picks,
+// so the report cannot name a row the read does not serve. No duplicates yields
+// an empty slice and a nil error — that is the common case, not a failure.
+func (r *UserRepo) DuplicateNicenames(ctx context.Context) ([]domain.NicenameConflict, error) {
+	var rows []struct {
+		Nicename string `bun:"user_nicename"`
+		Count    int    `bun:"n"`
+		WinnerID int64  `bun:"winner"`
+	}
+	err := r.db.NewSelect().
+		TableExpr("?", bun.Ident(r.prefix+"users")).
+		Column("user_nicename").
+		ColumnExpr("COUNT(*) AS n").
+		// bun.Ident("ID"), never a bare ID: Postgres declares the column
+		// quoted as "ID", so unquoted it folds to id and fails on that vendor
+		// alone (issues #40/#43 were both this defect).
+		ColumnExpr("MIN(?) AS winner", bun.Ident("ID")).
+		GroupExpr("user_nicename").
+		Having("COUNT(*) > 1").
+		OrderExpr("user_nicename ASC").
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	conflicts := make([]domain.NicenameConflict, len(rows))
+	for i, row := range rows {
+		conflicts[i] = domain.NicenameConflict{
+			Nicename: row.Nicename,
+			Count:    row.Count,
+			WinnerID: row.WinnerID,
+		}
+	}
+	return conflicts, nil
 }
 
 // ByID returns a user by ID, or ErrNotFound.

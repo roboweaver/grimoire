@@ -169,32 +169,132 @@ func (s *Server) Routes() http.Handler {
 	if s.media != nil {
 		r.Method(http.MethodGet, "/wp-content/uploads/*", s.handler(s.uploads))
 	}
-	r.Method(http.MethodGet, "/category/{slug}", s.handler(s.category))
 	r.Method(http.MethodGet, "/", s.handler(s.home))
 	// Admin group must be registered before the public catch-all so /admin is
 	// never shadowed by content resolution (Req 1.2).
 	s.registerAdmin(r)
 	// REST group likewise, so /wp-json/* is never shadowed (Req 1.3).
 	s.registerREST(r)
-	// Permalink routes for the configured structure, registered before the flat
-	// catch-all. Both slash forms are registered because chi matches them as
-	// distinct routes: registering only the canonical one would make chi 404 the
-	// other before `single` could redirect it, which is exactly the duplicate-URL
-	// case Requirement 3.3 exists to close.
+	// Content routes for the configured structure: the permalink patterns, the
+	// archive patterns derived from the resolved bases and the structure's front,
+	// and the flat single-segment fallback. Every one of them is registered to
+	// the single dispatcher s.resolve (Req 9.1).
 	//
-	// These patterns have a fixed segment count and so cannot shadow
-	// /category/{slug}, /, /login or /wp-content/uploads/*; the relative order of
-	// those is unchanged. A single-segment structure such as /%postname%/ does
-	// collide with /{slug} at chi's parameter node, which chi resolves silently in
-	// favor of whichever was registered last rather than panicking -- so the two
-	// forms of one post can arrive under different parameter names. That is why
-	// `single` derives its components from the request path rather than from
-	// chi's parameter names.
-	for _, pattern := range s.permalinks.ChiPatterns() {
-		r.Method(http.MethodGet, pattern, s.handler(s.single))
+	// Both slash forms of each pattern are registered because chi matches them as
+	// distinct routes: registering only the canonical one would make chi 404 the
+	// other before the dispatcher could redirect it, which is exactly the
+	// duplicate-URL case Requirement 3.3 exists to close. The category archive is
+	// the one exception -- ArchivePatterns emits it as a single wildcard rooted at
+	// its base, because a nested category path has a segment count no chi pattern
+	// can express (Req 9.5), and a wildcard's remainder spans both slash forms on
+	// its own. The handler derives the segments from r.URL.Path, the way
+	// resolveSingle already does.
+	//
+	// These patterns collide with each other in ways chi does not report. It
+	// resolves a collision at a parameter node silently in favour of whichever
+	// pattern was registered last rather than panicking (M9a probed this; M9b
+	// probed the wildcard-versus-parameter pairs and found the same), so a path
+	// can arrive under a parameter name belonging to a different pattern. The
+	// cases this tree can register today:
+	//
+	//   - a single-segment structure such as /%postname%/ against the flat
+	//     /{slug}, so the two forms of one post arrive as {postname} on one and
+	//     {slug} on the other (M9a's case);
+	//   - the bare year archive /{year} against both of those, since a front-less
+	//     structure roots its date archives at /;
+	//   - a date archive against a permalink pattern of the same segment count,
+	//     e.g. /{year}/{monthnum}/{day} against /%year%/%monthnum%/%postname%/;
+	//   - a base that equals a leading literal of the structure, which registers
+	//     /archives/* alongside /archives/{post_id} for category_base=archives on
+	//     WordPress's Numeric preset (Req 4.4b, 9.7);
+	//   - category_base equal to tag_base, or either equal to "author", which
+	//     roots two archive patterns at one segment (Req 4.4a).
+	//
+	// Pointing all of them at s.resolve is what makes those silent choices
+	// unobservable rather than something this code has to win: the dispatcher
+	// classifies r.URL.Path exactly once and dispatches on the answer, so
+	// precedence is a property of routing.Structure.Classify -- a pure function
+	// with a documented table and a test per row -- and not of the order of these
+	// calls (Req 9.1, 9.2, 9.7).
+	//
+	// The routes registered above keep their behavior because chi prefers a static
+	// node over a parameter node, which is asserted rather than concluded by
+	// inspection (routes_regression_test.go, Req 9.6). The one place that net
+	// records a move is POST /comment/ -- never a registered route -- which
+	// answers 405 instead of 404 under a structure whose date archives root a
+	// GET-only /{year}/ at the same node; slashFormCases spells that out.
+	s.requireArchiveDeps(s.permalinks)
+	for _, pattern := range contentPatterns(s.permalinks) {
+		r.Method(http.MethodGet, pattern, s.handler(s.resolve))
 	}
-	// Still registered when a structure is configured, but its role changes: it
-	// becomes the canonical-redirect path (Req 3.1) rather than a renderer.
-	r.Method(http.MethodGet, "/{slug}", s.handler(s.single))
 	return r
+}
+
+// requireArchiveDeps panics when this Server is about to register archive
+// patterns it cannot serve.
+//
+// The archive patterns are not opt-in. contentPatterns registers them from the
+// permalink structure alone, and ArchivePatterns emits the category, tag and
+// author patterns for every structure including the flat one -- /category/*
+// has shipped since M1 -- so an embedder who builds a TermService without
+// WithHierarchy, or a PostService without WithAuthors, gets a route whose
+// handler dereferences a nil dependency on its first request. Recoverer turns
+// that into a 500, which means the wiring gap is discoverable only by asking
+// for a category or author URL and is reported as a server fault rather than as
+// the startup mistake it is. Failing here moves it to the one moment the
+// operator is watching, and names the call to add.
+//
+// Panicking is the point, in both senses. The nil dereference inside
+// CategoryArchive and AuthorArchive is deliberate -- it matches RecentPage's
+// posture for an unwired PostCounter -- and this only moves it earlier; it does
+// not soften it into a log line an embedder would never read. And the
+// alternative of quietly not registering the patterns was rejected: two
+// embedders would then serve different routing tables for the same path, so
+// /category/foo would 404 on one and render on the other, which is exactly the
+// per-deployment routing divergence routing.Structure.Classify exists to
+// prevent. A route either exists for every embedder of a given structure or the
+// server does not start.
+//
+// NewServer takes posts and terms positionally, so neither is nil in any
+// supported construction; the nil-service checks cost one comparison and keep
+// the failure a named message rather than a second nil panic from the predicate
+// call, for a caller who built a Server literal inside the package.
+func (s *Server) requireArchiveDeps(st routing.Structure) {
+	if len(st.ArchivePatterns()) == 0 {
+		return
+	}
+	if s.terms == nil || !s.terms.HasHierarchy() {
+		panic("web: Routes registers the category archive but the TermService has no taxonomy reader: " +
+			"call content.NewTermService(...).WithHierarchy(repos.TermReader), " +
+			"or every /category/* request will 500")
+	}
+	if s.posts == nil || !s.posts.HasAuthors() {
+		panic("web: Routes registers the author archive but the PostService has no user reader: " +
+			"call content.NewPostService(...).WithAuthors(repos.Users), " +
+			"or every /author/* request will 500")
+	}
+}
+
+// contentPatterns is every chi pattern the dispatcher owns, in registration
+// order: the structure's permalink patterns, its archive patterns, and the flat
+// /{slug} fallback.
+//
+// The flat pattern is registered whether or not a structure is configured; what
+// changes is its role. With no structure it is the renderer, exactly as it was
+// before M9a; with one it becomes the canonical-redirect path (Req 3.1).
+//
+// No pattern can appear twice in the result, so nothing here registers a
+// duplicate: ArchivePatterns is internally duplicate-free (asserted in
+// internal/routing), and its three parameter names -- {slug}, {nicename} and the
+// date components -- cannot collide with a permalink pattern, because
+// ChiPatterns always carries {postname} or {post_id} (Parse rejects a structure
+// with no identifying token) and a base never normalizes to nothing, so every
+// entity-archive pattern has at least two segments where the flat fallback has
+// one. That is a claim worth stating rather than relying on: chi overwrites a
+// duplicate pattern's endpoint silently, so a duplicate would be one more thing
+// the router cannot tell anyone about.
+func contentPatterns(st routing.Structure) []string {
+	pats := st.ChiPatterns()
+	pats = append(pats, st.ArchivePatterns()...)
+	return append(pats, "/{slug}")
 }

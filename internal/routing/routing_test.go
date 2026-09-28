@@ -340,3 +340,195 @@ func indexOf(h, n string) int {
 	}
 	return -1
 }
+
+// Requirements 6.1, 6.3 and 6.4. A date archive's interval is the seat of the
+// whole feature: get the granularity wrong and a month archive lists a year, get
+// the zone wrong and every boundary silently shifts by the host's offset.
+//
+// The bounds are asserted as a half-open [start, end): the start instant is
+// included and the end instant is the first one excluded, so a post published
+// exactly on the upper bound belongs to the next archive and never to two.
+func TestDateRefRange(t *testing.T) {
+	utc := func(y int, m time.Month, d int) time.Time {
+		return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	}
+	cases := []struct {
+		name      string
+		ref       routing.DateRef
+		wantStart time.Time
+		wantEnd   time.Time
+	}{
+		{
+			name:      "year only spans the whole year",
+			ref:       routing.DateRef{Year: 2024},
+			wantStart: utc(2024, time.January, 1),
+			wantEnd:   utc(2025, time.January, 1),
+		},
+		{
+			name:      "year and month spans that month",
+			ref:       routing.DateRef{Year: 2024, Month: 5},
+			wantStart: utc(2024, time.May, 1),
+			wantEnd:   utc(2024, time.June, 1),
+		},
+		{
+			// December is the case an off-by-one month increment gets wrong: the
+			// end rolls into the following year rather than to month 13.
+			name:      "december rolls the end into the next year",
+			ref:       routing.DateRef{Year: 2024, Month: 12},
+			wantStart: utc(2024, time.December, 1),
+			wantEnd:   utc(2025, time.January, 1),
+		},
+		{
+			name:      "year month and day spans one day",
+			ref:       routing.DateRef{Year: 2024, Month: 5, Day: 17},
+			wantStart: utc(2024, time.May, 17),
+			wantEnd:   utc(2024, time.May, 18),
+		},
+		{
+			// Last day of a month: the end must roll into the next month.
+			name:      "last day of a month rolls the end into the next month",
+			ref:       routing.DateRef{Year: 2024, Month: 5, Day: 31},
+			wantStart: utc(2024, time.May, 31),
+			wantEnd:   utc(2024, time.June, 1),
+		},
+		{
+			// A real leap day must be accepted, not rejected along with the
+			// impossible dates below.
+			name:      "real leap day is a valid date",
+			ref:       routing.DateRef{Year: 2024, Month: 2, Day: 29},
+			wantStart: utc(2024, time.February, 29),
+			wantEnd:   utc(2024, time.March, 1),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start, end, ok := tc.ref.Range()
+			if !ok {
+				t.Fatalf("Range() ok = false for %+v, want true", tc.ref)
+			}
+			if !start.Equal(tc.wantStart) {
+				t.Errorf("start = %s, want %s", start.Format(time.RFC3339), tc.wantStart.Format(time.RFC3339))
+			}
+			if !end.Equal(tc.wantEnd) {
+				t.Errorf("end = %s, want %s", end.Format(time.RFC3339), tc.wantEnd.Format(time.RFC3339))
+			}
+			// Requirement 6.4: the interval carries no zone offset, so
+			// wprepo's formatTS -- t.UTC().Format(tsLayout) -- is the identity
+			// on both bounds. Built in time.Local instead, a May 2024 archive on
+			// a UTC-7 host would query from 2024-05-01 07:00:00, dropping the
+			// first seven hours of May 1. The offset is asserted as well as the
+			// instant because an instant comparison alone passes on a host whose
+			// local zone happens to be UTC, which is most CI runners.
+			for label, got := range map[string]time.Time{"start": start, "end": end} {
+				if _, offset := got.Zone(); offset != 0 {
+					t.Errorf("%s zone offset = %d, want 0 so formatTS is the identity", label, offset)
+				}
+			}
+		})
+	}
+}
+
+// Requirement 6.3: components that do not form a real calendar date are rejected
+// here, so the handler 404s without ever reaching a query.
+func TestDateRefRangeRejectsImpossibleDates(t *testing.T) {
+	cases := []struct {
+		name string
+		ref  routing.DateRef
+	}{
+		{"day past the end of the month", routing.DateRef{Year: 2024, Month: 2, Day: 30}},
+		{"month out of range", routing.DateRef{Year: 2024, Month: 13, Day: 1}},
+		{"leap day in a non-leap year", routing.DateRef{Year: 2023, Month: 2, Day: 29}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, ok := tc.ref.Range(); ok {
+				t.Errorf("Range() ok = true for %+v, want false", tc.ref)
+			}
+		})
+	}
+}
+
+// Requirements 4.7, 4.8 and 4.9. The front applies to category and tag archives
+// only when the corresponding base option is *unset*, and "unset" is
+// WordPress's truthiness test on get_option() -- not "differs from the default".
+// So Parse has to record whether each base was **provided**, which is strictly
+// more than what it resolved to: the empty case and the explicit-default case
+// resolve to the same string and must still be distinguishable afterwards.
+func TestParseRecordsBaseProvision(t *testing.T) {
+	cases := []struct {
+		name         string
+		categoryBase string
+		tagBase      string
+		wantCatBase  string
+		wantTagBase  string
+		wantCatSet   bool
+		wantTagSet   bool
+	}{
+		{
+			// content.OptionService maps an absent option to the empty string,
+			// so the empty string arriving here *is* a falsy get_option().
+			name:        "neither option provided",
+			wantCatBase: "category",
+			wantTagBase: "tag",
+		},
+		{
+			name:         "both options provided with non-default values",
+			categoryBase: "sections",
+			tagBase:      "topics",
+			wantCatBase:  "sections",
+			wantTagBase:  "topics",
+			wantCatSet:   true,
+			wantTagSet:   true,
+		},
+		{
+			// The case that separates provision from inequality-with-the-default,
+			// and the reason these flags exist at all. WordPress tests the
+			// truthiness of get_option( 'category_base' ), so the string
+			// "category" is set: create_initial_taxonomies() then registers the
+			// taxonomy with with_front => false and the front is dropped. An
+			// implementation that reported provision by comparing the resolved
+			// base against DefaultCategoryBase passes both cases above and fails
+			// this one, keeping a front WordPress would have dropped.
+			name:         "both options provided as the default strings",
+			categoryBase: routing.DefaultCategoryBase,
+			tagBase:      routing.DefaultTagBase,
+			wantCatBase:  "category",
+			wantTagBase:  "tag",
+			wantCatSet:   true,
+			wantTagSet:   true,
+		},
+		{
+			// The two flags are independent, because WordPress evaluates
+			// with_front once per taxonomy: the same structure can carry the
+			// front on its tag archive and not on its category archive.
+			name:         "only the category base provided",
+			categoryBase: "sections",
+			wantCatBase:  "sections",
+			wantTagBase:  "tag",
+			wantCatSet:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := routing.Parse(presetPostName, tc.categoryBase, tc.tagBase)
+			if err != nil {
+				t.Fatalf("Parse(%q, %q, %q) error: %v",
+					presetPostName, tc.categoryBase, tc.tagBase, err)
+			}
+			if s.CategoryBase != tc.wantCatBase {
+				t.Errorf("CategoryBase = %q, want %q", s.CategoryBase, tc.wantCatBase)
+			}
+			if s.TagBase != tc.wantTagBase {
+				t.Errorf("TagBase = %q, want %q", s.TagBase, tc.wantTagBase)
+			}
+			if s.CategoryBaseSet != tc.wantCatSet {
+				t.Errorf("CategoryBaseSet = %v, want %v (category_base = %q)",
+					s.CategoryBaseSet, tc.wantCatSet, tc.categoryBase)
+			}
+			if s.TagBaseSet != tc.wantTagSet {
+				t.Errorf("TagBaseSet = %v, want %v (tag_base = %q)",
+					s.TagBaseSet, tc.wantTagSet, tc.tagBase)
+			}
+		})
+	}
+}

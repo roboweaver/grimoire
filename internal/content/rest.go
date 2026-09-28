@@ -215,10 +215,27 @@ func commentLink(postID, commentID int64) string {
 	return "/?p=" + strconv.FormatInt(postID, 10) + "#comment-" + strconv.FormatInt(commentID, 10)
 }
 
-// userLink is the REST "link" field for a user. grimoire has no author
-// archive route either, so this mirrors WordPress's own plain-permalink
-// fallback ("/?author={id}") for the same reason as commentLink.
-func userLink(userID int64) string { return "/?author=" + strconv.FormatInt(userID, 10) }
+// userLink is the REST "link" field for a user. It delegates to
+// routing.Structure.AuthorPath — the single construction site for an author
+// archive URL — so the advertised link is the path web.authorArchive serves at
+// 200 rather than the "/?author={id}" fallback M9a kept explicitly because no
+// author route existed (Req 7.5, 10.3). AuthorPath applies the permalink front
+// unconditionally (Req 4.7) and the structure's trailing-slash rule, so a flat
+// structure yields "/author/{nicename}" with no trailing slash.
+//
+// It is keyed on user_nicename, the field /author/{nicename} resolves by
+// (Req 7.1), which is why the ID is only the degenerate fallback: a row with an
+// empty user_nicename addresses no author archive, and AuthorPath returns "" for
+// it. Advertising "" would resolve to the site root, so such a row keeps the
+// plain-permalink shape — the one URL that still distinguishes it — rather than
+// pointing at the home page. Like postLink, the result is a relative path made
+// absolute by the web layer.
+func (m *RESTMapper) userLink(u domain.User) string {
+	if path := m.permalinks.AuthorPath(u.Nicename); path != "" {
+		return path
+	}
+	return "/?author=" + strconv.FormatInt(u.ID, 10)
+}
 
 // restCommon is a method rather than a plain function because the link field
 // now depends on the mapper's permalink structure.
@@ -393,7 +410,7 @@ func (m *RESTMapper) User(ctx context.Context, u domain.User, restContext RESTCo
 		ID:   u.ID,
 		Name: u.DisplayName,
 		Slug: u.Nicename,
-		Link: userLink(u.ID),
+		Link: m.userLink(u),
 	}
 	if restContext != RESTContextEdit {
 		return view, nil

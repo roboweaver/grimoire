@@ -94,10 +94,10 @@ func newM4Env(t *testing.T) *m4Env {
 		repos.AdminPosts, repos.PostWriter, repos.PostCounter,
 		repos.UserCounter, repos.TermCounter, repos.Users,
 	)
-	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
+	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter).WithAuthors(repos.Users)
 	srv := web.NewServer(
 		posts,
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,

@@ -382,7 +382,10 @@ func TestRESTMapperUserViewContextOmitsPrivateFields(t *testing.T) {
 	if !ok {
 		t.Fatalf("got type %T, want RESTUser", got)
 	}
-	if view.ID != 5 || view.Name != "Alice" || view.Slug != "alice" || view.Link != "/?author=5" {
+	// newTestMapper carries a flat structure, so the author archive path is
+	// "/author/alice" with no trailing slash (Req 7.5, 10.3). It replaces the
+	// "/?author=5" fallback M9a kept while no author route existed.
+	if view.ID != 5 || view.Name != "Alice" || view.Slug != "alice" || view.Link != "/author/alice" {
 		t.Errorf("view = %+v", view)
 	}
 

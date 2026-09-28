@@ -32,6 +32,12 @@ type NewReposFunc func(t *testing.T) (*storage.Repositories, func())
 //     attachment 201 has "_wp_attachment_metadata"; hello-2 and attachment
 //     202 deliberately have neither
 //   - options blogname + blogdescription
+//
+// Every term_taxonomy row here has parent 0. A case that needs a category
+// hierarchy calls SeedNestedCategories on top of this set rather than growing
+// it: several assertions against these fixtures are absolute (exactly 3 posts
+// in a fixed slug order, exactly 3 category terms), and internal/web's handler
+// and REST tests share this seed.
 func SeedFixtures(ctx context.Context, db *sql.DB, vendor, prefix string) error {
 	stmts := []struct {
 		q    string
@@ -347,21 +353,6 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 		}
 	})
 
-	t.Run("ByTermSlug related published posts newest-first", func(t *testing.T) {
-		repos, cleanup := newRepos(t)
-		defer cleanup()
-		posts, err := repos.Posts.ByTermSlug(ctx, "category", "news", 10, 0)
-		if err != nil {
-			t.Fatalf("ByTermSlug: %v", err)
-		}
-		if len(posts) != 2 {
-			t.Fatalf("want 2 related posts, got %d", len(posts))
-		}
-		if posts[0].Slug != "hello-3" || posts[1].Slug != "hello-2" {
-			t.Errorf("related order wrong: %q / %q", posts[0].Slug, posts[1].Slug)
-		}
-	})
-
 	t.Run("TermRepository BySlug and not-found", func(t *testing.T) {
 		repos, cleanup := newRepos(t)
 		defer cleanup()
@@ -374,25 +365,6 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 		}
 		if _, err := repos.Terms.BySlug(ctx, "category", "nope"); !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("unknown term err = %v, want ErrNotFound", err)
-		}
-	})
-
-	t.Run("CountPublishedByTermSlug counts only published posts in the taxonomy", func(t *testing.T) {
-		repos, cleanup := newRepos(t)
-		defer cleanup()
-		n, err := repos.Terms.CountPublishedByTermSlug(ctx, "category", "news")
-		if err != nil {
-			t.Fatalf("CountPublishedByTermSlug: %v", err)
-		}
-		if n != 2 {
-			t.Fatalf("want 2 published posts in the news category fixture, got %d", n)
-		}
-		unknownCount, err := repos.Terms.CountPublishedByTermSlug(ctx, "category", "no-such-slug")
-		if err != nil {
-			t.Fatalf("unknown slug should return (0, nil), got err: %v", err)
-		}
-		if unknownCount != 0 {
-			t.Fatalf("unknown slug count = %d, want 0", unknownCount)
 		}
 	})
 

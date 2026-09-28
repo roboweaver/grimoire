@@ -71,10 +71,10 @@ func newRESTRouterWithPermalinks(t *testing.T, fake *fakeSessions, structure str
 	}
 	mapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, "wp_").WithPermalinks(st)
 	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}))
-	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
+	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter).WithAuthors(repos.Users)
 	srv := web.NewServer(
 		posts,
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,

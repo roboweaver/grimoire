@@ -11,6 +11,7 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/routing"
 )
 
 // WordPress permalink_structure values used below. The supported set mirrors
@@ -266,3 +267,324 @@ func (h *recordingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 }
 
 func (h *recordingHandler) WithGroup(string) slog.Handler { return h }
+
+// Structures and bases the base-and-notes assertions below run over. The
+// front-colliding structure is WordPress's own "Numeric" preset, which is the
+// collision an operator provokes by renaming category_base to the very segment
+// their URLs already live under (Req 4.4b).
+const (
+	mainStructNumeric = "/archives/%post_id%"
+
+	mainBaseSections = "sections"
+	mainBaseTopics   = "topics"
+	mainBaseArchives = "archives"
+)
+
+// TestResolvePermalinksNamesArchiveBasesInEveryBranch covers the first half of
+// Requirement 4.4's startup reporting: the line reporting the structure verdict
+// names both resolved archive bases, in all three branches.
+//
+// The three branches are the point. routing.Parse resolves CategoryBase and
+// TagBase *before* it can fail or decide the structure is flat -- the error path
+// returns a flat copy that already carries them -- so the bases are as real on a
+// rejected structure as on a resolved one, and the flat fallback keeps serving
+// /{CategoryBase}/{slug} either way. The unsupported branch named neither base
+// before this milestone, which is the branch where an operator most needs them.
+//
+// Expected values come from routing.Parse rather than from literals, so the
+// assertion tracks base normalization (Req 4.11) instead of duplicating it.
+func TestResolvePermalinksNamesArchiveBasesInEveryBranch(t *testing.T) {
+	cases := []struct {
+		name    string
+		options map[string]string
+		// wantLevel is the level the branch reports its verdict at: WARN for
+		// the unsupported fallback, INFO for the two it can serve.
+		wantLevel slog.Level
+	}{
+		{
+			name: "resolved structure with overridden bases",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructDayAndName,
+				content.OptionCategoryBase:       mainBaseSections,
+				content.OptionTagBase:            mainBaseTopics,
+			},
+			wantLevel: slog.LevelInfo,
+		},
+		{
+			name: "resolved structure with default bases",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructPostName,
+			},
+			wantLevel: slog.LevelInfo,
+		},
+		{
+			// A plain-permalink site still serves its category and tag
+			// archives at their bases, so the bases are as load-bearing here
+			// as anywhere.
+			name: "plain structure with overridden bases",
+			options: map[string]string{
+				content.OptionCategoryBase: mainBaseSections,
+				content.OptionTagBase:      mainBaseTopics,
+			},
+			wantLevel: slog.LevelInfo,
+		},
+		{
+			name:      "plain structure with default bases",
+			options:   map[string]string{},
+			wantLevel: slog.LevelInfo,
+		},
+		{
+			name: "unsupported structure with overridden bases",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructCategoryAndName,
+				content.OptionCategoryBase:       mainBaseSections,
+				content.OptionTagBase:            mainBaseTopics,
+			},
+			wantLevel: slog.LevelWarn,
+		},
+		{
+			name: "unsupported structure with default bases",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructDateOnly,
+			},
+			wantLevel: slog.LevelWarn,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := parseLikeStartup(t, tc.options)
+			// None of these configurations collides, so the branch's verdict
+			// line is the only record at its level. A row that did collide
+			// would add a WARN and make the count assertion below ambiguous.
+			if notes := st.Notes(); len(notes) != 0 {
+				t.Fatalf("test setup is wrong: this configuration is meant to be "+
+					"clean but Notes() reports %q", notes)
+			}
+
+			log, sink := newRecordingLogger()
+			resolvePermalinks(context.Background(), newMainOptions(tc.options), log)
+
+			records := sink.at(tc.wantLevel)
+			if len(records) != 1 {
+				t.Fatalf("got %d %v record(s), want exactly 1: %v",
+					len(records), tc.wantLevel, records)
+			}
+			// Both bases on the verdict line itself, not merely somewhere in
+			// the log: an operator correlating a base with the structure it
+			// applies to reads one line.
+			for _, want := range []string{
+				"category_base=" + st.CategoryBase,
+				"tag_base=" + st.TagBase,
+			} {
+				if !strings.Contains(records[0], want) {
+					t.Errorf("%v record does not name %q: %s", tc.wantLevel, want, records[0])
+				}
+			}
+		})
+	}
+}
+
+// TestResolvePermalinksLogsNotesInEveryBranch covers the second half of
+// Requirement 4.4's startup reporting: every Structure.Notes() entry is logged at
+// WARN, in all three branches.
+//
+// Notes() is the non-fatal diagnostic channel -- routing.Parse returns a nil error
+// and a usable Structure for all of these -- so the startup log is the only place
+// a running server reports a collision at all. baseOptionNotes is recorded on the
+// flat fallback too, which is why a collision is asserted on a rejected structure
+// and on a plain one rather than only on a resolved one.
+//
+// Entries are asserted verbatim: each already names the option, its resolved
+// value and which of the two competing readings won, so nothing here expects the
+// startup path to re-word one.
+func TestResolvePermalinksLogsNotesInEveryBranch(t *testing.T) {
+	cases := []struct {
+		name    string
+		options map[string]string
+	}{
+		{
+			// Req 4.4a: both bases on one segment. The segment keeps its
+			// category meaning, so tag archives silently vanish.
+			name: "resolved structure, category_base equals tag_base",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructDayAndName,
+				content.OptionCategoryBase:       mainBaseSections,
+				content.OptionTagBase:            mainBaseSections,
+			},
+		},
+		{
+			// Req 4.4b: the base collides with the structure's leading
+			// literal. This note exists only on a non-flat structure, since a
+			// flat one has no front for a base to collide with.
+			name: "resolved structure, category_base collides with the front",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructNumeric,
+				content.OptionCategoryBase:       mainBaseArchives,
+			},
+		},
+		{
+			name: "plain structure, category_base equals tag_base",
+			options: map[string]string{
+				content.OptionCategoryBase: mainBaseSections,
+				content.OptionTagBase:      mainBaseSections,
+			},
+		},
+		{
+			name: "unsupported structure, tag_base equals author",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructCategoryAndName,
+				content.OptionTagBase:            routing.AuthorBase,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := parseLikeStartup(t, tc.options)
+			notes := st.Notes()
+			if len(notes) == 0 {
+				t.Fatalf("test setup is wrong: this configuration produces no "+
+					"Notes() entries, so it asserts nothing (structure %q, "+
+					"category_base %q, tag_base %q)",
+					tc.options[content.OptionPermalinkStructure],
+					tc.options[content.OptionCategoryBase],
+					tc.options[content.OptionTagBase])
+			}
+
+			log, sink := newRecordingLogger()
+			// Req 4.3 still holds with notes in play: a diagnostic does not
+			// stop the seam returning a usable Structure.
+			if got := resolvePermalinks(context.Background(), newMainOptions(tc.options), log); got.Raw != st.Raw {
+				t.Errorf("Structure.Raw = %q, want %q", got.Raw, st.Raw)
+			}
+
+			warns := sink.at(slog.LevelWarn)
+			for _, note := range notes {
+				if !containsAny(warns, note) {
+					t.Errorf("no WARN record carries the Notes() entry\n\t%s\ngot:\n\t%s",
+						note, strings.Join(warns, "\n\t"))
+				}
+			}
+			// A collision is not a failed boot: it costs an archive surface,
+			// and an ERROR here would read as an outage in a log pipeline.
+			if errs := sink.at(slog.LevelError); len(errs) != 0 {
+				t.Errorf("got %d ERROR record(s), want 0: %v", len(errs), errs)
+			}
+		})
+	}
+}
+
+// TestResolvePermalinksLogsNoNotesOnACleanConfiguration is what keeps the notes
+// above worth reading. A WARN an operator sees on every boot is one they learn to
+// skip, and then the real collisions are invisible -- the same argument routing's
+// own TestNotesEmptyWhenNothingCollides makes one layer down, asserted here
+// because startup is where a human actually reads them.
+//
+// It asserts on marker phrases rather than on record counts because the
+// unsupported branch legitimately emits one WARN of its own, so "no WARN records"
+// would be the wrong claim on those rows.
+func TestResolvePermalinksLogsNoNotesOnACleanConfiguration(t *testing.T) {
+	// The phrases every collision note carries: "unreachable" for the three
+	// base collisions and the front collision, "more than one path segment"
+	// for a multi-segment base (internal/routing/notes.go).
+	noteMarkers := []string{"unreachable", "more than one path segment"}
+
+	cases := []struct {
+		name    string
+		options map[string]string
+	}{
+		{
+			name: "resolved structure, distinct overridden bases",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructDayAndName,
+				content.OptionCategoryBase:       mainBaseSections,
+				content.OptionTagBase:            mainBaseTopics,
+			},
+		},
+		{
+			// Bases explicitly set to their own defaults are "set" (Req 4.9)
+			// but collide with nothing, so they are not a fault either.
+			name: "resolved structure, bases set to the default strings",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructPostName,
+				content.OptionCategoryBase:       routing.DefaultCategoryBase,
+				content.OptionTagBase:            routing.DefaultTagBase,
+			},
+		},
+		{
+			name:    "plain structure, no bases configured",
+			options: map[string]string{},
+		},
+		{
+			// A front exists here and no base collides with it. A note keyed
+			// on "this structure has a front" would show up as a failure on
+			// this row.
+			name: "resolved structure with a front, no collision",
+			options: map[string]string{
+				content.OptionPermalinkStructure: "/blog/%year%/%monthnum%/%postname%/",
+				content.OptionCategoryBase:       mainBaseSections,
+			},
+		},
+		{
+			name: "unsupported structure, distinct default bases",
+			options: map[string]string{
+				content.OptionPermalinkStructure: mainStructDateOnly,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := parseLikeStartup(t, tc.options)
+			if notes := st.Notes(); len(notes) != 0 {
+				t.Fatalf("test setup is wrong: this configuration is meant to be "+
+					"clean but Notes() reports %q", notes)
+			}
+
+			log, sink := newRecordingLogger()
+			resolvePermalinks(context.Background(), newMainOptions(tc.options), log)
+
+			warns := sink.at(slog.LevelWarn)
+			for _, marker := range noteMarkers {
+				if containsAny(warns, marker) {
+					t.Errorf("a WARN record carries the diagnostic marker %q on a "+
+						"clean configuration -- a warning an operator sees every "+
+						"boot is one they stop reading:\n\t%s",
+						marker, strings.Join(warns, "\n\t"))
+				}
+			}
+		})
+	}
+}
+
+// parseLikeStartup parses the same three options resolvePermalinks reads, so the
+// expectations are derived from routing.Parse rather than restated as literals.
+// An error is not a failure here: the unsupported rows depend on it, and Parse
+// returns a usable flat Structure alongside it.
+func parseLikeStartup(t *testing.T, options map[string]string) routing.Structure {
+	t.Helper()
+
+	st, _ := routing.Parse(
+		options[content.OptionPermalinkStructure],
+		options[content.OptionCategoryBase],
+		options[content.OptionTagBase],
+	)
+	return st
+}
+
+// newMainOptions drives the real content.OptionService over the fake repository,
+// so the option names the startup path reads stay part of what is asserted.
+func newMainOptions(values map[string]string) *content.OptionService {
+	return content.NewOptionService(&fakeMainOptionRepo{values: values})
+}
+
+// containsAny reports whether any record contains want.
+func containsAny(records []string, want string) bool {
+	for _, r := range records {
+		if strings.Contains(r, want) {
+			return true
+		}
+	}
+	return false
+}

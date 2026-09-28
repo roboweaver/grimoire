@@ -107,8 +107,8 @@ func newM7Env(t *testing.T) *m7Env {
 	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
 
 	srv := web.NewServer(
-		content.NewPostService(repos.Posts),
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewPostService(repos.Posts).WithAuthors(repos.Users),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,

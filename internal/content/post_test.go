@@ -24,10 +24,14 @@ type fakePostRepo struct {
 	byIDPost  domain.Post
 	byIDErr   error
 
-	termTax, termSlug     string
-	termLimit, termOffset int
-	termPosts             []domain.Post
-	termErr               error
+	archiveFilter               domain.ArchiveFilter
+	archiveLimit, archiveOffset int
+	archivePosts                []domain.Post
+	archiveErr                  error
+
+	archiveCountFilter domain.ArchiveFilter
+	archiveCount       int
+	archiveCountErr    error
 }
 
 func (f *fakePostRepo) RecentPosts(ctx context.Context, limit, offset int) ([]domain.Post, error) {
@@ -45,9 +49,14 @@ func (f *fakePostRepo) PublishedByID(ctx context.Context, id int64, types ...str
 	return f.byIDPost, f.byIDErr
 }
 
-func (f *fakePostRepo) ByTermSlug(ctx context.Context, taxonomy, termSlug string, limit, offset int) ([]domain.Post, error) {
-	f.termTax, f.termSlug, f.termLimit, f.termOffset = taxonomy, termSlug, limit, offset
-	return f.termPosts, f.termErr
+func (f *fakePostRepo) PublishedArchive(ctx context.Context, filter domain.ArchiveFilter, limit, offset int) ([]domain.Post, error) {
+	f.archiveFilter, f.archiveLimit, f.archiveOffset = filter, limit, offset
+	return f.archivePosts, f.archiveErr
+}
+
+func (f *fakePostRepo) CountPublishedArchive(ctx context.Context, filter domain.ArchiveFilter) (int, error) {
+	f.archiveCountFilter = filter
+	return f.archiveCount, f.archiveCountErr
 }
 
 func TestPostServiceRecentClampsPaging(t *testing.T) {

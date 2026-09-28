@@ -113,22 +113,43 @@ func TestRESTLinkIsCanonicalPermalink(t *testing.T) {
 	}
 }
 
-// TestRESTCommentAndUserLinksUnchangedByPermalinkStructure asserts Req 6.4:
-// commentLink and userLink stay on their plain-permalink-shaped fallbacks even
-// when a structure is configured. The routes they would point at are not
-// implemented until the 9.C follow-on, so routing them through the structure
-// would advertise URLs that 404.
+// TestRESTCommentLinkUnchangedByPermalinkStructure is the surviving half of
+// M9a's TestRESTCommentAndUserLinksUnchangedByPermalinkStructure. That test
+// asserted Req 6.4 for both links at once: commentLink and userLink stay on
+// their plain-permalink-shaped fallbacks even when a structure is configured,
+// because neither route existed.
 //
-// The existing rest_test.go cases cover these shapes only with a flat mapper;
-// this one covers them with a structure configured, which is the case Phase 5
-// could plausibly break.
-func TestRESTCommentAndUserLinksUnchangedByPermalinkStructure(t *testing.T) {
-	mapper := newTestMapperWithPermalinks(t, restStructDayAndName)
-
+// Only the comment half of that premise survives M9b. No comment route is added
+// in this milestone, so routing a comment link through the structure would still
+// advertise a URL that 404s (Req 10.4) — which is what this keeps asserting, and
+// what task 8.2's rest_commentlink_test.go widens across five structures and
+// overridden bases.
+//
+// The user half was not weakened, it was inverted: /author/{nicename} is now
+// served, so the user link *is* structure-dependent and "unchanged by permalink
+// structure" is no longer a true statement about it. It moved to
+// TestRESTUserLinkNowFollowsPermalinkStructure below, on the same fixture and the
+// same mapper, and the full path table lives in
+// TestRESTUserLinkIsAuthorArchivePath (rest_authorlink_test.go).
+func TestRESTCommentLinkUnchangedByPermalinkStructure(t *testing.T) {
 	c := Comment(domain.Comment{ID: 9, PostID: 42, Status: commentStatusOK})
 	if want := "/?p=42#comment-9"; c.Link != want {
 		t.Errorf("comment Link = %q, want %q", c.Link, want)
 	}
+}
+
+// TestRESTUserLinkNowFollowsPermalinkStructure is the inverted user half of the
+// test above, kept on its original fixture (user 5, nicename "alice", the
+// day-and-name structure) so the transition is legible at the exact input that
+// used to assert the opposite.
+//
+// M9a Req 6.4 held the user link on "/?author=5" *explicitly because no author
+// route existed*; Req 7.5 ends that condition with this milestone. So the
+// assertion that matters here is both directions at once: the configured
+// structure now reaches the link, and the old fallback is gone rather than
+// coincidentally equal to something else.
+func TestRESTUserLinkNowFollowsPermalinkStructure(t *testing.T) {
+	mapper := newTestMapperWithPermalinks(t, restStructDayAndName)
 
 	got, err := mapper.User(context.Background(), domain.User{ID: 5, DisplayName: "Alice", Nicename: "alice"}, RESTContextView)
 	if err != nil {
@@ -138,7 +159,10 @@ func TestRESTCommentAndUserLinksUnchangedByPermalinkStructure(t *testing.T) {
 	if !ok {
 		t.Fatalf("got type %T, want RESTUser", got)
 	}
-	if want := "/?author=5"; view.Link != want {
+	if view.Link == "/?author=5" {
+		t.Errorf("user Link = %q, want the author archive path, not M9a's plain-permalink fallback", view.Link)
+	}
+	if want := "/author/alice/"; view.Link != want {
 		t.Errorf("user Link = %q, want %q", view.Link, want)
 	}
 }

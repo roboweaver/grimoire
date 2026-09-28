@@ -54,6 +54,14 @@ type Term struct {
 	Name     string
 	Slug     string
 	Taxonomy string
+
+	// ParentID backs term_taxonomy.parent; 0 means "no parent", matching both
+	// WordPress's own sentinel and the zero-value-means-unset convention
+	// already used by Post.ParentID and MediaFilter.ParentID.
+	//
+	// Read-only in this milestone: term reads populate it, and no write path
+	// sets it.
+	ParentID int64
 }
 
 // Option is a single row from the WordPress options table.

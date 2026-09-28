@@ -50,14 +50,33 @@ type SingleData struct {
 	Menu           NavMenuView
 }
 
-// CategoryData backs the category/archive templates.
-type CategoryData struct {
+// ArchiveData backs the category, tag, author and date templates — the four
+// archive kinds already registered in the hierarchy map (each {kind} → archive
+// → index), so no template-resolution change accompanies it.
+//
+// Kind names the archive being rendered so a shared archive.tmpl can vary on
+// it. Heading is the archive title the handler resolved (a term name, an author
+// display name, a formatted date range). BaseURL is the canonical archive path:
+// pagination links are built from it rather than reconstructed from Term.Slug,
+// which is wrong for a nested category and wrong for an overridden
+// category_base. Term is empty for the author and date kinds.
+type ArchiveData struct {
 	SiteTitle  string
 	Tagline    string
+	Kind       string // "category" | "tag" | "author" | "date"
+	Heading    string
+	BaseURL    string
 	Term       TermView
 	Posts      []PostView
 	Pagination content.Page
 }
+
+// CategoryData backs the category template. It is an alias rather than a
+// distinct type so existing call sites and theme templates keep working:
+// html/template resolves field names at execution time, so a renamed or dropped
+// field would turn a working page into a 500 that no compile step catches.
+// Adding fields to ArchiveData is additive for every template.
+type CategoryData = ArchiveData
 
 // LoginData backs the login template. CSRFToken is embedded as a hidden form
 // field for the double-submit check; Error is set (without detail) after a

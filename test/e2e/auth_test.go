@@ -80,10 +80,10 @@ func TestAuthEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render.Load: %v", err)
 	}
-	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter)
+	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter).WithAuthors(repos.Users)
 	srv := web.NewServer(
 		posts,
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng,
 		nil,
@@ -199,8 +199,8 @@ func TestLoginRejectsWrongPassword(t *testing.T) {
 		t.Fatalf("render.Load: %v", err)
 	}
 	srv := web.NewServer(
-		content.NewPostService(repos.Posts),
-		content.NewTermService(repos.Terms, repos.Posts),
+		content.NewPostService(repos.Posts).WithAuthors(repos.Users),
+		content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader),
 		content.NewOptionService(repos.Options),
 		eng, nil,
 	).WithAuth(sm, web.AuthConfig{})

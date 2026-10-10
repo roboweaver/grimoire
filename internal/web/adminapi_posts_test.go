@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -526,5 +527,207 @@ func TestAdminPostDetailResolvesTerms(t *testing.T) {
 	}
 	if tags, ok := resp.Terms["post_tag"]; !ok || len(tags) != 0 {
 		t.Errorf("post_tag terms = %+v, want empty non-nil slice present", resp.Terms["post_tag"])
+	}
+}
+
+// --- Task 7.3: admin POST-write transport content-safety proof (Req 4.2, 4.4, 9.5) ---
+//
+// These tests assert END-TO-END, through the real adminPostCreate /
+// adminPostUpdate handlers (adminapi_posts.go), that content/excerpt are
+// sanitized and the title is reduced to plain text, and that a title which
+// sanitizes to empty maps onto the admin API's EXISTING missing-title 400
+// (badRequestError -> "bad_request").
+//
+// The proof is end-to-end on purpose: unlike the handler-level tests above
+// (which inject a fakePostWrite that records whatever it is handed), these wire
+// the REAL *content.PostWriteService as the Server's postWrite dependency, over
+// an in-memory domain.PostWriter. The sanitization therefore happens inside
+// PostWriteService.Create/Update exactly as production does -- a transport that
+// wrote directly to storage, bypassing PostWriteService, could NOT pass these.
+// The actor is an author (RoleAuthor, built through the real auth tables), who
+// LACKS unfiltered_html and so is a tier-B writer for post content/excerpt and
+// gets the plain-text title path (sanitize.TierFor); an editor would be tier C
+// and would not strip anything, so the author is the role that makes the
+// stripping observable.
+//
+// PostWriteService defaults its policy to sanitize.New() (NewPostWriteService),
+// so these pass once the package compiles even before task 8.2 wires an
+// explicit WithContentPolicy -- the behavior is asserted regardless of whether
+// the shared policy is injected or defaulted.
+
+// memPostWriter is a tiny in-memory domain.PostWriter: the real
+// PostWriteService writes the SANITIZED post into it, and the test reads the
+// stored bytes back out (and backs the handler's s.admin.Detail read-back).
+type memPostWriter struct {
+	mu     sync.Mutex
+	nextID int64
+	store  map[int64]domain.Post
+}
+
+func newMemPostWriter() *memPostWriter {
+	return &memPostWriter{nextID: 1, store: map[int64]domain.Post{}}
+}
+
+func (m *memPostWriter) ByID(_ context.Context, id int64) (domain.Post, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.store[id]
+	if !ok {
+		return domain.Post{}, domain.ErrNotFound
+	}
+	return p, nil
+}
+
+func (m *memPostWriter) Create(_ context.Context, p domain.Post) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id := m.nextID
+	m.nextID++
+	p.ID = id
+	m.store[id] = p
+	return id, nil
+}
+
+func (m *memPostWriter) Update(_ context.Context, p domain.Post) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.store[p.ID]; !ok {
+		return domain.ErrNotFound
+	}
+	m.store[p.ID] = p
+	return nil
+}
+
+func (m *memPostWriter) Delete(_ context.Context, id int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.store, id)
+	return nil
+}
+
+func (m *memPostWriter) get(id int64) domain.Post {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.store[id]
+}
+
+// newEndToEndWriteServer wires the real *content.PostWriteService (default
+// sanitize.New() policy) as the Server's postWrite over mem, and a fakeAdmin
+// whose Detail reads back out of the same store, so the create/update handlers
+// run their full read-after-write path against the sanitized record.
+func newEndToEndWriteServer(mem *memPostWriter) *Server {
+	a := &fakeAdmin{detail: func(id int64) (domain.Post, error) { return mem.ByID(context.Background(), id) }}
+	pw := content.NewPostWriteService(mem)
+	return testWriteServer(a, pw, nil, nil, nil)
+}
+
+// authorCtx carries an author principal (RoleAuthor): holds edit_posts /
+// publish_posts but NOT unfiltered_html, so it is a tier-B writer. UserID 1
+// matches the posts it authors below so the ownership capability checks pass.
+func authorCtx() context.Context {
+	p := auth.NewPrincipal(1, "author", []string{auth.RoleAuthor})
+	sess := domain.Session{ID: "s1", UserID: 1, CSRFToken: "csrf-token-123"}
+	return withAuth(context.Background(), p, sess)
+}
+
+// TestAdminPostCreateSanitizesContentExcerptAndTitleEndToEnd is the Req 9.5
+// proof for the admin create transport: an author (tier B) POSTs content and
+// excerpt carrying a disallowed <script> and an allow-listed <em>, and a title
+// carrying markup. The STORED record (read back from the writer) must have the
+// <script> stripped and the <em> surviving in content/excerpt, and the title
+// reduced to plain text.
+func TestAdminPostCreateSanitizesContentExcerptAndTitleEndToEnd(t *testing.T) {
+	mem := newMemPostWriter()
+	s := newEndToEndWriteServer(mem)
+	body := `{"title":"<em>Hello</em>","content":"<em>ok</em><script>alert(1)</script>","excerpt":"<em>ex</em><script>bad()</script>","status":"publish","date":"` +
+		time.Now().Add(-time.Hour).UTC().Format(adminDateLayout) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/posts", strings.NewReader(body)).WithContext(authorCtx())
+	rec := httptest.NewRecorder()
+	s.jsonHandler(s.adminPostCreate).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body=%s", rec.Code, rec.Body.String())
+	}
+	stored := mem.get(1)
+	if strings.Contains(stored.Content, "<script") || strings.Contains(stored.Content, "alert(1)") {
+		t.Errorf("tier-B sanitize did not run before the writer; content = %q", stored.Content)
+	}
+	if !strings.Contains(stored.Content, "<em>ok</em>") {
+		t.Errorf("allow-listed <em> did not survive tier B in content; content = %q", stored.Content)
+	}
+	if strings.Contains(stored.Excerpt, "<script") || strings.Contains(stored.Excerpt, "bad()") {
+		t.Errorf("tier-B sanitize did not run on excerpt; excerpt = %q", stored.Excerpt)
+	}
+	if !strings.Contains(stored.Excerpt, "<em>ex</em>") {
+		t.Errorf("allow-listed <em> did not survive tier B in excerpt; excerpt = %q", stored.Excerpt)
+	}
+	if stored.Title != "Hello" {
+		t.Errorf("title not reduced to plain text; title = %q, want %q", stored.Title, "Hello")
+	}
+}
+
+// TestAdminPostUpdateSanitizesContentExcerptAndTitleEndToEnd is the same proof
+// for the admin update transport. A pre-existing stored post is updated by its
+// author; the sanitized new values must land in the stored record (and the
+// title reduced to plain text).
+func TestAdminPostUpdateSanitizesContentExcerptAndTitleEndToEnd(t *testing.T) {
+	mem := newMemPostWriter()
+	modified := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	mem.store[7] = domain.Post{
+		ID: 7, Author: 1, Type: "post", Status: "publish",
+		Title: "Old", Content: "<p>old</p>", Excerpt: "old", Modified: modified,
+		Date: time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+	mem.nextID = 8
+	s := newEndToEndWriteServer(mem)
+	body := `{"title":"<em>New</em>","content":"<em>fresh</em><script>alert(1)</script>","excerpt":"<em>sum</em><script>x()</script>","status":"publish","modified":"2024-01-01T00:00:00Z"}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/api/posts/7", strings.NewReader(body)).WithContext(authorCtx())
+	req = withURLParam(req, "id", "7")
+	rec := httptest.NewRecorder()
+	s.jsonHandler(s.adminPostUpdate).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	stored := mem.get(7)
+	if strings.Contains(stored.Content, "<script") || strings.Contains(stored.Content, "alert(1)") {
+		t.Errorf("tier-B sanitize did not run on update content; content = %q", stored.Content)
+	}
+	if !strings.Contains(stored.Content, "<em>fresh</em>") {
+		t.Errorf("allow-listed <em> did not survive on update content; content = %q", stored.Content)
+	}
+	if strings.Contains(stored.Excerpt, "<script") || strings.Contains(stored.Excerpt, "x()") {
+		t.Errorf("tier-B sanitize did not run on update excerpt; excerpt = %q", stored.Excerpt)
+	}
+	if stored.Title != "New" {
+		t.Errorf("title not reduced to plain text on update; title = %q, want %q", stored.Title, "New")
+	}
+}
+
+// TestAdminPostCreateEmptySanitizedTitleMapsErrTitleEmptyTo400 pins the
+// ErrTitleEmpty -> existing-missing-title-400 contract for the admin create
+// transport (Req 4.2/4.4). The raw title "<em></em>" is NON-empty, so it passes
+// parsePostWrite's own `body.Title == ""` pre-check (which only fires for a
+// literally empty title) and reaches PostWriteService.Create, where the
+// plain-text title path reduces it to "" and the service returns
+// content.ErrTitleEmpty. The handler must map that onto the SAME 400 the admin
+// API already returns for a missing title (badRequestError -> "bad_request"),
+// not a 500. A non-draft status ("publish") is required so the empty-title rule
+// applies at all (a draft title is optional).
+func TestAdminPostCreateEmptySanitizedTitleMapsErrTitleEmptyTo400(t *testing.T) {
+	mem := newMemPostWriter()
+	s := newEndToEndWriteServer(mem)
+	body := `{"title":"<em></em>","content":"body","status":"publish","date":"` +
+		time.Now().Add(-time.Hour).UTC().Format(adminDateLayout) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/posts", strings.NewReader(body)).WithContext(authorCtx())
+	rec := httptest.NewRecorder()
+	s.jsonHandler(s.adminPostCreate).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (ErrTitleEmpty maps to the existing missing-title 400), body=%s", rec.Code, rec.Body.String())
+	}
+	assertJSONError(t, rec, "bad_request")
+	if _, ok := mem.store[1]; ok {
+		t.Errorf("a title that sanitizes to empty must not persist a post; stored = %+v", mem.store[1])
 	}
 }

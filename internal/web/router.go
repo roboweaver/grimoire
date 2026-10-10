@@ -12,6 +12,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/routing"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 )
 
 // Server wires content services and the render engine into HTTP handlers.
@@ -69,6 +70,17 @@ type Server struct {
 	restRequireTLS         bool
 	restTrustedProxyHeader string
 
+	// policy is the shared, process-wide content sanitizer. It backs the
+	// tier-A RENDER BACKSTOP in commentView and the pending-comment echo
+	// (pendingEcho), which cast comment content to template.HTML and must
+	// never emit an unsanitized value. Because that cast is safety-critical and
+	// the backstop is unconditional, the default must NOT be nil: NewServer
+	// installs sanitize.New() so a Server built without WithContentPolicy still
+	// applies the backstop (fail closed / never skip it). WithContentPolicy
+	// lets main.go pass the shared instance so pendingEcho, commentView and the
+	// write services all share one Policy.
+	policy *sanitize.Policy
+
 	// permalinks is the resolved permalink_structure. It is read once at
 	// startup rather than per request, because OptionService performs no
 	// caching and the chi patterns are derived from it at registration time
@@ -86,7 +98,10 @@ func NewServer(posts *content.PostService, terms *content.TermService, options *
 	// An empty structure is WordPress's "plain" setting and never fails to
 	// parse, so the error is not reachable here.
 	flat, _ := routing.Parse("", "", "")
-	return &Server{posts: posts, terms: terms, options: options, render: eng, log: log, permalinks: flat}
+	// Default to a non-nil Policy: commentView dereferences s.policy for the
+	// unconditional tier-A render backstop, which is safety-critical, so a
+	// Server built without WithContentPolicy must still apply it (fail closed).
+	return &Server{posts: posts, terms: terms, options: options, render: eng, log: log, policy: sanitize.New(), permalinks: flat}
 }
 
 // WithPermalinks configures the permalink structure used to resolve single-post
@@ -99,6 +114,21 @@ func NewServer(posts *content.PostService, terms *content.TermService, options *
 // and the startup path logs that error rather than refusing to boot.
 func (s *Server) WithPermalinks(st routing.Structure) *Server {
 	s.permalinks = st
+	return s
+}
+
+// WithContentPolicy injects the shared, process-wide *sanitize.Policy used by
+// the tier-A render backstop in commentView (and, once task 7.5 lands, the
+// pending-comment echo). It returns the same Server for chaining. main.go
+// passes the one Policy it builds so the Server and the write services all
+// share a single instance (Req 1.1).
+//
+// NewServer already installs a non-nil sanitize.New() default, so this method
+// replaces that default rather than enabling an otherwise-skipped backstop: the
+// backstop is unconditional and fail-closed, and a Server built without this
+// method still applies it.
+func (s *Server) WithContentPolicy(p *sanitize.Policy) *Server {
+	s.policy = p
 	return s
 }
 

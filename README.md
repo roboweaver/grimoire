@@ -181,20 +181,34 @@ full specification.
 - ✅ **M8:** [Content browsing parity](./plans/wordpress-core-parity-roadmap) — delivers public and admin pagination with out-of-range 404s, admin post `search`/`status`/`author` filters, and a media library with filters and a grid/list toggle.
 - ✅ **M9a:** [Permalinks and canonical routing](./plans/09-permalinks-canonical-routing) — delivers `permalink_structure`/`category_base`/`tag_base` reads, the `%postname%`/`%post_id%`/`%year%`/`%monthnum%`/`%day%` token set (WordPress's three presets), `301` canonical redirects from every other recognised form, canonical REST `link` values, and the `tag`/`author`/`date` template kinds. Unsupported structures fall back to the flat route with a startup `WARN`.
 - ✅ **M9b:** [Archives and nested categories](./plans/09.1-archives-nested-categories) — delivers the four archive routes M9a left unserved: nested category archives at their full ancestry (`/category/news/local`), with `301` recovery from the flat and wrong-ancestor forms, plus tag, author and date archives. `category_base`/`tag_base` are honored in route registration, path classification, theme links and REST `link` values; a category archive lists and counts its descendants' posts; REST `parent` carries `term_taxonomy.parent`, category/tag `link` values are real archive paths, and a user's `link` is `/author/{nicename}`. Zero schema changes.
-- 📝 **M10:** [REST write and content safety parity](./plans/wordpress-core-parity-roadmap) — roadmap-level only. Covers a capability-aware write-boundary sanitization policy, then REST media/user writes and `content.rendered` fidelity. Requires its own spec before implementation.
+- ✅ **M10a:** [Write-boundary content safety](./plans/10-rest-write-content-safety) — grimoire's first HTML sanitizer. A single capability-aware allow-list policy sanitizes comment content and post content/excerpt/title at the write boundary before storage (three tiers mirroring WordPress's `kses` lists, selected by field kind and `unfiltered_html`), reduces `post_title` to plain text, and backstops comment content at render. Covers the write paths that already shipped in M4/M6; adds **no** new REST write route (media/user writes still `501`). Pre-M10a stored post content is not retroactively sanitized.
+- 📝 **M10 (remaining):** [REST write and content safety parity](./plans/wordpress-core-parity-roadmap) — roadmap-level. The remaining groups (REST media/user writes, closing their `501`s, and `content.rendered` fidelity) each require their own spec before implementation.
 
 ## Status
 
-✅ M1-M8, M9a and M9b are implemented.
+✅ M1-M8, M9a, M9b and M10a are implemented.
 
-📝 M10 is scoped at roadmap level in
+📝 M10's remaining groups (REST media/user writes and `content.rendered`
+fidelity) are scoped at roadmap level in
 [`plans/wordpress-core-parity-roadmap`](./plans/wordpress-core-parity-roadmap)
-but not implemented; it needs its own spec first.
+but not implemented; each needs its own spec first.
+
+As of M10a, write-path content is sanitized at the boundary by a
+capability-aware allow-list policy before it is stored: comment content and
+post content/excerpt from writers without `unfiltered_html` are filtered against
+allow-lists mirroring WordPress's `kses` comment and post lists, `unfiltered_html`
+holders (default editor/administrator) bypass filtering as WordPress exempts them,
+`post_title` is reduced to plain text, and comment content is also filtered at
+render as a backstop. The guarantee is that every value written from M10a onward
+is sanitized at the writer's tier — not that already-stored content is safe:
+pre-M10a post content is not retroactively sanitized. M10a is the write-boundary
+content policy only; it does **not** add any new REST write route.
 
 Known gaps worth knowing before adopting an existing WordPress site:
 
 - **REST writes** for media and users are not exposed (they return `501`).
-  Addressed by M10, which lands write-boundary sanitization first.
+  M10a landed the write-boundary content policy first, as planned; the media and
+  user write routes themselves remain deferred to later M10 groups.
 - **Taxonomies and post types.** Only `category` and `post_tag` are served, and
   archives list `post` rows only — custom taxonomies and custom post types are
   out of scope. Term hierarchy is read-only: M9b reads `term_taxonomy.parent`,

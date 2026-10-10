@@ -346,31 +346,147 @@ Type mappings from the WordPress MySQL schema are translated per vendor
 
 ## Trusted-content boundary
 
-`post_content` is emitted verbatim as `template.HTML` (`internal/web/view.go`,
-`postView`), bypassing `html/template` auto-escaping — matching WordPress, which
-stores already-rendered post HTML.
+As of M10a, **every value written through grimoire from M10a onward is sanitized
+at the writer's tier.** This is the precise guarantee — it is explicitly *not* a
+claim that stored content is safe. A capability-aware allow-list policy
+(`internal/sanitize`, built on `bluemonday` with the `golang.org/x/net/html`
+parser) runs at the write boundary, above storage, in front of `post_content`,
+`post_excerpt`, `post_title` and comment content. It mirrors WordPress's two
+`kses` lists as captured from **WordPress 7.1** (`$allowedtags` = 14 elements,
+`$allowedposttags` = 124 elements, `wp_allowed_protocols` = 22 schemes; see
+`internal/sanitize/testdata/parity/provenance.json`).
 
-The list-view **`Excerpt`** is emitted the same way (also `template.HTML`, cast in
-`postView`). A manual `post_excerpt` is trusted WP HTML; an empty one is
-auto-derived by `internal/content.Excerpt`, which strips tags, shortcodes and
-Gutenberg block comments before wrapping the plain text — so the auto path emits
-no untrusted markup. Both fields therefore sit inside the same trust boundary.
+### The three tiers
 
-This was safe by construction in M1/M2, when grimoire only read a *trusted*
-WordPress database whose content was authored and sanitized upstream by
-WordPress and accepted no user input on the serving path.
+A writer's capability selects the tier; authentication status does not. The field
+kind selects the tight/broad list below tier C.
 
-As of M5-M7, write paths exist: the REST API accepts writes for posts/pages,
-comments, and categories/tags, and the admin UI supports full content CRUD.
-Content submitted through these paths is rendered through the same
-`template.HTML` cast described above, with no additional HTML sanitization
-at the render layer today. Operators exposing these write paths to
-less-trusted users (in particular the public comment-submission endpoint)
-should evaluate their own moderation/sanitization needs — the same
-operator-trust assumption WordPress itself relies on. The cast sites still
-carry a `TRUST BOUNDARY` comment; adding sanitization (e.g. `bluemonday`) at
-those sites remains the recommended hardening path if this assumption does
-not hold for a given deployment.
+| Tier | Oracle | Applies to | Allows | Granted to |
+|---|---|---|---|---|
+| **A** | `wp_kses($in, $allowedtags)` | comment content | WordPress's tight `$allowedtags` — 14 inline elements, 4 attribute grants; no `img`, no `class`, no `style` | every writer **without** `unfiltered_html`, authenticated or not |
+| **B** | `wp_kses_post($in)` | `post_content`, `post_excerpt` | the `$allowedposttags`-equivalent broad list incl. `img`, `class`, a 117-property `style` allow-list; no `iframe`/`form`/`input`/`on*` | writers without `unfiltered_html` (subscriber, contributor, author) |
+| **C** | identity (no filtering) | any field | everything, byte-identical | `unfiltered_html` holders: editor, administrator, and any custom role or explicit grant carrying it |
+
+**Granting `unfiltered_html` grants the ability to store arbitrary HTML,
+including script.** That is the capability's meaning in WordPress and here: a
+tier-C writer's content is persisted byte-identically, unfiltered, so the decision
+of which roles hold `unfiltered_html` is the decision of who may store script.
+
+### `post_title` is plain text
+
+`post_title` is reduced to plain text (`internal/sanitize/title.go`), a deliberate
+grimoire decision with its rationale — not a parity gap awaiting a fix.
+
+Stated at its **true width**: WordPress registers
+`add_filter('title_save_pre', 'wp_filter_kses')`, which applies the **tight
+`$allowedtags` comment list (14 inline elements), not the broad `$allowedposttags`
+(124)**. So a WordPress title carries 14 inline elements; grimoire stores none.
+Grimoire is not diverging from a 124-element post list it never had.
+
+Two losses follow:
+
+- **`<`/`>` in literal title text** — a title whose text contains `<` or `>`
+  (e.g. `5 < 6`) loses those characters. This is **documented behavior, not a
+  grimoire-specific divergence**: WordPress loses them too —
+  `wp_kses_post("5 < 6 & 7 > 2")` returns `5  2`, because `kses` eats `< 6 & 7 >`
+  as a bogus tag.
+- **Entity sequences** — because the title path iterates to a fixed point, a
+  literal HTML entity sequence in a title's text is also lost
+  (`&amp;lt;b&amp;gt;` decodes across passes to `b`). This loss **is
+  grimoire-specific** (the fixed-point title path) and is recorded as such.
+
+### Divergences from WordPress `kses` (D1–D15)
+
+Fifteen behaviors the chosen library cannot express exactly as WordPress's
+`kses` does. Most are in the **stricter** direction (grimoire removes more than
+WordPress would); D7 and D9 are cosmetic fixed-point normalizations, and D8 and
+D15 are no divergence at all (grimoire and WordPress agree). Each row names what
+grimoire does versus what WordPress does; the set is pinned by the parity fixtures
+(`internal/sanitize/testdata/parity/fixtures.json`).
+
+| # | Input | WordPress `kses` | grimoire | Direction |
+|---|---|---|---|---|
+| D1 | `<script>alert(1)</script>` | `alert(1)` — tags stripped, text kept | `` — content skipped | stricter |
+| D2 | `<style>.x{color:red}</style>` | `.x{color:red}` | `` | stricter |
+| D3 | `<a href="javascript:alert(1)">x</a>` | `<a href="alert(1)">x</a>` — protocol prefix stripped, remainder kept as a relative URL | `<a>x</a>` — attribute dropped | stricter |
+| D4 | `<img src="a.png" longdesc="javascript:alert(1)">` | keeps `longdesc="alert(1)"` | attribute not in tier B at all | stricter |
+| D5 | `<video poster="javascript:alert(1)" src="v.mp4">` | keeps `poster="alert(1)"` | attribute not in tier B | stricter |
+| D6 | `<object data="…">` | `<object></object>` | element not in tier B | stricter |
+| D7 | `<A HREF="http://x/" TITLE="t">y</A>` | `<A href="http://x/" title="t">y</A>` — element name case preserved | `<a href="http://x/" title="t">y</a>` — lowercased by the tokenizer | cosmetic; a fixed point either way |
+| D8 | `<a>text</a>` (no attributes) | `<a>text</a>` | `<a>text</a>` — kept (construction-time fix: `AllowNoAttrs` on every element) | none (fixed in construction) |
+| D9 | `<a href="/x?a=%41&b">y</a>` | value preserved verbatim | percent-encoding normalized and query keys re-escaped | cosmetic; idempotent |
+| D10 | `background-image: url(/rel.png)` | kept | dropped (http/https absolute only) | stricter, user-visible |
+| D11 | `style="aspect-ratio:16/9"` and 13 other properties | kept | dropped | stricter |
+| D12 | MathML markup | kept (7.1) | dropped | stricter |
+| D13 | `<title>a</title>`, `<textarea>a</textarea>` in post content | kept | dropped | stricter |
+| D14 | `<!-- wp:paragraph -->` in comment content | kept | dropped at tier A | stricter |
+| D15 | non-UTF-8 bytes at tier A/B | `kses` is byte-oriented and largely passes them | passed through byte-identically (D15 fixture: input `61fffe62` → grimoire `61fffe62`, divergence `none`) | none — grimoire and WordPress agree |
+
+### Known limitation: pre-M10a post content (not drained)
+
+The write policy **closes the inflow; it does not drain the pool.** This milestone
+performs **no backfill**: no migration, no startup scan, no write-back of
+sanitized content over stored rows (and no provenance flag recording when a value
+was sanitized).
+
+Scoped to post fields: a site whose pre-M10a authored *post content* or *post
+excerpt*, or whose imported WordPress post rows, already contain stored markup are
+**rendered verbatim** through the existing `template.HTML` casts
+(`internal/web/view.go`). Those two post casts carry pre-M10a and imported content
+as-is; they are the casts a future reader must weigh when deciding whether a post
+backstop is warranted.
+
+### Comment render backstop (tier A, unconditional)
+
+Comments are the exception: *comment content* is sanitized at **tier A on render**
+as well as on write, **unconditionally** — independent of the rendering request's
+principal and of the tier the stored value was written at. This is a second
+application of the **same** tier-A list, not a second policy or a laxer pass.
+
+So the pre-M10a framing above does **not** apply to comments: a comment stored
+before M10a containing `<script>` renders **inert** rather than as live markup —
+the stored row is still not repaired (nothing is written back), but it can no
+longer reach a reader as live script.
+
+The backstop is a **no-op for two populations**, which bounds its blast radius —
+WordPress filters comment content with the **same** tight `$allowedtags` list tier
+A mirrors:
+
+- **Imported WordPress comments** were already `kses`-filtered on the way in, so
+  they are already tier-A-shaped and pass through **unchanged**.
+- **Post-M10a comments** were already tier-A-sanitized on write, so property P1's
+  idempotence makes the render-time pass a **no-op** for them.
+- The only rows the backstop alters are **pre-M10a grimoire-authored** comments —
+  exactly the exposure it closes. (A comment written by an `unfiltered_html`
+  holder is still stored byte-identically, but is rendered through tier A like
+  every other comment, so tier C buys no additional markup in a rendered comment
+  body.)
+
+### Comment double-escape fix (user-visible)
+
+A deliberate user-visible defect fix, not a regression: comments authored with
+allow-listed markup now **render as markup instead of doubly-escaped entities**.
+Previously comment content was escaped twice — once at the render layer and again
+by auto-escaping — so a commenter who typed `<b>Hello</b>` saw the literal
+characters. Leaving the escape in place after sanitization would make the
+allow-list pointless.
+
+### REST `content.rendered` asymmetry
+
+The public page renders allow-listed comment markup, but the REST API's
+`/wp-json/wp/v2/comments` `content.rendered` field keeps its `html.EscapeString`
+(`internal/content/rest.go`), **unchanged and deliberately**. REST
+`content.rendered` fidelity is roadmap group 10.D, out of scope here; changing it
+would widen a REST response contract this milestone has not specified. The
+resulting asymmetry is a scoped deferral, not an inconsistency nobody noticed.
+
+### No new REST write route
+
+M10a enables **no new REST write route**. The `/wp-json/wp/v2/media` and
+`/wp-json/wp/v2/users` writes still answer `501` (`restNotImplemented` in
+`internal/web/rest_media.go` and `internal/web/rest_users.go`). This milestone is
+the capability-aware write-boundary content policy (roadmap group 10.A); media
+writes (10.B), user writes (10.C) and the rest of group 10 remain open.
 
 ## Excerpts (`the_excerpt`)
 

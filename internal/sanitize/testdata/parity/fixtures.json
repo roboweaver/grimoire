@@ -1,0 +1,573 @@
+[
+  {
+    "id": "D1-script-stripped",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<script>alert(1)</script>",
+    "wordpress_of_input": "alert(1)",
+    "grimoire": "",
+    "wordpress_of_grimoire": "",
+    "divergence": "D1"
+  },
+  {
+    "id": "D2-style-element-stripped",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<style>.x{color:red}</style>",
+    "wordpress_of_input": ".x{color:red}",
+    "grimoire": "",
+    "wordpress_of_grimoire": "",
+    "divergence": "D2"
+  },
+  {
+    "id": "D3-javascript-href-dropped",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<a href=\"javascript:alert(1)\">x</a>",
+    "wordpress_of_input": "<a href=\"alert(1)\">x</a>",
+    "grimoire": "<a>x</a>",
+    "wordpress_of_grimoire": "<a>x</a>",
+    "divergence": "D3"
+  },
+  {
+    "id": "D4-img-longdesc-not-in-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<img src=\"a.png\" longdesc=\"javascript:alert(1)\">",
+    "wordpress_of_input": "<img src=\"a.png\" longdesc=\"alert(1)\" />",
+    "grimoire": "<img src=\"a.png\">",
+    "wordpress_of_grimoire": "<img src=\"a.png\">",
+    "divergence": "D4"
+  },
+  {
+    "id": "D5-video-poster-not-in-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<video poster=\"javascript:alert(1)\" src=\"v.mp4\">",
+    "wordpress_of_input": "<video poster=\"alert(1)\" src=\"v.mp4\">",
+    "grimoire": "<video src=\"v.mp4\">",
+    "wordpress_of_grimoire": "<video src=\"v.mp4\">",
+    "divergence": "D5"
+  },
+  {
+    "id": "D6-object-not-in-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<object data=\"x\"></object>",
+    "wordpress_of_input": "<object data=\"x\"></object>",
+    "grimoire": "",
+    "wordpress_of_grimoire": "",
+    "divergence": "D6"
+  },
+  {
+    "id": "D7-uppercase-element-lowercased",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<A HREF=\"http://x/\" TITLE=\"t\">y</A>",
+    "wordpress_of_input": "<A href=\"http://x/\" title=\"t\">y</A>",
+    "grimoire": "<a href=\"http://x/\" title=\"t\">y</a>",
+    "wordpress_of_grimoire": "<a href=\"http://x/\" title=\"t\">y</a>",
+    "divergence": "D7"
+  },
+  {
+    "id": "D8-bare-anchor-survives-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<a>text</a>",
+    "wordpress_of_input": "<a>text</a>",
+    "grimoire": "<a>text</a>",
+    "wordpress_of_grimoire": "<a>text</a>",
+    "divergence": "none"
+  },
+  {
+    "id": "D8-bare-anchor-survives-tierA",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<a>text</a>",
+    "wordpress_of_input": "<a>text</a>",
+    "grimoire": "<a>text</a>",
+    "wordpress_of_grimoire": "<a>text</a>",
+    "divergence": "none"
+  },
+  {
+    "id": "D9-percent-encoding-normalized",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<a href=\"/x?a=%41&b\">y</a>",
+    "wordpress_of_input": "<a href=\"/x?a=%41&amp;b\">y</a>",
+    "grimoire": "<a href=\"/x?a=%41&amp;b\">y</a>",
+    "wordpress_of_grimoire": "<a href=\"/x?a=%41&amp;b\">y</a>",
+    "divergence": "none"
+  },
+  {
+    "id": "D10-background-image-relative-url-dropped",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<p style=\"background-image: url(/rel.png)\">x</p>",
+    "wordpress_of_input": "<p style=\"background-image: url(/rel.png)\">x</p>",
+    "grimoire": "<p>x</p>",
+    "wordpress_of_grimoire": "<p>x</p>",
+    "divergence": "D10"
+  },
+  {
+    "id": "D11-aspect-ratio-dropped",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<p style=\"aspect-ratio:16/9\">x</p>",
+    "wordpress_of_input": "<p style=\"aspect-ratio:16/9\">x</p>",
+    "grimoire": "<p>x</p>",
+    "wordpress_of_grimoire": "<p>x</p>",
+    "divergence": "D11"
+  },
+  {
+    "id": "D12-mathml-dropped",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<math><mi>x</mi></math>",
+    "wordpress_of_input": "<math><mi>x</mi></math>",
+    "grimoire": "x",
+    "wordpress_of_grimoire": "x",
+    "divergence": "D12"
+  },
+  {
+    "id": "D13-title-textarea-dropped",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<title>a</title><textarea>a</textarea>",
+    "wordpress_of_input": "<title>a</title><textarea>a</textarea>",
+    "grimoire": "a",
+    "wordpress_of_grimoire": "a",
+    "divergence": "D13"
+  },
+  {
+    "id": "D14-block-delimiter-dropped-tierA",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->",
+    "wordpress_of_input": "<!-- wp:paragraph -->Hi<!-- /wp:paragraph -->",
+    "grimoire": "Hi",
+    "wordpress_of_grimoire": "Hi",
+    "divergence": "D14"
+  },
+  {
+    "id": "D15-non-utf8-bytes-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "encoding": "hex",
+    "input": "61fffe62",
+    "wordpress_of_input": "61fffe62",
+    "grimoire": "61fffe62",
+    "wordpress_of_grimoire": "61fffe62",
+    "divergence": "none"
+  },
+  {
+    "id": "V-block-delimiters-survive-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->",
+    "wordpress_of_input": "<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->",
+    "grimoire": "<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->",
+    "wordpress_of_grimoire": "<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->",
+    "divergence": "none"
+  },
+  {
+    "id": "V-uppercase-element-lowercased-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<EM>Hi</EM>",
+    "wordpress_of_input": "<EM>Hi</EM>",
+    "grimoire": "<em>Hi</em>",
+    "wordpress_of_grimoire": "<em>Hi</em>",
+    "divergence": "D7"
+  },
+  {
+    "id": "V-relative-url-kept-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<a href=\"/local/page\">y</a>",
+    "wordpress_of_input": "<a href=\"/local/page\">y</a>",
+    "grimoire": "<a href=\"/local/page\">y</a>",
+    "wordpress_of_grimoire": "<a href=\"/local/page\">y</a>",
+    "divergence": "none"
+  },
+  {
+    "id": "V-tel-url-kept-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<a href=\"tel:+15551234\">call</a>",
+    "wordpress_of_input": "<a href=\"tel:+15551234\">call</a>",
+    "grimoire": "<a href=\"tel:+15551234\">call</a>",
+    "wordpress_of_grimoire": "<a href=\"tel:+15551234\">call</a>",
+    "divergence": "none"
+  },
+  {
+    "id": "V-class-dropped-tierA",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<em class=\"x\">hi</em>",
+    "wordpress_of_input": "<em>hi</em>",
+    "grimoire": "<em>hi</em>",
+    "wordpress_of_grimoire": "<em>hi</em>",
+    "divergence": "none"
+  },
+  {
+    "id": "V-class-kept-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<em class=\"x\">hi</em>",
+    "wordpress_of_input": "<em class=\"x\">hi</em>",
+    "grimoire": "<em class=\"x\">hi</em>",
+    "wordpress_of_grimoire": "<em class=\"x\">hi</em>",
+    "divergence": "none"
+  },
+  {
+    "id": "V-srcset-dropped-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<img src=\"a.png\" srcset=\"a-2x.png 2x\">",
+    "wordpress_of_input": "<img src=\"a.png\" srcset=\"a-2x.png 2x\" />",
+    "grimoire": "<img src=\"a.png\">",
+    "wordpress_of_grimoire": "<img src=\"a.png\">",
+    "divergence": "srcset-not-in-tierB"
+  },
+  {
+    "id": "V-entities-amp-lt-gt-tierB",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "5 < 6 & 7 > 2",
+    "wordpress_of_input": "5 &lt; 6 &amp; 7 &gt; 2",
+    "grimoire": "5 &lt; 6 &amp; 7 &gt; 2",
+    "wordpress_of_grimoire": "5 &lt; 6 &amp; 7 &gt; 2",
+    "divergence": "none"
+  },
+  {
+    "id": "T-em-title-reduced-to-text",
+    "kind": "post_title",
+    "tier": "B",
+    "input": "<em>Hello</em>",
+    "wordpress_of_input": "Hello",
+    "grimoire": "Hello",
+    "wordpress_of_grimoire": "Hello",
+    "divergence": "none"
+  },
+  {
+    "id": "T-amp-title-decoded",
+    "kind": "post_title",
+    "tier": "B",
+    "input": "5 &amp; 6",
+    "wordpress_of_input": "5 &amp; 6",
+    "grimoire": "5 & 6",
+    "wordpress_of_grimoire": "5 & 6",
+    "divergence": "title-plain-text"
+  },
+  {
+    "id": "T-nested-encoding-title-emptied",
+    "kind": "post_title",
+    "tier": "B",
+    "input": "&amp;lt;b&amp;gt;",
+    "wordpress_of_input": "&lt;b&gt;",
+    "grimoire": "",
+    "wordpress_of_grimoire": "",
+    "divergence": "title-plain-text"
+  },
+  {
+    "id": "tierA-el-a",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<a href=\"http://x/\">text</a>",
+    "wordpress_of_input": "<a href=\"http://x/\">text</a>",
+    "grimoire": "<a href=\"http://x/\">text</a>",
+    "wordpress_of_grimoire": "<a href=\"http://x/\">text</a>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-abbr",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<abbr title=\"t\">text</abbr>",
+    "wordpress_of_input": "<abbr title=\"t\">text</abbr>",
+    "grimoire": "<abbr title=\"t\">text</abbr>",
+    "wordpress_of_grimoire": "<abbr title=\"t\">text</abbr>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-acronym",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<acronym title=\"t\">text</acronym>",
+    "wordpress_of_input": "<acronym title=\"t\">text</acronym>",
+    "grimoire": "<acronym title=\"t\">text</acronym>",
+    "wordpress_of_grimoire": "<acronym title=\"t\">text</acronym>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-b",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<b>text</b>",
+    "wordpress_of_input": "<b>text</b>",
+    "grimoire": "<b>text</b>",
+    "wordpress_of_grimoire": "<b>text</b>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-blockquote",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<blockquote cite=\"http://x/\">text</blockquote>",
+    "wordpress_of_input": "<blockquote cite=\"http://x/\">text</blockquote>",
+    "grimoire": "<blockquote cite=\"http://x/\">text</blockquote>",
+    "wordpress_of_grimoire": "<blockquote cite=\"http://x/\">text</blockquote>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-cite",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<cite>text</cite>",
+    "wordpress_of_input": "<cite>text</cite>",
+    "grimoire": "<cite>text</cite>",
+    "wordpress_of_grimoire": "<cite>text</cite>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-code",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<code>text</code>",
+    "wordpress_of_input": "<code>text</code>",
+    "grimoire": "<code>text</code>",
+    "wordpress_of_grimoire": "<code>text</code>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-del",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<del datetime=\"2020-01-01\">text</del>",
+    "wordpress_of_input": "<del datetime=\"2020-01-01\">text</del>",
+    "grimoire": "<del datetime=\"2020-01-01\">text</del>",
+    "wordpress_of_grimoire": "<del datetime=\"2020-01-01\">text</del>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-em",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<em>text</em>",
+    "wordpress_of_input": "<em>text</em>",
+    "grimoire": "<em>text</em>",
+    "wordpress_of_grimoire": "<em>text</em>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-i",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<i>text</i>",
+    "wordpress_of_input": "<i>text</i>",
+    "grimoire": "<i>text</i>",
+    "wordpress_of_grimoire": "<i>text</i>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-q",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<q cite=\"http://x/\">text</q>",
+    "wordpress_of_input": "<q cite=\"http://x/\">text</q>",
+    "grimoire": "<q cite=\"http://x/\">text</q>",
+    "wordpress_of_grimoire": "<q cite=\"http://x/\">text</q>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-s",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<s>text</s>",
+    "wordpress_of_input": "<s>text</s>",
+    "grimoire": "<s>text</s>",
+    "wordpress_of_grimoire": "<s>text</s>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-strike",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<strike>text</strike>",
+    "wordpress_of_input": "<strike>text</strike>",
+    "grimoire": "<strike>text</strike>",
+    "wordpress_of_grimoire": "<strike>text</strike>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierA-el-strong",
+    "kind": "comment_content",
+    "tier": "A",
+    "input": "<strong>text</strong>",
+    "wordpress_of_input": "<strong>text</strong>",
+    "grimoire": "<strong>text</strong>",
+    "wordpress_of_grimoire": "<strong>text</strong>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-a-href",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<a href=\"http://x/\">text</a>",
+    "wordpress_of_input": "<a href=\"http://x/\">text</a>",
+    "grimoire": "<a href=\"http://x/\">text</a>",
+    "wordpress_of_grimoire": "<a href=\"http://x/\">text</a>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-img-alt",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<img alt=\"t\">",
+    "wordpress_of_input": "<img alt=\"t\" />",
+    "grimoire": "<img alt=\"t\">",
+    "wordpress_of_grimoire": "<img alt=\"t\">",
+    "divergence": "void-element-serialization"
+  },
+  {
+    "id": "tierB-el-area-alt",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<area alt=\"t\">",
+    "wordpress_of_input": "<area alt=\"t\" />",
+    "grimoire": "<area alt=\"t\">",
+    "wordpress_of_grimoire": "<area alt=\"t\">",
+    "divergence": "void-element-serialization"
+  },
+  {
+    "id": "tierB-el-audio-autoplay",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<audio autoplay=\"x\">text</audio>",
+    "wordpress_of_input": "<audio autoplay=\"x\">text</audio>",
+    "grimoire": "<audio autoplay=\"x\">text</audio>",
+    "wordpress_of_grimoire": "<audio autoplay=\"x\">text</audio>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-video-autoplay",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<video autoplay=\"x\">text</video>",
+    "wordpress_of_input": "<video autoplay=\"x\">text</video>",
+    "grimoire": "<video autoplay=\"x\">text</video>",
+    "wordpress_of_grimoire": "<video autoplay=\"x\">text</video>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-track-default",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<track default=\"x\">",
+    "wordpress_of_input": "<track default=\"x\" />",
+    "grimoire": "<track default=\"x\">",
+    "wordpress_of_grimoire": "<track default=\"x\">",
+    "divergence": "void-element-serialization"
+  },
+  {
+    "id": "tierB-el-blockquote-cite",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<blockquote cite=\"http://x/\">text</blockquote>",
+    "wordpress_of_input": "<blockquote cite=\"http://x/\">text</blockquote>",
+    "grimoire": "<blockquote cite=\"http://x/\">text</blockquote>",
+    "wordpress_of_grimoire": "<blockquote cite=\"http://x/\">text</blockquote>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-q-cite",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<q cite=\"http://x/\">text</q>",
+    "wordpress_of_input": "<q cite=\"http://x/\">text</q>",
+    "grimoire": "<q cite=\"http://x/\">text</q>",
+    "wordpress_of_grimoire": "<q cite=\"http://x/\">text</q>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-ins-datetime",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<ins datetime=\"2020-01-01\">text</ins>",
+    "wordpress_of_input": "<ins datetime=\"2020-01-01\">text</ins>",
+    "grimoire": "<ins datetime=\"2020-01-01\">text</ins>",
+    "wordpress_of_grimoire": "<ins datetime=\"2020-01-01\">text</ins>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-del-datetime",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<del datetime=\"2020-01-01\">text</del>",
+    "wordpress_of_input": "<del datetime=\"2020-01-01\">text</del>",
+    "grimoire": "<del datetime=\"2020-01-01\">text</del>",
+    "wordpress_of_grimoire": "<del datetime=\"2020-01-01\">text</del>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-p-align",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<p align=\"left\">text</p>",
+    "wordpress_of_input": "<p align=\"left\">text</p>",
+    "grimoire": "<p align=\"left\">text</p>",
+    "wordpress_of_grimoire": "<p align=\"left\">text</p>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-span-align",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<span align=\"left\">text</span>",
+    "wordpress_of_input": "<span align=\"left\">text</span>",
+    "grimoire": "<span align=\"left\">text</span>",
+    "wordpress_of_grimoire": "<span align=\"left\">text</span>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-div-align",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<div align=\"left\">text</div>",
+    "wordpress_of_input": "<div align=\"left\">text</div>",
+    "grimoire": "<div align=\"left\">text</div>",
+    "wordpress_of_grimoire": "<div align=\"left\">text</div>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-table-align",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<table align=\"left\">text</table>",
+    "wordpress_of_input": "<table align=\"left\">text</table>",
+    "grimoire": "<table align=\"left\">text</table>",
+    "wordpress_of_grimoire": "<table align=\"left\">text</table>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-el-td-abbr",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<td abbr=\"t\">text</td>",
+    "wordpress_of_input": "<td abbr=\"t\">text</td>",
+    "grimoire": "<td abbr=\"t\">text</td>",
+    "wordpress_of_grimoire": "<td abbr=\"t\">text</td>",
+    "divergence": "none"
+  },
+  {
+    "id": "tierB-style-allowed-and-forbidden-props",
+    "kind": "post_content",
+    "tier": "B",
+    "input": "<p style=\"color:red;position:fixed;aspect-ratio:16/9\">x</p>",
+    "wordpress_of_input": "<p style=\"color:red;position:fixed;aspect-ratio:16/9\">x</p>",
+    "grimoire": "<p style=\"color: red; position: fixed\">x</p>",
+    "wordpress_of_grimoire": "<p style=\"color: red; position: fixed\">x</p>",
+    "divergence": "D11"
+  }
+]

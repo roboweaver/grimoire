@@ -11,6 +11,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/storage/migrate"
 	"github.com/roboweaver/grimoire/internal/storage/storagetest"
@@ -43,7 +44,7 @@ func newCommentServer(t *testing.T) (http.Handler, string) {
 	if err != nil {
 		t.Fatalf("render.Load: %v", err)
 	}
-	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}))
+	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}), sanitize.New())
 	menus := content.NewNavMenuService(repos.NavMenus, "default")
 	media := content.NewMediaService(repos.Media, repos.MediaWriter, content.MediaConfig{UploadsDir: uploads, BaseURL: "/wp-content/uploads"})
 	h := web.NewServer(
@@ -68,7 +69,7 @@ func TestPublicCommentSubmissionRejectsMissingDoubleSubmitCSRF(t *testing.T) {
 	}
 }
 
-func TestPublicCommentSubmissionAcceptsValidTokenAndEscapesPendingEcho(t *testing.T) {
+func TestPublicCommentSubmissionAcceptsValidTokenAndRendersSanitizedPendingEcho(t *testing.T) {
 	h, _ := newCommentServer(t)
 	getRec := httptest.NewRecorder()
 	h.ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/hello-1", nil))
@@ -101,8 +102,15 @@ func TestPublicCommentSubmissionAcceptsValidTokenAndEscapesPendingEcho(t *testin
 	loc := rec.Header().Get("Location")
 	follow := httptest.NewRecorder()
 	h.ServeHTTP(follow, httptest.NewRequest(http.MethodGet, loc, nil))
-	if !strings.Contains(follow.Body.String(), "&amp;lt;b&amp;gt;Hello&amp;lt;/b&amp;gt;") {
-		t.Fatalf("pending echo not escaped: %s", follow.Body.String())
+	// M10a (write-boundary content safety): the pending echo is no longer double-
+	// escaped. Comment content is sanitized at tier A on write and re-sanitized at
+	// tier A on the echo (commentView backstop), and CommentView.Content is now
+	// template.HTML emitted verbatim. <b> is on tier A's allow-list ($allowedtags),
+	// so an anonymous submitter's "<b>Hello</b>" survives as real markup rather than
+	// rendering as the doubly-escaped "&amp;lt;b&amp;gt;...". This assertion was
+	// inverted deliberately for M10a (Req 6.2, 6.3), not loosened to make a change pass.
+	if !strings.Contains(follow.Body.String(), "<b>Hello</b>") {
+		t.Fatalf("pending echo not rendered as sanitized markup: %s", follow.Body.String())
 	}
 }
 

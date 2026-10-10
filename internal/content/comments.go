@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 	"github.com/roboweaver/grimoire/pkg/extensions"
 )
 
@@ -40,6 +41,13 @@ type CommentSubmittedPayload struct {
 
 var ErrCommentsClosed = errors.New("content: comments closed")
 
+// ErrCommentEmpty is returned by CommentService.Create when the Policy's output
+// for the comment content is empty although the submitted value was not -- a body
+// consisting entirely of markup tier A strips. The Policy does not reject content
+// (Req 4.4); Requirement 4.8's required-field check is evaluated here against the
+// sanitized value, so such a submission is handled exactly as an empty submission.
+var ErrCommentEmpty = errors.New("content: comment content empty after sanitization")
+
 type commentPostReader interface {
 	ByID(ctx context.Context, id int64) (domain.Post, error)
 }
@@ -50,11 +58,20 @@ type CommentService struct {
 	meta   domain.CommentMetaRepository
 	posts  commentPostReader
 	spam   domain.CommentSpamFilter
+	policy *sanitize.Policy
 	now    func() time.Time
 }
 
-func NewCommentService(repo domain.CommentRepository, writer domain.CommentWriter, meta domain.CommentMetaRepository, posts commentPostReader, spam domain.CommentSpamFilter) *CommentService {
-	return &CommentService{repo: repo, writer: writer, meta: meta, posts: posts, spam: spam, now: time.Now}
+func NewCommentService(repo domain.CommentRepository, writer domain.CommentWriter, meta domain.CommentMetaRepository, posts commentPostReader, spam domain.CommentSpamFilter, policy *sanitize.Policy) *CommentService {
+	// Fail closed on a nil policy: an unwired service sanitizes rather than
+	// nil-panicking in Create, matching PostWriteService and web.Server, both of
+	// which default to sanitize.New() rather than trusting the caller to pass one
+	// (Req 1.8). Production always injects the shared process-wide instance from
+	// main.go; this default is defense-in-depth for a construction mistake.
+	if policy == nil {
+		policy = sanitize.New()
+	}
+	return &CommentService{repo: repo, writer: writer, meta: meta, posts: posts, spam: spam, policy: policy, now: time.Now}
 }
 
 func (s *CommentService) List(ctx context.Context, filter domain.CommentFilter) ([]domain.Comment, int, error) {
@@ -77,7 +94,7 @@ func (s *CommentService) ByID(ctx context.Context, id int64) (domain.Comment, er
 	return s.repo.ByID(ctx, id)
 }
 
-func (s *CommentService) Create(ctx context.Context, c domain.Comment) (domain.Comment, domain.Post, error) {
+func (s *CommentService) Create(ctx context.Context, actor sanitize.Writer, c domain.Comment) (domain.Comment, domain.Post, error) {
 	post, err := s.posts.ByID(ctx, c.PostID)
 	if err != nil {
 		return domain.Comment{}, domain.Post{}, err
@@ -88,6 +105,18 @@ func (s *CommentService) Create(ctx context.Context, c domain.Comment) (domain.C
 	if strings.EqualFold(post.CommentStatus, "closed") {
 		return domain.Comment{}, domain.Post{}, ErrCommentsClosed
 	}
+	// Req 4.1: sanitize before the spam evaluation and before persistence, so
+	// the spam filter scores the text that will actually be stored and the
+	// "comment.submitted" payload carries the stored value. This mirrors
+	// WordPress's order (pre_comment_content runs ahead of wp_allow_comment).
+	clean, err := s.policy.Sanitize(sanitize.CommentContent, actor, c.Content)
+	if err != nil {
+		return domain.Comment{}, domain.Post{}, err
+	}
+	if clean == "" {
+		return domain.Comment{}, domain.Post{}, ErrCommentEmpty
+	}
+	c.Content = clean
 	// Req 2.2: every anonymous comment defaults to held-for-moderation; only
 	// an explicit spam-filter "approve" verdict publishes immediately.
 	status := commentStatusHold

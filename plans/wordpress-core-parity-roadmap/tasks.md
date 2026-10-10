@@ -790,7 +790,7 @@ task in group 10.B or 10.C begins. This ordering is not optional: it is
 the load-bearing safety property of this milestone (see `design.md`'s
 Security Considerations section).
 
-- [ ] **10.A — Capability-aware write-boundary content policy.** Specify,
+- [x] **10.A — Capability-aware write-boundary content policy.** Specify,
       in a dedicated design, the exact allow-listed HTML elements/
       attributes per capability tier, which existing write paths it
       applies to (REST media/user writes once enabled, plus the
@@ -801,6 +801,11 @@ Security Considerations section).
       and vet a concrete library (e.g. `bluemonday`, already named as the
       recommended candidate in both `docs/compatibility.md` and
       `view.go`'s existing comments) as part of that design, not before.
+      (Shipped via the `10-rest-write-content-safety` spec (M10a): the
+      three-tier capability-aware policy (`internal/sanitize`, built on
+      bluemonday + golang.org/x/net/html) applied at the comment and
+      admin/REST post write boundaries, post_title reduced to plain text,
+      comment render backstop. Groups 10.B–10.G remain open.)
 - [ ] **10.B — REST media write parity.** Replace
       `restNotImplemented` registrations in `internal/web/rest_media.go`
       for `POST /media` (create) and `PUT`/`PATCH`/`POST /media/{id}`

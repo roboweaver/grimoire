@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/content"
+	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/routing"
 	"github.com/roboweaver/grimoire/internal/storage"
@@ -264,5 +266,309 @@ func TestHandlerCategoryPaginationZeroPosts(t *testing.T) {
 	rec = get(t, srv, "/?page=2")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("home page=2 (out-of-range, Total>0) status = %d, want 404", rec.Code)
+	}
+}
+
+// Task 7.4 — pending-comment echo tests (Req 6.4, 6.6, 9.8; property P7;
+// Finding 4). Written RED first: internal/web does not compile / the echo is not
+// yet re-sanitized until task 7.5 implements pendingEcho (handlers.go lines
+// 209-211 still do a flat html.EscapeString of the raw query string). These
+// tests describe the POST-7.5 behavior.
+//
+// The echo renders in themes/default/templates/partials/comments.tmpl as:
+//
+//	<p class="...theme-comment-pending">Your comment is awaiting moderation: {{.PendingComment.Content}}</p>
+//
+// where PendingComment.Content is template.HTML, so it is emitted verbatim (no
+// html/template auto-escape). The echo therefore reaches the page exactly as the
+// Policy left it, which is what makes the <script>/<em> asymmetry below a real
+// test of sanitization rather than of auto-escaping.
+//
+// -----------------------------------------------------------------------------
+// RECONCILING P7 (echo == stored) WITH THE UNCONDITIONAL TIER-A BACKSTOP
+// -----------------------------------------------------------------------------
+// The rendered echo passes through TWO sanitizations, not one:
+//
+//  1. pendingEcho (task 7.5) re-sanitizes the query-string content at the tier
+//     the GET's OWN principal selects for CommentContent — tier A for anonymous
+//     and roles below editor, tier C (identity) for an unfiltered_html holder.
+//     The tier is NEVER carried in the URL (that would be reflected XSS); it is
+//     read from the GET's resolved principal. (design.md "Where the echo's tier
+//     comes from".)
+//  2. commentView (task 6.4) then applies the tier-A render BACKSTOP
+//     UNCONDITIONALLY — s.policy.Sanitize(CommentContent, Anonymous(), ...) — to
+//     EVERY comment value it casts to template.HTML, the echo included
+//     (Req 6.10: "AT the echo site the backstop is in addition to, not instead
+//     of, the submitter-tier sanitization 6.4 requires").
+//
+// So the value that actually renders is backstop(tierA, pendingEcho(tier, x)).
+// The design's P7 table (editor agreement "by identity", sanitize(C,x)=x) is
+// stated for pendingEcho's OUTPUT; the backstop sits after it. For an editor
+// whose stored tier-C value contains markup tier A strips (e.g. <script>), the
+// RENDERED echo = sanitize(A, x) would DIFFER from the stored x — the backstop
+// diverges from the P7-table identity row.
+//
+// The design's own Testing-strategy row for P7 resolves this: it asserts the
+// *rendered* echo is byte-identical to the stored row, "for an anonymous
+// submitter (tier A, agreement via P1) and a logged-in editor (tier C,
+// agreement via identity)". That holds — WITHOUT contradicting the backstop —
+// precisely when the agreement content is ALSO tier-A-valid, because then both
+// pendingEcho's cast and the backstop are no-ops:
+//
+//   - anonymous: stored = sanitize(A, x); rendered = sanitize(A, sanitize(A, x))
+//     = sanitize(A, x) = stored, by P1 idempotence. (Backstop is the 2nd A.)
+//   - editor:    stored = x (tier C, byte-identical). Choose x already tier-A-
+//     valid (<em>hi</em>): rendered = sanitize(A, pendingEcho(C, x)) =
+//     sanitize(A, x) = x = stored. Agreement holds AND the backstop is a no-op.
+//
+// If the editor-agreement content contained <script>, the backstop would strip
+// it and rendered != stored — that is NOT a P7 failure, it is the backstop doing
+// its job, and it is exactly what the SAFETY test below asserts (an editor's
+// tier-C value replayed anonymously is tier-A filtered). The two tests use
+// deliberately different content for that reason:
+//   - agreement tests use tier-A-valid markup so echo == stored is meaningful;
+//   - the safety test uses dangerous markup so the anonymous replay demonstrably
+//     strips it.
+// This sidesteps the only point where the P7 table and the backstop could be
+// read as contradictory, and does so in the direction the design's testing
+// strategy already chose. (Req 6.6, 6.10; Finding 4.)
+
+// pendingEchoFromBody extracts the text the pending-echo <p> actually rendered,
+// i.e. everything after the "awaiting moderation: " lead-in and before the
+// closing </p>. It lets the agreement assertions compare the rendered echo to
+// the stored bytes without matching on the surrounding theme chrome.
+func pendingEchoFromBody(t *testing.T, body string) string {
+	t.Helper()
+	const lead = "Your comment is awaiting moderation: "
+	i := strings.Index(body, lead)
+	if i < 0 {
+		t.Fatalf("pending-echo paragraph not found in body:\n%s", body)
+	}
+	rest := body[i+len(lead):]
+	j := strings.Index(rest, "</p>")
+	if j < 0 {
+		t.Fatalf("pending-echo paragraph not terminated in body:\n%s", body)
+	}
+	return rest[:j]
+}
+
+// getWithCookie performs a GET carrying an optional session cookie, so a replay
+// of the redirect Location can be run EITHER as the submitter (same session) or
+// anonymously (no cookie) — the distinction the conditional-P7 cases turn on.
+func getWithCookie(t *testing.T, h http.Handler, path string, sessionCookie *http.Cookie) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if sessionCookie != nil {
+		req.AddCookie(sessionCookie)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestPendingEchoDisallowedScriptRendersInert is Req 9.8's first acceptance
+// test: a GET carrying ?comment=pending&content=<script>alert(1)</script> on a
+// published post page renders NO <script> element. pendingEcho re-sanitizes the
+// query string at the GET principal's tier (anonymous here → tier A), which
+// strips the <script> entirely; the tier-A backstop in commentView would strip
+// it too. Either way the echoed value must not reach the page as a live script.
+func TestPendingEchoDisallowedScriptRendersInert(t *testing.T) {
+	h := newTestServer(t)
+
+	rec := get(t, h, "/hello-1?comment=pending&author=A&content=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "<script>alert(1)</script>") || strings.Contains(body, "<script>") {
+		t.Errorf("pending echo rendered a live <script>; it must be tier-A sanitized:\n%s", body)
+	}
+	if strings.Contains(body, "alert(1)") {
+		t.Errorf("pending echo leaked the script payload text:\n%s", body)
+	}
+}
+
+// TestPendingEchoAllowListedEmSurvives is Req 9.8's second acceptance test and
+// the asymmetry that makes the first one meaningful: a GET carrying
+// ?comment=pending&content=<em>hi</em> renders a REAL <em> element (surviving
+// markup, not escaped). An implementation that echoed the query string verbatim
+// would pass the <script> test but a blanket-escaping one would fail here, so
+// the pair pins "sanitize at tier A", not "escape everything" and not "pass
+// through". <em> is on tier A's allow-list, so it survives both pendingEcho's
+// tier-A cast (anonymous GET) and the tier-A backstop.
+func TestPendingEchoAllowListedEmSurvives(t *testing.T) {
+	h := newTestServer(t)
+
+	rec := get(t, h, "/hello-1?comment=pending&author=A&content=%3Cem%3Ehi%3C%2Fem%3E")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	echo := pendingEchoFromBody(t, rec.Body.String())
+	if !strings.Contains(echo, "<em>hi</em>") {
+		t.Errorf("allow-listed <em> did not survive the echo as real markup; got %q", echo)
+	}
+	if strings.Contains(echo, "&lt;em&gt;") {
+		t.Errorf("echo escaped the <em> instead of letting it survive; got %q", echo)
+	}
+}
+
+// TestPendingEchoAnonymousAgreesWithStored is the conditional-P7 agreement case
+// for an anonymous submitter (Req 6.6; Finding 4): submit a comment through the
+// real commentSubmit, replay the redirect Location on the SAME (here, absence
+// of) session, and assert the rendered echo is byte-identical to the stored
+// comment content.
+//
+// Agreement holds by P1 idempotence: the stored value is sanitize(A, x) and the
+// echo is sanitize(A, sanitize(A, x)) (pendingEcho's tier-A cast) further passed
+// through the tier-A backstop — all applications of the same tier-A function to
+// a value already in its image, so every one is a no-op. The content is chosen
+// tier-A-valid (<em>hi</em>) so the stored value is non-empty markup and the
+// agreement is a statement about surviving markup, not about the empty string.
+func TestPendingEchoAnonymousAgreesWithStored(t *testing.T) {
+	h, repos, _ := newCommentFormAuthServer(t, nil)
+
+	const submitted = `<em>hi</em>`
+	rec := submitCommentForm(t, h, submitted, nil)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /comment status = %d, want 303 (body=%s)", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	if loc == "" {
+		t.Fatal("no Location header on the 303 redirect")
+	}
+
+	stored, ok := latestCommentContentFor(t, repos, "a@example.com")
+	if !ok {
+		t.Fatal("anonymous comment never reached the writer")
+	}
+
+	// Replay the redirect anonymously (no session) — the same principal that
+	// submitted it.
+	follow := getWithCookie(t, h, loc, nil)
+	if follow.Code != http.StatusOK {
+		t.Fatalf("replay GET status = %d, want 200 (body=%s)", follow.Code, follow.Body.String())
+	}
+	echo := pendingEchoFromBody(t, follow.Body.String())
+	if echo != stored {
+		t.Errorf("anonymous echo/stored disagree (P7 via P1 idempotence should hold):\n echo   %q\n stored %q", echo, stored)
+	}
+}
+
+// TestPendingEchoEditorAgreesWithStored is the conditional-P7 agreement case for
+// a logged-in editor holding unfiltered_html (Req 6.6; Finding 4). The editor's
+// comment is STORED at tier C — byte-identical to the submission. Replaying the
+// redirect ON THE SAME SESSION, pendingEcho reads the GET's own principal as an
+// editor and re-sanitizes at tier C (identity), so the echo equals the stored
+// value.
+//
+// The submitted content is deliberately tier-A-valid (<em>hi</em>): the tier-A
+// render backstop in commentView runs on the echo UNCONDITIONALLY (Req 6.10),
+// so had the content contained markup tier A strips (e.g. <script>), the
+// rendered echo would be backstop(A, x) != x and would NOT equal the stored
+// tier-C value. Choosing tier-A-valid content makes BOTH pendingEcho's tier-C
+// identity cast AND the tier-A backstop no-ops, so rendered echo == stored holds
+// without contradicting the backstop. (See the long comment above for the full
+// reconciliation of the P7 table's "editor by identity" row with the backstop.)
+func TestPendingEchoEditorAgreesWithStored(t *testing.T) {
+	fake := &fakeSessions{
+		authPrincipal: auth.NewPrincipal(1, "editor", []string{auth.RoleEditor}),
+		authSession:   domain.Session{ID: "sid", UserID: 1, CSRFToken: "tok"},
+	}
+	h, repos, _ := newCommentFormAuthServer(t, fake)
+	session := &http.Cookie{Name: "grimoire_session", Value: "anything"}
+
+	const submitted = `<em>hi</em>`
+	rec := submitCommentForm(t, h, submitted, session)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /comment status = %d, want 303 (body=%s)", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	if loc == "" {
+		t.Fatal("no Location header on the 303 redirect")
+	}
+
+	stored, ok := latestCommentContentFor(t, repos, "a@example.com")
+	if !ok {
+		t.Fatal("editor comment never reached the writer")
+	}
+	if stored != submitted {
+		t.Fatalf("editor comment not stored at tier C byte-identically: stored %q, submitted %q", stored, submitted)
+	}
+
+	// Replay on the SAME session: the GET resolves to the editor principal, so
+	// pendingEcho sanitizes at tier C (identity).
+	follow := getWithCookie(t, h, loc, session)
+	if follow.Code != http.StatusOK {
+		t.Fatalf("replay GET status = %d, want 200 (body=%s)", follow.Code, follow.Body.String())
+	}
+	echo := pendingEchoFromBody(t, follow.Body.String())
+	if echo != stored {
+		t.Errorf("editor echo/stored disagree (P7 by identity should hold for tier-A-valid content):\n echo   %q\n stored %q", echo, stored)
+	}
+}
+
+// TestPendingEchoEditorValueReplayedAnonymouslyIsTierAFiltered is the
+// unconditional SAFETY assertion of Finding 4 — the reflected-XSS guard. An
+// editor's tier-C value may legitimately contain markup tier A strips (here a
+// <script>), stored byte-identically. The redirect Location carries that value
+// in the (attacker-supplyable) query string. When that SAME URL is replayed
+// WITHOUT the session — by a third party, or after the editor's session expired
+// — the GET resolves to an ANONYMOUS principal, so pendingEcho re-sanitizes at
+// tier A and the dangerous markup does NOT appear in the echo. The echo's tier
+// comes from the GET's OWN principal, never from the URL; this is why encoding
+// the tier in the redirect was rejected as a one-line bypass.
+//
+// This is the row where P7 agreement does NOT hold (echo != stored), and that
+// non-agreement is the correct, safe outcome: the echo is sanitized at the
+// requesting principal's tier, which is never laxer than that principal's own
+// writing tier.
+func TestPendingEchoEditorValueReplayedAnonymouslyIsTierAFiltered(t *testing.T) {
+	fake := &fakeSessions{
+		authPrincipal: auth.NewPrincipal(1, "editor", []string{auth.RoleEditor}),
+		authSession:   domain.Session{ID: "sid", UserID: 1, CSRFToken: "tok"},
+	}
+	h, repos, _ := newCommentFormAuthServer(t, fake)
+	session := &http.Cookie{Name: "grimoire_session", Value: "anything"}
+
+	// Dangerous markup that tier C keeps and tier A strips.
+	const submitted = `<script>alert(1)</script><em>ok</em>`
+	rec := submitCommentForm(t, h, submitted, session)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("POST /comment status = %d, want 303 (body=%s)", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	if loc == "" {
+		t.Fatal("no Location header on the 303 redirect")
+	}
+
+	// Confirm the editor really stored the dangerous markup at tier C, so the
+	// Location header carries it: the guard is meaningful only if the value in
+	// the URL actually contains the <script>.
+	stored, ok := latestCommentContentFor(t, repos, "a@example.com")
+	if !ok {
+		t.Fatal("editor comment never reached the writer")
+	}
+	if stored != submitted {
+		t.Fatalf("precondition: editor must store tier-C byte-identically; stored %q, want %q", stored, submitted)
+	}
+
+	// Replay the SAME Location anonymously (no session cookie): the echo is
+	// re-sanitized at the GET's own tier (A), so the <script> must be gone.
+	follow := getWithCookie(t, h, loc, nil)
+	if follow.Code != http.StatusOK {
+		t.Fatalf("anonymous replay GET status = %d, want 200 (body=%s)", follow.Code, follow.Body.String())
+	}
+	body := follow.Body.String()
+	if strings.Contains(body, "<script>alert(1)</script>") || strings.Contains(body, "<script>") {
+		t.Errorf("editor's tier-C <script> survived an anonymous replay — reflected XSS, tier came from the URL not the GET principal:\n%s", body)
+	}
+	if strings.Contains(body, "alert(1)") {
+		t.Errorf("anonymous replay leaked the script payload text:\n%s", body)
+	}
+	// The allow-listed part still survives the tier-A echo, proving the guard is
+	// tier A (not a blanket drop/escape).
+	echo := pendingEchoFromBody(t, body)
+	if !strings.Contains(echo, "<em>ok</em>") {
+		t.Errorf("tier-A anonymous replay dropped the allow-listed <em>; got %q", echo)
 	}
 }

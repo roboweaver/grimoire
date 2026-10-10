@@ -16,6 +16,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/storage/migrate"
 	"github.com/roboweaver/grimoire/internal/storage/storagetest"
@@ -70,7 +71,7 @@ func newAppPasswordRESTRouter(t *testing.T, fake *fakeSessions, requireTLS bool,
 		repos.UserCounter, repos.TermCounter, repos.Users,
 	)
 	mapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, "wp_")
-	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}))
+	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}), sanitize.New())
 	ap := &auth.ApplicationPasswords{Users: repos.Users, Meta: repos.UserMeta, Prefix: "wp_"}
 	srv := web.NewServer(
 		content.NewPostService(repos.Posts).WithAuthors(repos.Users),

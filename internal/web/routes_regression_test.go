@@ -17,6 +17,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/routing"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/storage/migrate"
 	"github.com/roboweaver/grimoire/internal/storage/storagetest"
@@ -116,6 +117,7 @@ func newFullRouter(t *testing.T, structure string) (http.Handler, string) {
 	comments := content.NewCommentService(
 		repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter,
 		content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}),
+		sanitize.New(),
 	)
 	media := content.NewMediaService(repos.Media, repos.MediaWriter, content.MediaConfig{
 		UploadsDir: uploads,

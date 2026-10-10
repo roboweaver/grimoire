@@ -16,11 +16,25 @@ import (
 // as template.HTML, bypassing html/template auto-escaping. Content is the raw
 // post_content; Excerpt is either a manual post_excerpt or an auto-derived
 // summary from content.Excerpt (which strips tags/shortcodes/block comments).
-// This is safe in M1/M2 ONLY because grimoire reads a trusted, read-only
-// WordPress database whose content was authored/sanitized by WordPress. Any
-// future write/admin path (or ingestion of untrusted content) MUST sanitize
-// post_content and post_excerpt (e.g. bluemonday) before they reach these casts.
-// See docs/compatibility.md.
+//
+// As of M10a every value written through grimoire is sanitized at the write
+// boundary by internal/sanitize: post_content and post_excerpt at tier B
+// (WordPress's $allowedposttags) for a writer lacking unfiltered_html, or
+// unfiltered at tier C for a holder, applied in content.PostWriteService.
+// post_title is reduced to plain text, which is why PostView.Title is still a
+// string and is still auto-escaped.
+//
+// These two casts therefore carry exactly two kinds of value: sanitized
+// post-M10a writes, and content that predates the Policy -- rows imported from a
+// WordPress database (sanitized upstream by WordPress) and rows authored through
+// M5-M7's write paths, which were unsanitized when they ran. Pre-M10a content is
+// NOT retroactively sanitized: there is no backfill, no provenance flag and no
+// render-layer backstop, by design. See docs/compatibility.md,
+// "Trusted-content boundary", for what that guarantee does and does not cover.
+//
+// A new write path MUST route its content through internal/sanitize rather than
+// adding a call here; the Policy lives above storage and in front of the write
+// services precisely so that no transport has an opinion about safety.
 //
 // baseURLs (from OptionService.BaseURLs) are the site's own configured
 // siteurl/home option values, absolute self-references to which are rewritten

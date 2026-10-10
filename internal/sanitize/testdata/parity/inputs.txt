@@ -1,0 +1,73 @@
+# Parity oracle input list — consumed by scripts/capture-kses-fixtures.php, NOT by Go.
+# Format: <id>\t<kind>\t<tier>\t<input>  (literal \n \t \\ escapes decoded by the script)
+# Keyed 1:1 to internal/sanitize/testdata/parity/fixtures.json. The Go test reads
+# fixtures.json only; this file exists so a re-capture reads the same inputs.
+#
+# --- D1..D15 divergences ---
+D1-script-stripped	post_content	B	<script>alert(1)</script>
+D2-style-element-stripped	post_content	B	<style>.x{color:red}</style>
+D3-javascript-href-dropped	post_content	B	<a href="javascript:alert(1)">x</a>
+D4-img-longdesc-not-in-tierB	post_content	B	<img src="a.png" longdesc="javascript:alert(1)">
+D5-video-poster-not-in-tierB	post_content	B	<video poster="javascript:alert(1)" src="v.mp4">
+D6-object-not-in-tierB	post_content	B	<object data="x"></object>
+D7-uppercase-element-lowercased	post_content	B	<A HREF="http://x/" TITLE="t">y</A>
+D8-bare-anchor-survives-tierB	post_content	B	<a>text</a>
+D8-bare-anchor-survives-tierA	comment_content	A	<a>text</a>
+D9-percent-encoding-normalized	post_content	B	<a href="/x?a=%41&b">y</a>
+D10-background-image-relative-url-dropped	post_content	B	<p style="background-image: url(/rel.png)">x</p>
+D11-aspect-ratio-dropped	post_content	B	<p style="aspect-ratio:16/9">x</p>
+D12-mathml-dropped	post_content	B	<math><mi>x</mi></math>
+D13-title-textarea-dropped	post_content	B	<title>a</title><textarea>a</textarea>
+D14-block-delimiter-dropped-tierA	comment_content	A	<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->
+# D15-non-utf8-bytes-tierB carries raw bytes 61 ff fe 62; fixtures.json keys it as
+# encoding=hex since inputs.txt and JSON are both UTF-8 text (bytes shown here as a note).
+D15-non-utf8-bytes-tierB	post_content	B	a\xff\xfeb
+#
+# --- seven design-verified behaviors ---
+V-block-delimiters-survive-tierB	post_content	B	<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->
+V-uppercase-element-lowercased-tierB	post_content	B	<EM>Hi</EM>
+V-relative-url-kept-tierB	post_content	B	<a href="/local/page">y</a>
+V-tel-url-kept-tierB	post_content	B	<a href="tel:+15551234">call</a>
+V-class-dropped-tierA	comment_content	A	<em class="x">hi</em>
+V-class-kept-tierB	post_content	B	<em class="x">hi</em>
+V-srcset-dropped-tierB	post_content	B	<img src="a.png" srcset="a-2x.png 2x">
+V-entities-amp-lt-gt-tierB	post_content	B	5 < 6 & 7 > 2
+#
+# --- title path samples ---
+T-em-title-reduced-to-text	post_title	B	<em>Hello</em>
+T-amp-title-decoded	post_title	B	5 &amp; 6
+T-nested-encoding-title-emptied	post_title	B	&amp;lt;b&amp;gt;
+#
+# --- one fixture per tier-A element ---
+tierA-el-a	comment_content	A	<a href="http://x/">text</a>
+tierA-el-abbr	comment_content	A	<abbr title="t">text</abbr>
+tierA-el-acronym	comment_content	A	<acronym title="t">text</acronym>
+tierA-el-b	comment_content	A	<b>text</b>
+tierA-el-blockquote	comment_content	A	<blockquote cite="http://x/">text</blockquote>
+tierA-el-cite	comment_content	A	<cite>text</cite>
+tierA-el-code	comment_content	A	<code>text</code>
+tierA-el-del	comment_content	A	<del datetime="2020-01-01">text</del>
+tierA-el-em	comment_content	A	<em>text</em>
+tierA-el-i	comment_content	A	<i>text</i>
+tierA-el-q	comment_content	A	<q cite="http://x/">text</q>
+tierA-el-s	comment_content	A	<s>text</s>
+tierA-el-strike	comment_content	A	<strike>text</strike>
+tierA-el-strong	comment_content	A	<strong>text</strong>
+#
+# --- tier-B sample weighted toward scheme-bearing / style-bearing attributes ---
+tierB-el-a-href	post_content	B	<a href="http://x/">text</a>
+tierB-el-img-alt	post_content	B	<img alt="t">
+tierB-el-area-alt	post_content	B	<area alt="t">
+tierB-el-audio-autoplay	post_content	B	<audio autoplay="x">text</audio>
+tierB-el-video-autoplay	post_content	B	<video autoplay="x">text</video>
+tierB-el-track-default	post_content	B	<track default="x">
+tierB-el-blockquote-cite	post_content	B	<blockquote cite="http://x/">text</blockquote>
+tierB-el-q-cite	post_content	B	<q cite="http://x/">text</q>
+tierB-el-ins-datetime	post_content	B	<ins datetime="2020-01-01">text</ins>
+tierB-el-del-datetime	post_content	B	<del datetime="2020-01-01">text</del>
+tierB-el-p-align	post_content	B	<p align="left">text</p>
+tierB-el-span-align	post_content	B	<span align="left">text</span>
+tierB-el-div-align	post_content	B	<div align="left">text</div>
+tierB-el-table-align	post_content	B	<table align="left">text</table>
+tierB-el-td-abbr	post_content	B	<td abbr="t">text</td>
+tierB-style-allowed-and-forbidden-props	post_content	B	<p style="color:red;position:fixed;aspect-ratio:16/9">x</p>

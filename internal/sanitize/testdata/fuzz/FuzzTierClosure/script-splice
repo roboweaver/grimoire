@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<scr<script>ipt>alert(1)</script>")

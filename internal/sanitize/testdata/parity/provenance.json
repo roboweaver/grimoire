@@ -1,0 +1,16 @@
+{
+  "wordpress_version": "7.1",
+  "image": "docker.io/library/wordpress:latest",
+  "container": "wp-wordpress",
+  "captured_at": "2024-01-01T00:00:00Z",
+  "capture_script": "scripts/capture-kses-fixtures.php",
+  "script_sha256": "55631c045a33775150825655a1bf9c05e036b0e28fdb0fef9917547ccdcfca6e",
+  "oracle": {
+    "A": "wp_kses($in, $allowedtags)",
+    "B": "wp_kses_post($in)",
+    "C": "identity"
+  },
+  "allowedtags_count": 14,
+  "allowedposttags_count": 124,
+  "allowed_protocols_count": 22
+}

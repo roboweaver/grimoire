@@ -1,0 +1,330 @@
+package sanitize
+
+// This file holds the allow-list tables as declarative Go data; the bluemonday
+// policies in policy.go are built *from* them (design "The tables are data, not
+// code"). Keeping the lists as data rather than scattered AllowAttrs calls makes
+// property P3 (tier monotonicity) a set-containment assertion over these maps,
+// lets the parity-fixture generator read the same source the policy does, and
+// lets a reviewer diff these against WordPress's $allowedtags/$allowedposttags
+// arrays without reading any control flow.
+//
+// Provenance: dumped from a running WordPress 7.1 container
+// (docker.io/library/wordpress:latest): $allowedtags, $allowedposttags,
+// wp_allowed_protocols() and safecss_filter_attr's safe_style_css default array
+// (design "Provenance of the enumeration").
+
+// tierAElements is WordPress's $allowedtags, complete: 14 elements, 4 attribute
+// grants, no global attribute set at all (and therefore no class, id, style or
+// img -- Req 2.1). An empty slice means "element allowed, no element-specific
+// attributes". The four attribute grants (title on a/abbr/acronym, datetime on
+// del, cite on blockquote/q, href on a) are the ones Req 2.1's own parenthetical
+// omits; the binding phrase there is "equivalent to WordPress's tight comment
+// list $allowedtags", so this table governs (design "Tier A", Finding 5).
+var tierAElements = map[string][]string{
+	"a":          {"href", "title"},
+	"abbr":       {"title"},
+	"acronym":    {"title"},
+	"b":          {},
+	"blockquote": {"cite"},
+	"cite":       {},
+	"code":       {},
+	"del":        {"datetime"},
+	"em":         {},
+	"i":          {},
+	"q":          {"cite"},
+	"s":          {},
+	"strike":     {},
+	"strong":     {},
+}
+
+// tierBElements is WordPress's $allowedposttags minus the stated exclusion set
+// (object, title, textarea, the MathML block, and the three scheme-bearing
+// attributes img[longdesc]/video[poster]/img[usemap]), carrying element-specific
+// attributes only; tierBGlobalAttrs carries the shared tail. 92 elements: 35 that
+// carry only the global tail (empty slice here) and 57 with element-specific
+// attributes (design "Tier B").
+//
+// iframe, form, input and every on* handler are absent because $allowedposttags
+// already excludes them -- tier B inherits the exclusion rather than adding a
+// blocklist on top (design "What tier B excludes, and why").
+var tierBElements = map[string][]string{
+	// --- 35 global-tail-only elements -----------------------------------
+	"abbr":     {},
+	"acronym":  {},
+	"address":  {},
+	"b":        {},
+	"bdo":      {},
+	"big":      {},
+	"br":       {},
+	"cite":     {},
+	"code":     {},
+	"dd":       {},
+	"dfn":      {},
+	"dl":       {},
+	"dt":       {},
+	"em":       {},
+	"fieldset": {},
+	"i":        {},
+	"kbd":      {},
+	"mark":     {},
+	"rb":       {},
+	"rp":       {},
+	"rt":       {},
+	"rtc":      {},
+	"ruby":     {},
+	"s":        {},
+	"samp":     {},
+	"search":   {},
+	"small":    {},
+	"strike":   {},
+	"strong":   {},
+	"sub":      {},
+	"sup":      {},
+	"tt":       {},
+	"u":        {},
+	"var":      {},
+	"wbr":      {},
+
+	// --- 57 elements with element-specific attributes -------------------
+	"a":          {"href", "rel", "rev", "name", "target", "download"},
+	"area":       {"alt", "coords", "href", "nohref", "shape", "target"},
+	"article":    {"align"},
+	"aside":      {"align"},
+	"audio":      {"autoplay", "controls", "loop", "muted", "preload", "src"},
+	"blockquote": {"cite"},
+	"button":     {"command", "commandfor", "disabled", "name", "type", "value", "popovertarget", "popovertargetaction", "aria-haspopup"},
+	"caption":    {"align"},
+	"col":        {"align", "char", "charoff", "span", "valign", "width"},
+	"colgroup":   {"align", "char", "charoff", "span", "valign", "width"},
+	"data":       {"value"},
+	"del":        {"datetime"},
+	"details":    {"align", "open", "name"},
+	"dialog":     {"closedby", "open", "popover", "autofocus"},
+	"div":        {"align", "popover"},
+	"figcaption": {"align"},
+	"figure":     {"align"},
+	"font":       {"color", "face", "size"},
+	"footer":     {"align"},
+	"h1":         {"align"},
+	"h2":         {"align"},
+	"h3":         {"align"},
+	"h4":         {"align"},
+	"h5":         {"align"},
+	"h6":         {"align"},
+	"header":     {"align"},
+	"hgroup":     {"align"},
+	"hr":         {"align", "noshade", "size", "width"},
+	"img":        {"alt", "align", "border", "height", "hspace", "loading", "vspace", "src", "width"},
+	"ins":        {"datetime", "cite"},
+	"label":      {"for"},
+	"legend":     {"align"},
+	"li":         {"align", "value"},
+	"main":       {"align"},
+	"map":        {"name"},
+	"menu":       {"type"},
+	"meter":      {"high", "low", "max", "min", "optimum", "value"},
+	"nav":        {"align"},
+	"ol":         {"start", "type", "reversed"},
+	"p":          {"align"},
+	"pre":        {"width"},
+	"progress":   {"max", "value"},
+	"q":          {"cite"},
+	"section":    {"align"},
+	"span":       {"align"},
+	"summary":    {"align"},
+	"table":      {"align", "bgcolor", "border", "cellpadding", "cellspacing", "rules", "summary", "width"},
+	"tbody":      {"align", "char", "charoff", "valign"},
+	"td":         {"abbr", "align", "axis", "bgcolor", "char", "charoff", "colspan", "headers", "height", "nowrap", "rowspan", "scope", "valign", "width"},
+	"tfoot":      {"align", "char", "charoff", "valign"},
+	"th":         {"abbr", "align", "axis", "bgcolor", "char", "charoff", "colspan", "headers", "height", "nowrap", "rowspan", "scope", "valign", "width"},
+	"thead":      {"align", "char", "charoff", "valign"},
+	"time":       {"datetime"},
+	"tr":         {"align", "bgcolor", "char", "charoff", "valign"},
+	"track":      {"default", "kind", "label", "src", "srclang"},
+	"ul":         {"type", "popover"},
+	"video":      {"autoplay", "controls", "height", "loop", "muted", "playsinline", "preload", "src", "width"},
+}
+
+// tierBGlobalAttrs is $allowedposttags's shared tail -- the 19 named attributes
+// granted on every tier-B element, which is what makes tier B "deliberately
+// permissive" (Req 2.2). data-* is granted separately via AllowDataAttributes
+// (it is policy-wide in bluemonday) and style via AllowStyles over
+// tierBStyleProps; both appear in the design's 21-token tail list but are not
+// AllowAttrs grants, so they are not in this slice (design "Tier B").
+var tierBGlobalAttrs = []string{
+	"aria-controls",
+	"aria-current",
+	"aria-describedby",
+	"aria-details",
+	"aria-expanded",
+	"aria-hidden",
+	"aria-label",
+	"aria-labelledby",
+	"aria-live",
+	"class",
+	"dir",
+	"hidden",
+	"id",
+	"lang",
+	"role",
+	"tabindex",
+	"title",
+	"xml:lang",
+}
+
+// tierBStyleProps is the tier-B style property allow-list (Req 2.10): the
+// intersection of WordPress's safe_style_css default array and the properties
+// bluemonday can validate -- 117 properties. A property bluemonday has no
+// handler for falls through to its BaseHandler, which returns false, so unknown
+// properties are dropped rather than passed; listing one bluemonday cannot
+// validate would be a lie in the table, so only the intersection appears (design
+// "Tier B style properties").
+var tierBStyleProps = []string{
+	"align-content",
+	"align-items",
+	"align-self",
+	"background",
+	"background-attachment",
+	"background-blend-mode",
+	"background-color",
+	"background-image",
+	"background-position",
+	"background-repeat",
+	"background-size",
+	"border",
+	"border-bottom",
+	"border-bottom-color",
+	"border-bottom-left-radius",
+	"border-bottom-right-radius",
+	"border-bottom-style",
+	"border-bottom-width",
+	"border-collapse",
+	"border-color",
+	"border-left",
+	"border-left-color",
+	"border-left-style",
+	"border-left-width",
+	"border-radius",
+	"border-right",
+	"border-right-color",
+	"border-right-style",
+	"border-right-width",
+	"border-spacing",
+	"border-style",
+	"border-top",
+	"border-top-color",
+	"border-top-left-radius",
+	"border-top-right-radius",
+	"border-top-style",
+	"border-top-width",
+	"border-width",
+	"bottom",
+	"box-shadow",
+	"caption-side",
+	"clear",
+	"color",
+	"column-count",
+	"column-fill",
+	"column-gap",
+	"column-rule",
+	"column-span",
+	"column-width",
+	"columns",
+	"cursor",
+	"direction",
+	"display",
+	"filter",
+	"flex",
+	"flex-basis",
+	"flex-direction",
+	"flex-flow",
+	"flex-grow",
+	"flex-shrink",
+	"flex-wrap",
+	"float",
+	"font",
+	"font-family",
+	"font-size",
+	"font-style",
+	"font-variant",
+	"font-weight",
+	"grid-auto-columns",
+	"grid-auto-rows",
+	"grid-column",
+	"grid-column-end",
+	"grid-column-gap",
+	"grid-column-start",
+	"grid-gap",
+	"grid-row",
+	"grid-row-end",
+	"grid-row-gap",
+	"grid-row-start",
+	"grid-template-columns",
+	"grid-template-rows",
+	"height",
+	"justify-content",
+	"left",
+	"letter-spacing",
+	"line-height",
+	"list-style-type",
+	"margin",
+	"margin-bottom",
+	"margin-left",
+	"margin-right",
+	"margin-top",
+	"max-height",
+	"max-width",
+	"min-height",
+	"min-width",
+	"object-fit",
+	"object-position",
+	"opacity",
+	"overflow",
+	"padding",
+	"padding-bottom",
+	"padding-left",
+	"padding-right",
+	"padding-top",
+	"position",
+	"right",
+	"text-align",
+	"text-decoration",
+	"text-indent",
+	"text-transform",
+	"top",
+	"vertical-align",
+	"white-space",
+	"width",
+	"writing-mode",
+	"z-index",
+}
+
+// allowedSchemes is WordPress's wp_allowed_protocols(), complete: 22 schemes
+// (Req 2.9; design "URL schemes"). Neither javascript: nor data: appears, which
+// is the floor Req 2.9 sets. The scheme check is only consulted when
+// RequireParseableURLs(true) is set on the policy (see New), so that flag is as
+// load-bearing as this list.
+var allowedSchemes = []string{
+	"http",
+	"https",
+	"ftp",
+	"ftps",
+	"mailto",
+	"news",
+	"irc",
+	"irc6",
+	"ircs",
+	"gopher",
+	"nntp",
+	"feed",
+	"telnet",
+	"mms",
+	"rtsp",
+	"sms",
+	"svn",
+	"tel",
+	"fax",
+	"xmpp",
+	"webcal",
+	"urn",
+}

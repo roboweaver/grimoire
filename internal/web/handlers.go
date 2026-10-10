@@ -12,8 +12,8 @@ import (
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/routing"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 	"github.com/roboweaver/grimoire/pkg/extensions"
-	"html"
 )
 
 // hookRenderPostHTML is the "render.post_html" filter hook (Req 11.1):
@@ -203,19 +203,27 @@ func (s *Server) renderSingle(w http.ResponseWriter, r *http.Request, post domai
 			return err
 		}
 		for _, c := range items {
-			comments = append(comments, commentView(c))
+			comments = append(comments, s.commentView(c))
 		}
 		commentCount = total
-		if r.URL.Query().Get("comment") == "pending" {
-			p := render.CommentView{Author: r.URL.Query().Get("author"), Content: r.URL.Query().Get("content"), Date: time.Now(), PendingEcho: true}
-			p.Content = html.EscapeString(p.Content)
-			pending = &p
-		}
 		tok, err := randToken()
 		if err == nil {
 			s.setCommentCSRFCookie(w, tok)
 			commentToken = tok
 		}
+	}
+	// The pending-comment echo is a GET-side render of the attacker-supplyable
+	// query string, re-sanitized here through s.policy (always non-nil, fail
+	// closed). It does not read the comment service, so it is produced whenever
+	// ?comment=pending is present rather than being gated on s.comments -- the
+	// backstop/echo path must be as available as the policy that governs it
+	// (Req 6.4, 6.10).
+	if r.URL.Query().Get("comment") == "pending" {
+		echo, err := s.pendingEcho(r)
+		if err != nil {
+			return err // fail closed: no echo rather than an unsanitized one
+		}
+		pending = echo
 	}
 	if s.menus != nil {
 		m, err := s.menus.ByLocation(ctx, "primary")
@@ -226,6 +234,38 @@ func (s *Server) renderSingle(w http.ResponseWriter, r *http.Request, post domai
 	}
 	data := render.SingleData{SiteTitle: title, Tagline: tagline, Post: postView(ctx, post, s.options.BaseURLs(ctx), s.featured), Comments: comments, CommentCount: commentCount, PendingComment: pending, CommentToken: commentToken, Menu: menu}
 	return s.renderHTML(w, r, kind, data)
+}
+
+// pendingEcho renders the just-submitted comment back to its author from the
+// query string of the redirect commentSubmit issued.
+//
+// SAFETY-CRITICAL (Req 6.4). The query string is attacker-supplyable in a link,
+// so the echoed value is re-sanitized here -- it is NOT trusted on the grounds
+// that commentSubmit sanitized what it put in the Location header. The tier comes
+// from this request's own resolved Principal, read through the same
+// PrincipalFrom/sanitize.For pair CommentService.Create's callers use. It is the
+// only non-forgeable tier input available on a GET; the alternative -- carrying
+// the tier in the URL -- would put a capability claim in the attacker's hands.
+// This is NOT a tier inferred from the echo path looking anonymous (Req 6.4): an
+// authenticated editor following their own redirect is read as an editor and gets
+// tier C, so their echo matches what was stored. See Finding 4 for when echo/
+// stored agreement (P7) holds and what happens when it does not.
+func (s *Server) pendingEcho(r *http.Request) (*render.CommentView, error) {
+	actor := sanitize.Anonymous()
+	if p, ok := PrincipalFrom(r.Context()); ok {
+		actor = sanitize.For(p)
+	}
+	clean, err := s.policy.Sanitize(sanitize.CommentContent, actor, r.URL.Query().Get("content"))
+	if err != nil {
+		return nil, err // fail closed: no echo rather than an unsanitized one
+	}
+	v := s.commentView(domain.Comment{
+		Author:  r.URL.Query().Get("author"), // stays a string, auto-escaped (Req 6.5)
+		Content: clean,
+		Date:    time.Now(),
+	})
+	v.PendingEcho = true
+	return &v, nil
 }
 
 // The four archive handlers below follow one shape, which is what makes

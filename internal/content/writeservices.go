@@ -7,12 +7,20 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 )
 
 // ErrForbidden is returned by the write services when the acting Principal lacks
 // the capability required for the requested operation. It is deliberately
 // generic so callers do not leak which capability was missing.
 var ErrForbidden = errors.New("content: operation not permitted")
+
+// ErrTitleEmpty is returned by PostWriteService.Create/Update when the caller's
+// post_title sanitizes to an empty string (e.g. a markup-only "<em></em>" that
+// the title plain-text path reduces to nothing). Both transports require a
+// non-empty title, so the service fails closed rather than persisting a
+// title-less post (design "Emptied fields"; Req 1.8, 4.2).
+var ErrTitleEmpty = errors.New("content: post title empty after sanitization")
 
 // ConflictError is returned by PostWriteService.Update when the caller's
 // expectedModified argument does not match the post's current stored Modified
@@ -35,6 +43,13 @@ func (e *ConflictError) Error() string {
 type PostWriteService struct {
 	w         domain.PostWriter
 	revisions revisionSnapshotter
+	// policy is the write-boundary content policy applied to the caller's
+	// title/content/excerpt before they reach the writer (Req 4). It defaults
+	// to sanitize.New() in NewPostWriteService and is NEVER nil: an unwired
+	// service sanitizes rather than silently passing input through, so the
+	// fail-closed guarantee (Req 1.8) holds even for a call site that forgets
+	// WithContentPolicy.
+	policy *sanitize.Policy
 }
 
 // revisionSnapshotter is the narrow capability PostWriteService.Update needs
@@ -68,11 +83,23 @@ func WithRevisionSnapshotter(rs revisionSnapshotter) PostWriteOption {
 	return func(s *PostWriteService) { s.revisions = rs }
 }
 
+// WithContentPolicy wires the write-boundary content policy (in production, the
+// process-wide sanitize.New()) into PostWriteService so Create/Update sanitize
+// the caller's title/content/excerpt at the actor's tier (Req 4). It follows
+// the WithRevisionSnapshotter option style. When omitted, NewPostWriteService's
+// sanitize.New() default still applies, so the service never silently skips
+// sanitization (fail closed, Req 1.8).
+func WithContentPolicy(p *sanitize.Policy) PostWriteOption {
+	return func(s *PostWriteService) { s.policy = p }
+}
+
 // NewPostWriteService constructs a PostWriteService over a PostWriter. By
 // default Update's revision-snapshot hook is a no-op; pass
-// WithRevisionSnapshotter to wire in real revisioning (Req 1.1).
+// WithRevisionSnapshotter to wire in real revisioning (Req 1.1). The content
+// policy defaults to sanitize.New() (never nil / fail closed); pass
+// WithContentPolicy to share the process-wide policy (Req 4, 1.8).
 func NewPostWriteService(w domain.PostWriter, opts ...PostWriteOption) *PostWriteService {
-	s := &PostWriteService{w: w, revisions: noopRevisionSnapshotter{}}
+	s := &PostWriteService{w: w, revisions: noopRevisionSnapshotter{}, policy: sanitize.New()}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -98,7 +125,64 @@ func (s *PostWriteService) Create(ctx context.Context, actor auth.Principal, p d
 	if !auth.CanCreatePost(actor, p.Type, p.Status, p.Author) {
 		return 0, ErrForbidden
 	}
+	// Req 4.2: sanitize the caller's values at the actor's tier, after the
+	// auth gate (never spend the Policy on input an unauthorized caller is not
+	// entitled to) and before the writer. Create has no stored record, so all
+	// three fields are sanitized unconditionally (sanitizeIncoming against a
+	// zero cur: byte-identity only matches when a field is itself empty, which
+	// is a no-op). On any policy error or an empty title, fail closed without
+	// calling the writer.
+	clean, err := s.sanitizeIncoming(actor, p, domain.Post{})
+	if err != nil {
+		return 0, err
+	}
+	p.Title = clean.Title
+	p.Content = clean.Content
+	p.Excerpt = clean.Excerpt
 	return s.w.Create(ctx, p)
+}
+
+// sanitizeIncoming sanitizes the caller's title/content/excerpt at the actor's
+// tier. A field whose caller value is byte-identical to the stored value is
+// passed through unsanitized, because it is not a caller value in any meaningful
+// sense: REST's partial update merges the stored record as its base
+// (rest_posts.go parseRESTPostWrite), so a PATCH of {"title":"x"} arrives here
+// with p.Content == cur.Content. Re-sanitizing it would rewrite pre-M10a or
+// imported content in place, which Requirement 5.2 forbids ("no write-back of
+// sanitized content over stored rows"). Skipping it introduces nothing: the value
+// is already in the row. See design.md Finding 3.
+//
+// The title has an additional check: if it sanitizes to empty, sanitizeIncoming
+// returns ErrTitleEmpty (fail closed, Req 1.8/4.2) — content and excerpt may be
+// empty. Any error from the policy is returned unchanged, also fail-closed.
+func (s *PostWriteService) sanitizeIncoming(actor auth.Principal, p, cur domain.Post) (domain.Post, error) {
+	writer := sanitize.For(actor)
+
+	if p.Title != cur.Title {
+		cleaned, err := s.policy.Sanitize(sanitize.PostTitle, writer, p.Title)
+		if err != nil {
+			return domain.Post{}, err
+		}
+		if cleaned == "" {
+			return domain.Post{}, ErrTitleEmpty
+		}
+		p.Title = cleaned
+	}
+	if p.Content != cur.Content {
+		cleaned, err := s.policy.Sanitize(sanitize.PostContent, writer, p.Content)
+		if err != nil {
+			return domain.Post{}, err
+		}
+		p.Content = cleaned
+	}
+	if p.Excerpt != cur.Excerpt {
+		cleaned, err := s.policy.Sanitize(sanitize.PostExcerpt, writer, p.Excerpt)
+		if err != nil {
+			return domain.Post{}, err
+		}
+		p.Excerpt = cleaned
+	}
+	return p, nil
 }
 
 // Update authorizes and replaces an existing post. It loads the authoritative
@@ -143,9 +227,20 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	if err := s.revisions.Snapshot(ctx, cur, actor.UserID); err != nil { // NEW (Req 1.1)
 		return err // snapshots cur BEFORE any field below mutates it
 	}
-	cur.Title = p.Title
-	cur.Content = p.Content
-	cur.Excerpt = p.Excerpt
+	// Req 4.3: sanitize the CALLER's values here -- after authorization, after
+	// the optimistic-concurrency check, after the revision snapshot, and before
+	// the merge below. cur is not touched, so the snapshot still holds the
+	// historical stored value (Req 9.7). A field byte-identical to the stored
+	// value is passed through unsanitized (Finding 3). On error (including
+	// ErrTitleEmpty) return before the merge/write: no unsanitized value reaches
+	// cur and no write happens (fail closed, Req 1.8).
+	clean, err := s.sanitizeIncoming(actor, p, cur)
+	if err != nil {
+		return err
+	}
+	cur.Title = clean.Title
+	cur.Content = clean.Content
+	cur.Excerpt = clean.Excerpt
 	cur.Slug = p.Slug
 	cur.CommentStatus = p.CommentStatus
 	if !p.Date.IsZero() && !p.Date.Equal(cur.Date) {

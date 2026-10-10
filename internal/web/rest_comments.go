@@ -10,6 +10,7 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 )
 
 // canModerateComments reports whether the request's resolved principal (if
@@ -188,11 +189,13 @@ func (s *Server) handleRESTCommentCreate() http.HandlerFunc {
 			Agent:       r.UserAgent(),
 			Content:     body.Content,
 		}
+		actor := sanitize.Anonymous()
 		if p, ok := PrincipalFrom(r.Context()); ok {
 			c.UserID = p.UserID
+			actor = sanitize.For(p)
 		}
 
-		comment, _, err := s.comments.Create(r.Context(), c)
+		comment, _, err := s.comments.Create(r.Context(), actor, c)
 		if err != nil {
 			if errors.Is(err, domain.ErrNotFound) {
 				writeRESTError(w, http.StatusNotFound, "rest_comment_invalid_post_id", "Sorry, you are not allowed to create a comment on this post.")
@@ -200,6 +203,10 @@ func (s *Server) handleRESTCommentCreate() http.HandlerFunc {
 			}
 			if errors.Is(err, content.ErrCommentsClosed) {
 				writeRESTError(w, http.StatusForbidden, "rest_comment_closed", "Sorry, comments are closed for this item.")
+				return
+			}
+			if errors.Is(err, content.ErrCommentEmpty) {
+				writeRESTError(w, http.StatusBadRequest, "rest_comment_content_invalid", "post, author_name, author_email, and content are required.")
 				return
 			}
 			writeRESTError(w, http.StatusInternalServerError, "rest_comment_failed", "Could not create the comment.")

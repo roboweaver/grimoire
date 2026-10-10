@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -237,6 +238,12 @@ func (s *Server) adminPostCreate(w http.ResponseWriter, r *http.Request) error {
 	}
 	id, err := s.postWrite.Create(r.Context(), principal, p)
 	if err != nil {
+		// A title that sanitizes to empty maps onto the same missing-title 400
+		// parsePostWrite already uses (badRequestError -> "bad_request"), not a
+		// 500 (Req 4.2/4.4).
+		if errors.Is(err, content.ErrTitleEmpty) {
+			return badRequestError{msg: "title is required unless status is draft"}
+		}
 		return err
 	}
 	partial := s.applyTermIDs(r.Context(), principal, id, body.TermIDs)
@@ -284,6 +291,12 @@ func (s *Server) adminPostUpdate(w http.ResponseWriter, r *http.Request) error {
 	}
 	p.ID = id
 	if err := s.postWrite.Update(r.Context(), principal, p, expectedModified); err != nil {
+		// A title that sanitizes to empty maps onto the same missing-title 400
+		// parsePostWrite already uses (badRequestError -> "bad_request"), not a
+		// 500 (Req 4.2/4.4).
+		if errors.Is(err, content.ErrTitleEmpty) {
+			return badRequestError{msg: "title is required unless status is draft"}
+		}
 		return err
 	}
 	partial := s.applyTermIDs(r.Context(), principal, id, body.TermIDs)

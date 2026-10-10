@@ -319,6 +319,13 @@ func (s *Server) handleRESTPostCreate(typ string) http.HandlerFunc {
 				writeRESTError(w, http.StatusForbidden, "rest_cannot_create", "Sorry, you are not allowed to create "+typ+"s as this user.")
 				return
 			}
+			// A title that sanitizes to empty maps onto the same missing-title
+			// 400 parseRESTPostWrite already returns (status 400,
+			// "rest_invalid_param"), not a 500 (Req 4.2/4.4).
+			if errors.Is(err, content.ErrTitleEmpty) {
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "title is required unless status is draft")
+				return
+			}
 			writeRESTError(w, http.StatusInternalServerError, "rest_create_failed", "Could not create "+typ+".")
 			return
 		}
@@ -387,6 +394,11 @@ func (s *Server) handleRESTPostUpdate(typ string) http.HandlerFunc {
 				writeRESTError(w, http.StatusForbidden, "rest_cannot_edit", "Sorry, you are not allowed to update this "+typ+".")
 			case errors.As(err, &conflict):
 				writeRESTError(w, http.StatusConflict, "rest_conflict", "The "+typ+" has been modified since it was last read.")
+			case errors.Is(err, content.ErrTitleEmpty):
+				// A title that sanitizes to empty maps onto the same
+				// missing-title 400 parseRESTPostWrite already returns (status
+				// 400, "rest_invalid_param"), not a 500 (Req 4.2/4.4).
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "title is required unless status is draft")
 			default:
 				writeRESTError(w, http.StatusInternalServerError, "rest_update_failed", "Could not update "+typ+".")
 			}

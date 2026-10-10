@@ -6,7 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 )
 
 type fakeCommentRepo struct {
@@ -215,8 +217,8 @@ func TestCommentServiceCreateRoutesSpamVerdictsAndValidatesPost(t *testing.T) {
 				posts[10] = tt.post
 			}
 			writer := &fakeCommentWriter{}
-			svc := NewCommentService(&fakeCommentRepo{}, writer, &fakeCommentMeta{}, &fakePostByID{posts: posts}, tt.filter)
-			_, _, err := svc.Create(context.Background(), domain.Comment{PostID: tt.postID, Author: "A", AuthorEmail: "a@example.com", Content: "hello", Date: now, DateGMT: now})
+			svc := NewCommentService(&fakeCommentRepo{}, writer, &fakeCommentMeta{}, &fakePostByID{posts: posts}, tt.filter, sanitize.New())
+			_, _, err := svc.Create(context.Background(), sanitize.Anonymous(), domain.Comment{PostID: tt.postID, Author: "A", AuthorEmail: "a@example.com", Content: "hello", Date: now, DateGMT: now})
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Create error = %v, want %v", err, tt.wantErr)
 			}
@@ -234,7 +236,7 @@ func TestCommentServiceCreateRoutesSpamVerdictsAndValidatesPost(t *testing.T) {
 
 func TestCommentServiceListPassesFilterAndCount(t *testing.T) {
 	repo := &fakeCommentRepo{list: []domain.Comment{{ID: 1}}, count: 7}
-	svc := NewCommentService(repo, &fakeCommentWriter{}, &fakeCommentMeta{}, &fakePostByID{}, nil)
+	svc := NewCommentService(repo, &fakeCommentWriter{}, &fakeCommentMeta{}, &fakePostByID{}, nil, sanitize.New())
 	comments, total, err := svc.List(context.Background(), domain.CommentFilter{PostID: 5, Statuses: []string{"1"}, Limit: 20, Offset: 40})
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -252,7 +254,7 @@ func TestCommentServiceTrashSnapshotsAndUntrashRestores(t *testing.T) {
 	repo := &fakeCommentRepo{byID: map[int64]domain.Comment{12: {ID: 12, Status: "1"}}}
 	meta := &fakeCommentMeta{values: map[int64]map[string]string{}}
 	writer := &fakeCommentWriter{}
-	svc := NewCommentService(repo, writer, meta, &fakePostByID{}, nil)
+	svc := NewCommentService(repo, writer, meta, &fakePostByID{}, nil, sanitize.New())
 	svc.now = func() time.Time { return now }
 
 	if err := svc.Trash(context.Background(), 12); err != nil {
@@ -286,7 +288,7 @@ func TestCommentServiceUntrashDefaultsToHoldWhenSnapshotMissing(t *testing.T) {
 	repo := &fakeCommentRepo{byID: map[int64]domain.Comment{33: {ID: 33, Status: commentStatusTrash}}}
 	meta := &fakeCommentMeta{values: map[int64]map[string]string{}}
 	writer := &fakeCommentWriter{}
-	svc := NewCommentService(repo, writer, meta, &fakePostByID{}, nil)
+	svc := NewCommentService(repo, writer, meta, &fakePostByID{}, nil, sanitize.New())
 
 	if err := svc.Untrash(context.Background(), 33); err != nil {
 		t.Fatalf("Untrash: %v", err)
@@ -323,5 +325,162 @@ func TestBasicCommentSpamFilterHeuristics(t *testing.T) {
 	}
 	if verdict, _ := filter.Evaluate(ctx, domain.Comment{Author: "A", AuthorEmail: "a@example.com", Content: "third", AuthorIP: "9.9.9.9"}, post); verdict != spamVerdictHold {
 		t.Fatalf("rate verdict = %q, want hold", verdict)
+	}
+}
+
+// --- Task 4.1: sanitization wiring of CommentService.Create ---
+//
+// These tests pin the write-boundary content-safety behavior task 4.2 will
+// implement. They currently fail to compile (and, once compiling, fail) because
+// Create does not yet take an `actor sanitize.Writer`, does not sanitize via the
+// policy, and does not return content.ErrCommentEmpty. See design.md sections
+// "Ordering in CommentService.Create", "Emptied fields (Requirement 4.8)" and
+// the ErrCommentEmpty sentinel.
+//
+// Assumed signatures (so task 4.2 matches):
+//   - NewCommentService(repo, writer, meta, posts, spam, policy *sanitize.Policy) *CommentService
+//     (policy appended as the final constructor parameter)
+//   - (*CommentService).Create(ctx context.Context, actor sanitize.Writer, c domain.Comment)
+//     (domain.Comment, domain.Post, error)
+//     (actor inserted as the first parameter after ctx)
+//   - var ErrCommentEmpty error  // content: comment content empty after sanitization
+
+// anonActor is the public (no-Principal) comment submitter: tier A for comment
+// content.
+func anonActor() sanitize.Writer { return sanitize.Anonymous() }
+
+// unfilteredActor is a tier-C actor: a Principal holding unfiltered_html, which
+// passes comment content through verbatim.
+func unfilteredActor() sanitize.Writer {
+	return sanitize.For(auth.NewPrincipal(1, "editor", []string{sanitize.CapUnfilteredHTML}))
+}
+
+// TestCommentServiceCreateSanitizesAnonymousAtTierA asserts that an anonymous
+// actor's comment content is sanitized through tier A, that the SANITIZED (not
+// the raw) value is what the spam filter scores and what gets persisted, and
+// that sanitization happens before spam evaluation. (Req 4.1, 1.6, 2.5)
+func TestCommentServiceCreateSanitizesAnonymousAtTierA(t *testing.T) {
+	post := domain.Post{ID: 10, Status: "publish", Type: "post"}
+	writer := &fakeCommentWriter{}
+	spam := &fakeSpamFilter{verdict: spamVerdictApprove}
+	svc := NewCommentService(&fakeCommentRepo{}, writer, &fakeCommentMeta{}, &fakePostByID{posts: map[int64]domain.Post{10: post}}, spam, sanitize.New())
+
+	// Tier A keeps <em> but strips the global class attribute and <script>.
+	raw := `<em>hi</em> <span class="x">y</span><script>alert(1)</script>`
+	wantClean, err := sanitize.New().Sanitize(sanitize.CommentContent, anonActor(), raw)
+	if err != nil {
+		t.Fatalf("oracle sanitize: %v", err)
+	}
+
+	got, _, err := svc.Create(context.Background(), anonActor(), domain.Comment{PostID: 10, Author: "A", AuthorEmail: "a@example.com", Content: raw})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if wantClean == raw {
+		t.Fatal("test input must change under tier A sanitization")
+	}
+	if len(writer.created) != 1 {
+		t.Fatalf("writer.Create calls = %d, want 1", len(writer.created))
+	}
+	if writer.created[0].Content != wantClean {
+		t.Fatalf("persisted content = %q, want sanitized %q", writer.created[0].Content, wantClean)
+	}
+	if len(spam.seen) != 1 || spam.seen[0].Content != wantClean {
+		t.Fatalf("spam filter scored %q, want sanitized %q", spam.seen[0].Content, wantClean)
+	}
+	if got.Content != wantClean {
+		t.Fatalf("returned comment content = %q, want sanitized %q", got.Content, wantClean)
+	}
+}
+
+// TestCommentServiceCreateTierCPassesThroughVerbatim asserts that an actor
+// holding unfiltered_html routes comment content through tier C: the stored and
+// spam-scored content is byte-identical to the raw input. (Req 2.5)
+func TestCommentServiceCreateTierCPassesThroughVerbatim(t *testing.T) {
+	post := domain.Post{ID: 10, Status: "publish", Type: "post"}
+	writer := &fakeCommentWriter{}
+	spam := &fakeSpamFilter{verdict: spamVerdictApprove}
+	svc := NewCommentService(&fakeCommentRepo{}, writer, &fakeCommentMeta{}, &fakePostByID{posts: map[int64]domain.Post{10: post}}, spam, sanitize.New())
+
+	raw := `<em>hi</em> <span class="x">y</span><script>alert(1)</script>`
+	if _, _, err := svc.Create(context.Background(), unfilteredActor(), domain.Comment{PostID: 10, Author: "A", AuthorEmail: "a@example.com", Content: raw}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(writer.created) != 1 {
+		t.Fatalf("writer.Create calls = %d, want 1", len(writer.created))
+	}
+	if writer.created[0].Content != raw {
+		t.Fatalf("persisted content = %q, want verbatim %q", writer.created[0].Content, raw)
+	}
+	if len(spam.seen) != 1 || spam.seen[0].Content != raw {
+		t.Fatalf("spam filter scored %q, want verbatim %q", spam.seen[0].Content, raw)
+	}
+}
+
+// TestCommentServiceCreateRejectsSanitizedToEmpty asserts that a comment body
+// that is non-empty but sanitizes to empty at tier A returns ErrCommentEmpty and
+// does NOT persist. (Req 4.8, "ErrCommentEmpty")
+func TestCommentServiceCreateRejectsSanitizedToEmpty(t *testing.T) {
+	post := domain.Post{ID: 10, Status: "publish", Type: "post"}
+
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{name: "script only", raw: `<script>alert(1)</script>`},
+		{name: "markup only", raw: `<img src="x">`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Guard: the oracle must actually sanitize this input to empty, else
+			// the test asserts nothing.
+			clean, err := sanitize.New().Sanitize(sanitize.CommentContent, anonActor(), tc.raw)
+			if err != nil {
+				t.Fatalf("oracle sanitize: %v", err)
+			}
+			if clean != "" {
+				t.Fatalf("input %q sanitizes to %q, want empty", tc.raw, clean)
+			}
+
+			writer := &fakeCommentWriter{}
+			spam := &fakeSpamFilter{verdict: spamVerdictApprove}
+			svc := NewCommentService(&fakeCommentRepo{}, writer, &fakeCommentMeta{}, &fakePostByID{posts: map[int64]domain.Post{10: post}}, spam, sanitize.New())
+
+			_, _, err = svc.Create(context.Background(), anonActor(), domain.Comment{PostID: 10, Author: "A", AuthorEmail: "a@example.com", Content: tc.raw})
+			if !errors.Is(err, ErrCommentEmpty) {
+				t.Fatalf("Create error = %v, want ErrCommentEmpty", err)
+			}
+			if len(writer.created) != 0 {
+				t.Fatalf("writer.Create calls = %d, want 0 (no persistence)", len(writer.created))
+			}
+		})
+	}
+}
+
+// TestCommentServiceCreateFiresHookWithSanitizedContent asserts that the
+// comment.submitted payload carries the sanitized content, since sanitization
+// runs before persistence and the hook fires with the stored comment. (Req 11.2)
+func TestCommentServiceCreateFiresHookWithSanitizedContent(t *testing.T) {
+	post := domain.Post{ID: 10, Status: "publish", Type: "post"}
+	writer := &fakeCommentWriter{createID: 42}
+	spam := &fakeSpamFilter{verdict: spamVerdictApprove}
+	svc := NewCommentService(&fakeCommentRepo{}, writer, &fakeCommentMeta{}, &fakePostByID{posts: map[int64]domain.Post{10: post}}, spam, sanitize.New())
+
+	raw := `<em>ok</em><script>alert(1)</script>`
+	wantClean, err := sanitize.New().Sanitize(sanitize.CommentContent, anonActor(), raw)
+	if err != nil {
+		t.Fatalf("oracle sanitize: %v", err)
+	}
+
+	got, _, err := svc.Create(context.Background(), anonActor(), domain.Comment{PostID: 10, Author: "A", AuthorEmail: "a@example.com", Content: raw})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got.ID != 42 {
+		t.Fatalf("returned comment ID = %d, want 42", got.ID)
+	}
+	if got.Content != wantClean {
+		t.Fatalf("submitted comment content = %q, want sanitized %q", got.Content, wantClean)
 	}
 }

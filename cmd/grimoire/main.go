@@ -20,6 +20,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/render"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 	"github.com/roboweaver/grimoire/internal/scheduler"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/web"
@@ -81,7 +82,13 @@ func main() {
 		Prefix:   cfg.Database.TablePrefix,
 	}
 
-	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}))
+	// One Policy for the process: allow-listing HTML is not vendor-, transport-
+	// or field-specific, so there is exactly one of these (Req 1.1). Shared by
+	// both write services and the Server (pendingEcho + commentView backstop) so
+	// a single instance governs every path.
+	contentPolicy := sanitize.New()
+
+	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}), contentPolicy)
 	menus := content.NewNavMenuService(repos.NavMenus, cfg.Theme)
 	media := content.NewMediaService(repos.Media, repos.MediaWriter, content.MediaConfig{UploadsDir: cfg.Media.UploadsDir, BaseURL: "/wp-content/uploads", AllowedMIMEs: cfg.Media.AllowedMIMEs, MaxUploadSize: cfg.Media.MaxUploadSize})
 
@@ -114,7 +121,7 @@ func main() {
 	// wiring shape.
 	revisionWrite := content.NewRevisionWriteService(repos.Revisions, repos.PostWriter, -1)
 	autosave := content.NewAutosaveService(repos.Revisions, repos.PostWriter)
-	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite))
+	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite), content.WithContentPolicy(contentPolicy))
 	termWrite := content.NewTermWriteService(termRW)
 	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
 
@@ -133,7 +140,7 @@ func main() {
 		options,
 		eng,
 		log,
-	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
+	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

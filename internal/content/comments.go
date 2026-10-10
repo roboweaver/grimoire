@@ -63,6 +63,14 @@ type CommentService struct {
 }
 
 func NewCommentService(repo domain.CommentRepository, writer domain.CommentWriter, meta domain.CommentMetaRepository, posts commentPostReader, spam domain.CommentSpamFilter, policy *sanitize.Policy) *CommentService {
+	// Fail closed on a nil policy: an unwired service sanitizes rather than
+	// nil-panicking in Create, matching PostWriteService and web.Server, both of
+	// which default to sanitize.New() rather than trusting the caller to pass one
+	// (Req 1.8). Production always injects the shared process-wide instance from
+	// main.go; this default is defense-in-depth for a construction mistake.
+	if policy == nil {
+		policy = sanitize.New()
+	}
 	return &CommentService{repo: repo, writer: writer, meta: meta, posts: posts, spam: spam, policy: policy, now: time.Now}
 }
 

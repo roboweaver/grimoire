@@ -3,6 +3,7 @@ package content
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -482,5 +483,31 @@ func TestCommentServiceCreateFiresHookWithSanitizedContent(t *testing.T) {
 	}
 	if got.Content != wantClean {
 		t.Fatalf("submitted comment content = %q, want sanitized %q", got.Content, wantClean)
+	}
+}
+
+// TestNewCommentServiceNilPolicyFailsClosed pins the defense-in-depth default
+// (PR #53 review finding 2): constructing a CommentService with a nil policy
+// must not nil-panic in Create; the constructor substitutes sanitize.New() so an
+// unwired service sanitizes rather than skipping sanitization or crashing,
+// matching PostWriteService and web.Server. A tier-A write still strips a
+// disallowed <script> while keeping an allow-listed <em>.
+func TestNewCommentServiceNilPolicyFailsClosed(t *testing.T) {
+	post := domain.Post{ID: 10, Status: "publish", Type: "post"}
+	writer := &fakeCommentWriter{}
+	svc := NewCommentService(&fakeCommentRepo{}, writer, &fakeCommentMeta{}, &fakePostByID{posts: map[int64]domain.Post{10: post}}, &fakeSpamFilter{verdict: spamVerdictApprove}, nil)
+
+	got, _, err := svc.Create(context.Background(), sanitize.Anonymous(), domain.Comment{PostID: 10, Author: "A", AuthorEmail: "a@example.com", Content: `<em>ok</em><script>alert(1)</script>`})
+	if err != nil {
+		t.Fatalf("Create with nil policy: %v (constructor must default to sanitize.New(), not leave policy nil)", err)
+	}
+	if len(writer.created) != 1 {
+		t.Fatalf("writer.Create calls = %d, want 1", len(writer.created))
+	}
+	if strings.Contains(writer.created[0].Content, "<script") {
+		t.Errorf("nil-defaulted policy did not sanitize: %q", writer.created[0].Content)
+	}
+	if !strings.Contains(got.Content, "<em>ok</em>") {
+		t.Errorf("nil-defaulted policy dropped allow-listed <em>: %q", got.Content)
 	}
 }

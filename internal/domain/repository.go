@@ -289,6 +289,16 @@ type UserRepository interface {
 	// UpdatePass replaces the stored password hash for a user. It returns
 	// ErrNotFound when no user has the given ID.
 	UpdatePass(ctx context.Context, id int64, passHash string) error
+	// UpdateProfile writes only the non-nil fields of f to the user's
+	// {prefix}users row (display_name/user_email/user_url/user_nicename),
+	// leaving every nil field's column untouched. It returns ErrNotFound when
+	// no user has the given ID, matching the UpdatePass contract. It never
+	// touches description (usermeta, Req 3.4) or the password (that flows
+	// through UpdatePass, Req 3.5).
+	UpdateProfile(ctx context.Context, id int64, f UserProfileFields) error
+	// ByEmail returns a user by user_email, or ErrNotFound when no user has
+	// that email, mirroring ByLogin.
+	ByEmail(ctx context.Context, email string) (User, error)
 	// List returns users ordered by ID ascending, for REST /users pagination.
 	List(ctx context.Context, limit, offset int) ([]User, error)
 	// Count returns the total number of users, ignoring limit/offset (used

@@ -81,6 +81,12 @@ func (r *UserRepo) ByLogin(ctx context.Context, login string) (domain.User, erro
 	return r.selectOne(ctx, "user_login", login)
 }
 
+// ByEmail returns a user by user_email, or ErrNotFound. It mirrors ByLogin
+// exactly, differing only in the column it filters on.
+func (r *UserRepo) ByEmail(ctx context.Context, email string) (domain.User, error) {
+	return r.selectOne(ctx, "user_email", email)
+}
+
 // ByNicename returns a user by user_nicename, or ErrNotFound.
 //
 // The ORDER BY "ID" ASC is a deliberate divergence from WordPress.
@@ -189,6 +195,45 @@ func (r *UserRepo) UpdatePass(ctx context.Context, id int64, passHash string) er
 	res, err := r.db.NewUpdate().
 		TableExpr("?", bun.Ident(r.prefix+"users")).
 		Set("user_pass = ?", passHash).
+		Where("? = ?", bun.Ident("ID"), id).
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	return errNotFoundIfZero(res)
+}
+
+// UpdateProfile writes only the non-nil fields of f onto the user's
+// {prefix}users row, keyed by ID, and returns domain.ErrNotFound when no row
+// matches. A nil field is left untouched (partial update), and an all-nil f is
+// a safe no-op that issues no SQL and returns nil. It never touches user_pass —
+// that is UpdatePass's job.
+func (r *UserRepo) UpdateProfile(ctx context.Context, id int64, f domain.UserProfileFields) error {
+	// Collect only the supplied (column, value) pairs. An all-nil f means the
+	// caller asked for no users-table change, so return without issuing SQL.
+	q := r.db.NewUpdate().
+		TableExpr("?", bun.Ident(r.prefix+"users"))
+	set := false
+	if f.DisplayName != nil {
+		q = q.Set("display_name = ?", *f.DisplayName)
+		set = true
+	}
+	if f.Email != nil {
+		q = q.Set("user_email = ?", *f.Email)
+		set = true
+	}
+	if f.URL != nil {
+		q = q.Set("user_url = ?", *f.URL)
+		set = true
+	}
+	if f.Nicename != nil {
+		q = q.Set("user_nicename = ?", *f.Nicename)
+		set = true
+	}
+	if !set {
+		return nil
+	}
+	res, err := q.
 		Where("? = ?", bun.Ident("ID"), id).
 		Exec(ctx)
 	if err != nil {

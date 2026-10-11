@@ -162,6 +162,36 @@ type MediaMeta struct {
 	Description string // post_content
 }
 
+// UserProfileFields is the editable user-profile set: a write-side value object
+// distinct from User so the update port names exactly the fields it persists and
+// nothing else. Every field is a *string so a nil pointer means "leave this
+// column unchanged" and a non-nil pointer (including a pointer to "") means
+// "write this value" -- the partial-update posture MediaMeta serves positionally
+// but which users need per-field because any single column may be updated alone.
+//
+// Each field maps to a column on the user's {prefix}users row:
+//
+//	DisplayName -> display_name
+//	Email       -> user_email
+//	URL         -> user_url
+//	Nicename    -> user_nicename
+//
+// description (usermeta), the password (UpdatePass), and roles (usermeta) are
+// deliberately absent: this value object never reaches them.
+type UserProfileFields struct {
+	DisplayName *string // display_name
+	Email       *string // user_email
+	URL         *string // user_url
+	Nicename    *string // user_nicename
+}
+
+// any reports whether at least one field is set (non-nil). The update service's
+// partial-update guard uses it to reject a no-op write before touching storage,
+// matching the posture MediaMeta/any relies on.
+func (f UserProfileFields) any() bool {
+	return f.DisplayName != nil || f.Email != nil || f.URL != nil || f.Nicename != nil
+}
+
 // NavMenu is a nav_menu taxonomy term plus its item tree.
 type NavMenu struct {
 	ID    int64

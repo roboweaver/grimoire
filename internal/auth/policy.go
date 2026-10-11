@@ -86,6 +86,11 @@ func CanCreateUsers(actor Principal) bool { return actor.Can("create_users") }
 // CanEditUsers reports whether actor may edit users (including roles/passwords).
 func CanEditUsers(actor Principal) bool { return actor.Can("edit_users") }
 
+// CanPromoteUsers reports whether actor may assign roles to users. It is the
+// promote_users capability read through the one capability mechanism; no second
+// capability path and no new role table is introduced (Req 6.4).
+func CanPromoteUsers(actor Principal) bool { return actor.Can("promote_users") }
+
 // CanListUsers reports whether actor may list users.
 func CanListUsers(actor Principal) bool { return actor.Can("list_users") }
 

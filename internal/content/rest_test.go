@@ -446,3 +446,210 @@ func TestRESTMapperUserEditContextToleratesMissingCapabilities(t *testing.T) {
 		t.Errorf("Roles = %v, want empty non-nil slice", edit.Roles)
 	}
 }
+
+// sampleMedia is an attachment whose editable-metadata fields are all
+// populated, so the mapper's emission of caption/alt_text/description can be
+// asserted independently of the create-time filename-derived title.
+func sampleMedia() domain.Media {
+	return domain.Media{
+		ID:          3,
+		Title:       "A Photo",
+		Filename:    "2024/03/a-photo.jpg",
+		URL:         "/wp-content/uploads/2024/03/a-photo.jpg",
+		MimeType:    "image/jpeg",
+		Date:        time.Date(2024, 3, 5, 9, 0, 0, 0, time.UTC),
+		ParentID:    42,
+		Slug:        "a-photo",
+		AuthorID:    7,
+		Caption:     "A short caption",
+		AltText:     "Alt text for the photo",
+		Description: "A longer description of the photo.",
+	}
+}
+
+// TestRESTMapperMediaEmitsCaptionAltTextDescription pins the three M10.B
+// read-side fields (Finding 3, Req 10.3): caption and description are the
+// WordPress {"rendered": "..."} sub-object shape (RESTRendered), alt_text is a
+// bare string, each populated straight from domain.Media.
+func TestRESTMapperMediaEmitsCaptionAltTextDescription(t *testing.T) {
+	mapper, _, _, _ := newTestMapper()
+	m := sampleMedia()
+
+	got, err := mapper.Media(context.Background(), m)
+	if err != nil {
+		t.Fatalf("Media: %v", err)
+	}
+
+	if got.Caption.Rendered != m.Caption {
+		t.Errorf("Caption.Rendered = %q, want %q", got.Caption.Rendered, m.Caption)
+	}
+	if got.Description.Rendered != m.Description {
+		t.Errorf("Description.Rendered = %q, want %q", got.Description.Rendered, m.Description)
+	}
+	if got.AltText != m.AltText {
+		t.Errorf("AltText = %q, want %q", got.AltText, m.AltText)
+	}
+}
+
+// TestRESTMapperMediaNewFieldsJSONShape pins the JSON tags and shapes so task
+// 5.2 matches WordPress: "caption"/"description" are {"rendered": "..."}
+// sub-objects, "alt_text" is a bare string.
+func TestRESTMapperMediaNewFieldsJSONShape(t *testing.T) {
+	mapper, _, _, _ := newTestMapper()
+
+	got, err := mapper.Media(context.Background(), sampleMedia())
+	if err != nil {
+		t.Fatalf("Media: %v", err)
+	}
+
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	caption, ok := raw["caption"].(map[string]any)
+	if !ok {
+		t.Fatalf(`json "caption" = %v, want {"rendered": ...} object`, raw["caption"])
+	}
+	if caption["rendered"] != "A short caption" {
+		t.Errorf(`json caption.rendered = %v, want "A short caption"`, caption["rendered"])
+	}
+
+	description, ok := raw["description"].(map[string]any)
+	if !ok {
+		t.Fatalf(`json "description" = %v, want {"rendered": ...} object`, raw["description"])
+	}
+	if description["rendered"] != "A longer description of the photo." {
+		t.Errorf(`json description.rendered = %v, want the description text`, description["rendered"])
+	}
+
+	altText, ok := raw["alt_text"].(string)
+	if !ok {
+		t.Fatalf(`json "alt_text" = %v, want a bare string`, raw["alt_text"])
+	}
+	if altText != "Alt text for the photo" {
+		t.Errorf(`json alt_text = %q, want "Alt text for the photo"`, altText)
+	}
+}
+
+// TestRESTMapperMediaNewFieldsStableWhenEmpty asserts that an attachment with
+// empty caption/alt_text/description still emits the keys (shape stable): the
+// RESTRendered fields are present as {"rendered": ""} and alt_text is a bare
+// "" string, never absent (Req 10.3 shape stability).
+func TestRESTMapperMediaNewFieldsStableWhenEmpty(t *testing.T) {
+	mapper, _, _, _ := newTestMapper()
+	m := domain.Media{
+		ID:       4,
+		URL:      "/wp-content/uploads/2024/03/doc.pdf",
+		MimeType: "application/pdf",
+	}
+
+	got, err := mapper.Media(context.Background(), m)
+	if err != nil {
+		t.Fatalf("Media: %v", err)
+	}
+
+	if got.Caption.Rendered != "" {
+		t.Errorf("Caption.Rendered = %q, want empty", got.Caption.Rendered)
+	}
+	if got.Description.Rendered != "" {
+		t.Errorf("Description.Rendered = %q, want empty", got.Description.Rendered)
+	}
+	if got.AltText != "" {
+		t.Errorf("AltText = %q, want empty", got.AltText)
+	}
+
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	for _, key := range []string{"caption", "alt_text", "description"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("json missing %q key, want present (shape stable)", key)
+		}
+	}
+	if cap, ok := raw["caption"].(map[string]any); !ok {
+		t.Errorf(`json "caption" = %v, want {"rendered": ""} object`, raw["caption"])
+	} else if cap["rendered"] != "" {
+		t.Errorf(`json caption.rendered = %v, want ""`, cap["rendered"])
+	}
+	if desc, ok := raw["description"].(map[string]any); !ok {
+		t.Errorf(`json "description" = %v, want {"rendered": ""} object`, raw["description"])
+	} else if desc["rendered"] != "" {
+		t.Errorf(`json description.rendered = %v, want ""`, desc["rendered"])
+	}
+	if alt, ok := raw["alt_text"].(string); !ok || alt != "" {
+		t.Errorf(`json "alt_text" = %v, want bare "" string`, raw["alt_text"])
+	}
+}
+
+// TestRESTMapperMediaExistingFieldsUnchanged asserts the pre-10.B emitted
+// fields are untouched by the additive change (Req 10.1) and that no
+// content.rendered field is introduced for media (Req 10.2): media has no
+// content field at all.
+func TestRESTMapperMediaExistingFieldsUnchanged(t *testing.T) {
+	mapper, _, meta, _ := newTestMapper()
+	meta.attach[3] = `a:2:{s:5:"width";i:800;s:6:"height";i:600;}`
+	m := sampleMedia()
+
+	got, err := mapper.Media(context.Background(), m)
+	if err != nil {
+		t.Fatalf("Media: %v", err)
+	}
+
+	if got.ID != 3 {
+		t.Errorf("ID = %d, want 3", got.ID)
+	}
+	if got.Date != "2024-03-05T09:00:00" {
+		t.Errorf("Date = %q", got.Date)
+	}
+	if got.Slug != "a-photo" {
+		t.Errorf("Slug = %q", got.Slug)
+	}
+	if got.Type != "attachment" {
+		t.Errorf("Type = %q, want attachment", got.Type)
+	}
+	if got.Link != m.URL {
+		t.Errorf("Link = %q, want %q", got.Link, m.URL)
+	}
+	if got.Title.Rendered != "A Photo" {
+		t.Errorf("Title.Rendered = %q, want %q", got.Title.Rendered, m.Title)
+	}
+	if got.Author != 7 {
+		t.Errorf("Author = %d, want 7", got.Author)
+	}
+	if got.MimeType != "image/jpeg" {
+		t.Errorf("MimeType = %q", got.MimeType)
+	}
+	if got.SourceURL != m.URL {
+		t.Errorf("SourceURL = %q, want %q", got.SourceURL, m.URL)
+	}
+	if got.Post != 42 {
+		t.Errorf("Post = %d, want 42", got.Post)
+	}
+	if got.MediaDetails.Width != 800 || got.MediaDetails.Height != 600 {
+		t.Errorf("MediaDetails = %+v", got.MediaDetails)
+	}
+
+	// Req 10.2: media carries no content field, so content.rendered must not
+	// appear in the emitted JSON.
+	b, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if _, ok := raw["content"]; ok {
+		t.Errorf(`json has "content" key, want absent for media (Req 10.2)`)
+	}
+}

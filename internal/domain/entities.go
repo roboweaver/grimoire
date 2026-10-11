@@ -140,6 +140,26 @@ type Media struct {
 	// present in an overlaid, pre-existing WordPress database.
 	Slug     string
 	AuthorID int64
+
+	// Caption, AltText, and Description back the attachment's editable
+	// metadata so an updated value is observable on a subsequent GET: caption
+	// maps to post_excerpt, alt text to the _wp_attachment_image_alt postmeta
+	// row, and description to post_content. Additive and zero-valued for every
+	// existing reader that does not populate them.
+	Caption     string
+	AltText     string
+	Description string
+}
+
+// MediaMeta is the editable attachment metadata set: a write-side value object
+// distinct from Media so the update port names exactly the fields it persists
+// and nothing else. Parent is excluded by design -- it continues to flow
+// through MediaWriter.SetParent rather than this value object.
+type MediaMeta struct {
+	Title       string // post_title
+	Caption     string // post_excerpt
+	AltText     string // _wp_attachment_image_alt postmeta
+	Description string // post_content
 }
 
 // NavMenu is a nav_menu taxonomy term plus its item tree.

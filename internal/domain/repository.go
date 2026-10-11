@@ -218,10 +218,25 @@ type MediaRepository interface {
 	ByID(ctx context.Context, id int64) (Media, error)
 }
 
-// MediaWriter creates attachments and updates attachment parents.
+// MediaWriter creates attachments and updates attachment parents and metadata.
 type MediaWriter interface {
+	// Create inserts an attachment and returns its generated ID. m.AuthorID is
+	// written to post_author (0 for callers that do not set it -- the pre-10.B
+	// behavior; the author seam is threaded one layer up through
+	// content.MediaUpload, so no signature change is needed here, Req 3.6).
 	Create(ctx context.Context, m Media) (int64, error)
+	// SetParent sets the attachment's post_parent, or ErrNotFound when no
+	// attachment has the given ID.
 	SetParent(ctx context.Context, id, parentID int64) error
+	// UpdateMeta persists an attachment's editable metadata to its existing
+	// storage locations: title -> post_title, caption -> post_excerpt, and
+	// description -> post_content on the attachment's {prefix}posts row, and
+	// alt_text -> the _wp_attachment_image_alt {prefix}postmeta row (Req 3.1,
+	// 3.2). It returns ErrNotFound when no attachment has the given ID, matching
+	// the SetParent contract (Req 3.4). The parent (post) is NOT updated here;
+	// it continues to flow through SetParent rather than being folded into this
+	// method (Req 3.5, D2).
+	UpdateMeta(ctx context.Context, id int64, m MediaMeta) error
 }
 
 // NavMenuRepository reads menus and their items.

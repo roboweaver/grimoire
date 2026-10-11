@@ -161,7 +161,12 @@ func (s *Server) adminMediaUpload(w http.ResponseWriter, r *http.Request) error 
 		writeJSONError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "file type not allowed")
 		return nil
 	}
-	m, err := s.media.Store(r.Context(), bytes.NewReader(data), content.MediaUpload{Filename: h.Filename, MimeType: sniffed})
+	// Author the attachment to the acting admin, matching the REST path (D7,
+	// Req 3.6). PrincipalFrom yields the zero principal when absent, so
+	// authorID is 0 in that case -- preserving the pre-10.B default.
+	principal, _ := PrincipalFrom(r.Context())
+	authorID := principal.UserID
+	m, err := s.media.Store(r.Context(), bytes.NewReader(data), content.MediaUpload{Filename: h.Filename, MimeType: sniffed, Author: authorID})
 	if err != nil {
 		return err
 	}

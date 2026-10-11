@@ -29,6 +29,10 @@ type MediaUpload struct {
 	MimeType string
 	Title    string
 	ParentID int64
+	// Author is the uploading principal's user ID, written to the new
+	// attachment's post_author (D7, Req 3.6). Zero -- the value every pre-10.B
+	// caller supplies by omission -- preserves today's behavior (author 0).
+	Author int64
 }
 
 type MediaService struct {
@@ -101,6 +105,7 @@ func (s *MediaService) Store(ctx context.Context, r io.Reader, upload MediaUploa
 		MimeType: detectedMime(upload.MimeType, upload.Filename),
 		Date:     now,
 		ParentID: upload.ParentID,
+		AuthorID: upload.Author,
 		Slug:     slug,
 	}
 	id, err := s.writer.Create(ctx, media)

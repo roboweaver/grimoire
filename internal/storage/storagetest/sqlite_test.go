@@ -89,3 +89,16 @@ func TestSQLiteNicenameAuditorContract(t *testing.T) {
 			return newSQLiteRepos(t)
 		})
 }
+
+// TestSQLiteMediaWriteMetaContract runs the MediaRepo.UpdateMeta cross-vendor
+// contract against SQLite. It reuses newSQLiteRepos for the migrated+seeded
+// bundle and additionally surfaces the vendor and the fixed "wp_" prefix so the
+// contract can read back post_excerpt/post_content and the
+// _wp_attachment_image_alt postmeta row directly (MediaRepo.ByID does not
+// surface those yet).
+func TestSQLiteMediaWriteMetaContract(t *testing.T) {
+	RunMediaWriteMetaContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}

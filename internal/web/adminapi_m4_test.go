@@ -198,3 +198,7 @@ type stubMediaWriter struct{}
 
 func (stubMediaWriter) Create(context.Context, domain.Media) (int64, error) { return 0, nil }
 func (stubMediaWriter) SetParent(context.Context, int64, int64) error       { return nil }
+
+// UpdateMeta is a record-free stub satisfying the domain.MediaWriter port's
+// method added in task 1.2; the admin upload path never calls it.
+func (stubMediaWriter) UpdateMeta(context.Context, int64, domain.MediaMeta) error { return nil }

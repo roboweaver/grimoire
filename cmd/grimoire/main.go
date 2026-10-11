@@ -122,6 +122,12 @@ func main() {
 	revisionWrite := content.NewRevisionWriteService(repos.Revisions, repos.PostWriter, -1)
 	autosave := content.NewAutosaveService(repos.Revisions, repos.PostWriter)
 	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite), content.WithContentPolicy(contentPolicy))
+	// mediaWrite backs the REST media write surface (POST/PATCH
+	// /wp-json/wp/v2/media). It layers capability-checked create/update over the
+	// existing media read/write service and the Media reader / MediaWriter ports,
+	// sharing the process-wide contentPolicy so metadata fields sanitize at the
+	// write boundary like every other write path (Req 8.3, 11.1).
+	mediaWrite := content.NewMediaWriteService(media, repos.Media, repos.MediaWriter, content.WithMediaContentPolicy(contentPolicy))
 	termWrite := content.NewTermWriteService(termRW)
 	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
 
@@ -140,7 +146,7 @@ func main() {
 		options,
 		eng,
 		log,
-	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
+	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithMediaWrites(mediaWrite).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

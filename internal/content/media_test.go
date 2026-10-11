@@ -48,11 +48,16 @@ func (f *fakeMediaRepo) ByID(_ context.Context, id int64) (domain.Media, error) 
 }
 
 type fakeMediaWriter struct {
-	created   []domain.Media
-	setParent []struct{ id, parentID int64 }
+	created    []domain.Media
+	setParent  []struct{ id, parentID int64 }
+	updateMeta []struct {
+		id int64
+		m  domain.MediaMeta
+	}
 	createID  int64
 	createErr error
 	parentErr error
+	updateErr error
 }
 
 func (f *fakeMediaWriter) Create(_ context.Context, m domain.Media) (int64, error) {
@@ -69,6 +74,18 @@ func (f *fakeMediaWriter) Create(_ context.Context, m domain.Media) (int64, erro
 func (f *fakeMediaWriter) SetParent(_ context.Context, id, parentID int64) error {
 	f.setParent = append(f.setParent, struct{ id, parentID int64 }{id: id, parentID: parentID})
 	return f.parentErr
+}
+
+// UpdateMeta records the metadata-update call so tests can assert on it. It is
+// a record-only stub satisfying the domain.MediaWriter port's new method
+// (added in task 1.2); the real update behavior is exercised by the
+// MediaWriteService tests, not here.
+func (f *fakeMediaWriter) UpdateMeta(_ context.Context, id int64, m domain.MediaMeta) error {
+	f.updateMeta = append(f.updateMeta, struct {
+		id int64
+		m  domain.MediaMeta
+	}{id: id, m: m})
+	return f.updateErr
 }
 
 func TestMediaServiceStoreWritesAttachmentAndMetadata(t *testing.T) {
@@ -103,6 +120,49 @@ func TestMediaServiceStoreWritesAttachmentAndMetadata(t *testing.T) {
 	}
 	if media.ID != 88 {
 		t.Fatalf("media ID = %d, want 88", media.ID)
+	}
+}
+
+func TestMediaServiceStoreThreadsAuthorToCreatedMedia(t *testing.T) {
+	root := t.TempDir()
+	writer := &fakeMediaWriter{}
+	svc := NewMediaService(&fakeMediaRepo{}, writer, MediaConfig{UploadsDir: root, BaseURL: "/wp-content/uploads", AllowedMIMEs: []string{"image/png"}})
+	svc.now = func() time.Time { return time.Date(2026, 8, 23, 9, 0, 0, 0, time.UTC) }
+
+	if _, err := svc.Store(context.Background(), bytes.NewReader([]byte("pngdata")), MediaUpload{
+		Filename: "cat.png",
+		MimeType: "image/png",
+		Author:   42,
+	}); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if len(writer.created) != 1 {
+		t.Fatalf("created attachments = %d, want 1", len(writer.created))
+	}
+	if got := writer.created[0].AuthorID; got != 42 {
+		t.Fatalf("stored AuthorID = %d, want 42 (uploader threaded to post_author)", got)
+	}
+}
+
+func TestMediaServiceStoreZeroAuthorPreservesLegacyBehavior(t *testing.T) {
+	root := t.TempDir()
+	writer := &fakeMediaWriter{}
+	svc := NewMediaService(&fakeMediaRepo{}, writer, MediaConfig{UploadsDir: root, BaseURL: "/wp-content/uploads", AllowedMIMEs: []string{"image/png"}})
+	svc.now = func() time.Time { return time.Date(2026, 8, 23, 9, 0, 0, 0, time.UTC) }
+
+	// No Author set: the pre-10.B caller behavior must be preserved -- the
+	// created attachment stores post_author 0.
+	if _, err := svc.Store(context.Background(), bytes.NewReader([]byte("pngdata")), MediaUpload{
+		Filename: "dog.png",
+		MimeType: "image/png",
+	}); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	if len(writer.created) != 1 {
+		t.Fatalf("created attachments = %d, want 1", len(writer.created))
+	}
+	if got := writer.created[0].AuthorID; got != 0 {
+		t.Fatalf("stored AuthorID = %d, want 0 (zero-value author preserves legacy behavior)", got)
 	}
 }
 

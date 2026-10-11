@@ -63,6 +63,12 @@ type Server struct {
 	restUsers      domain.UserRepository
 	restPerPageMax int
 
+	// mediaWrite backs the REST media write surface (POST /wp-json/.../media,
+	// Req 1.1-1.6); nil until WithMediaWrites, in which case registerRESTMedia
+	// keeps the 501 restNotImplemented stub for POST /media. main.go wires it
+	// in task 7.1; harnesses that omit it still compile and serve the stub.
+	mediaWrite *content.MediaWriteService
+
 	// Application Password auth (Req 8); appPasswords nil until
 	// WithApplicationPasswords, in which case ApplicationPasswordAuth is
 	// not mounted and Basic-auth credentials on /wp-json are ignored.

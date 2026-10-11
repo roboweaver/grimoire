@@ -568,6 +568,9 @@ func (w *rollbackFailWriter) Create(context.Context, domain.Media) (int64, error
 	return 0, w.err
 }
 func (w *rollbackFailWriter) SetParent(context.Context, int64, int64) error { return nil }
+func (w *rollbackFailWriter) UpdateMeta(context.Context, int64, domain.MediaMeta) error {
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // Nav menu resolution against theme_mods -> public rendering.

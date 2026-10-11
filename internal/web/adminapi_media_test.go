@@ -1,8 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -195,5 +197,60 @@ func TestAdminMediaListClampsExcessivePerPage(t *testing.T) {
 	wantTotalPages := content.TotalPages(250, content.MaxPerPage)
 	if payload.TotalPages != wantTotalPages {
 		t.Fatalf("totalPages=%d, want %d (computed against the clamped perPage, not the raw 99999)", payload.TotalPages, wantTotalPages)
+	}
+}
+
+// authorCapturingMediaWriter records the domain.Media passed to Create so a
+// handler test can assert the attachment's author was threaded through from
+// the acting principal.
+type authorCapturingMediaWriter struct {
+	created []domain.Media
+}
+
+func (w *authorCapturingMediaWriter) Create(_ context.Context, m domain.Media) (int64, error) {
+	w.created = append(w.created, m)
+	return int64(len(w.created)), nil
+}
+func (w *authorCapturingMediaWriter) SetParent(context.Context, int64, int64) error { return nil }
+func (w *authorCapturingMediaWriter) UpdateMeta(context.Context, int64, domain.MediaMeta) error {
+	return nil
+}
+
+// TestAdminMediaUploadAuthorsAttachmentToActingAdmin proves the admin upload
+// path threads the acting principal's user ID onto the stored attachment's
+// post_author, matching the REST path (D7, Req 3.6).
+func TestAdminMediaUploadAuthorsAttachmentToActingAdmin(t *testing.T) {
+	const adminUserID int64 = 7
+	writer := &authorCapturingMediaWriter{}
+	srv := NewServer(nil, nil, nil, nil, nil)
+	srv.auth = fakeSessions{
+		p: auth.NewPrincipal(adminUserID, "admin", []string{auth.RoleAdministrator}),
+		s: domain.Session{CSRFToken: "token"},
+	}
+	srv.media = content.NewMediaService(&capturingMediaRepo{}, writer, content.MediaConfig{UploadsDir: t.TempDir(), BaseURL: "/wp-content/uploads"})
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", "photo.png")
+	// Minimal PNG signature so DetectContentType sniffs image/png.
+	fw.Write([]byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a})
+	mw.Close()
+
+	r := srv.SessionMiddleware(srv.adminAPIRouter())
+	req := httptest.NewRequest(http.MethodPost, "/media", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("X-CSRF-Token", "token")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "x"})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(writer.created) != 1 {
+		t.Fatalf("Create called %d times, want 1", len(writer.created))
+	}
+	if got := writer.created[0].AuthorID; got != adminUserID {
+		t.Fatalf("stored attachment AuthorID = %d, want acting admin %d", got, adminUserID)
 	}
 }

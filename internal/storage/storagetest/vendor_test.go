@@ -30,6 +30,15 @@ var tables = []string{
 // base fixture set is what the rest of the suite's absolute counts assume.
 func newReposFromDSN(t *testing.T, vendor, dsn string, extraSeeds ...seedFunc) (*storage.Repositories, func()) {
 	t.Helper()
+	repos, _, cleanup := newReposFromDSNWithPrefix(t, vendor, dsn, extraSeeds...)
+	return repos, cleanup
+}
+
+// newReposFromDSNWithPrefix is newReposFromDSN plus the scratch table prefix it
+// built against, for the cases (the media-write contract) that must issue a
+// direct, prefixed SQL read against the same backend.
+func newReposFromDSNWithPrefix(t *testing.T, vendor, dsn string, extraSeeds ...seedFunc) (*storage.Repositories, string, func()) {
+	t.Helper()
 	ctx := context.Background()
 	prefix := fmt.Sprintf("gt_%d_", time.Now().UnixNano())
 	cfg := config.DatabaseConfig{Vendor: vendor, DSN: dsn, TablePrefix: prefix}
@@ -62,5 +71,5 @@ func newReposFromDSN(t *testing.T, vendor, dsn string, extraSeeds ...seedFunc) (
 		}
 		repos.Close()
 	}
-	return repos, cleanup
+	return repos, prefix, cleanup
 }

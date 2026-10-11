@@ -130,6 +130,9 @@ type RESTMedia struct {
 	SourceURL    string           `json:"source_url"`
 	Post         int64            `json:"post"`
 	MediaDetails RESTMediaDetails `json:"media_details"`
+	Caption      RESTRendered     `json:"caption"`
+	AltText      string           `json:"alt_text"`
+	Description  RESTRendered     `json:"description"`
 }
 
 // RESTUser is the WordPress REST "view" context shape for a wp/v2/users
@@ -395,6 +398,9 @@ func (m *RESTMapper) Media(ctx context.Context, media domain.Media) (RESTMedia, 
 		SourceURL:    media.URL,
 		Post:         media.ParentID,
 		MediaDetails: mediaDetailsFromSerialized(raw),
+		Caption:      RESTRendered{Rendered: media.Caption},
+		AltText:      media.AltText,
+		Description:  RESTRendered{Rendered: media.Description},
 	}, nil
 }
 

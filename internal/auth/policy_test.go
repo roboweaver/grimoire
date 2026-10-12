@@ -111,3 +111,20 @@ func TestUserPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestPromoteUsersPolicy(t *testing.T) {
+	// Built through real capability resolution: administrator grants
+	// promote_users, editor/author do not, and an empty principal holds nothing.
+	if !CanPromoteUsers(principalFor(RoleAdministrator)) {
+		t.Errorf("administrator should be able to promote users")
+	}
+	if CanPromoteUsers(principalFor(RoleEditor)) {
+		t.Errorf("editor should not be able to promote users")
+	}
+	if CanPromoteUsers(principalFor(RoleAuthor)) {
+		t.Errorf("author should not be able to promote users")
+	}
+	if CanPromoteUsers(NewPrincipal(0, "", nil)) {
+		t.Errorf("anonymous principal should not be able to promote users")
+	}
+}

@@ -128,6 +128,14 @@ func main() {
 	// sharing the process-wide contentPolicy so metadata fields sanitize at the
 	// write boundary like every other write path (Req 8.3, 11.1).
 	mediaWrite := content.NewMediaWriteService(media, repos.Media, repos.MediaWriter, content.WithMediaContentPolicy(contentPolicy))
+	// userWrite backs the REST user write surface (POST/PATCH/DELETE
+	// /wp-json/wp/v2/users and .../users/me). It layers capability-checked
+	// profile writes over the Users / UserMeta ports and the table prefix,
+	// sharing the process-wide contentPolicy so the user description field
+	// sanitizes at the write boundary like every other write path -- one
+	// *sanitize.Policy now also governs the user description surface
+	// (Req 9.3, 11.1).
+	userWrite := content.NewUserService(repos.Users, repos.UserMeta, cfg.Database.TablePrefix, content.WithUserContentPolicy(contentPolicy))
 	termWrite := content.NewTermWriteService(termRW)
 	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
 
@@ -146,7 +154,7 @@ func main() {
 		options,
 		eng,
 		log,
-	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithMediaWrites(mediaWrite).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
+	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithMediaWrites(mediaWrite).WithUserWrites(userWrite).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

@@ -21,6 +21,16 @@ func (s *Server) WithMediaWrites(mw *content.MediaWriteService) *Server {
 	return s
 }
 
+// WithUserWrites enables the REST user write surface (Req 1, 7) by wiring the
+// capability-checked *content.UserService as s.userWrite. It returns the same
+// Server for chaining. Mirroring WithMediaWrites, this is a non-breaking builder
+// rather than a new positional parameter. When uw is nil, registerRESTUsers
+// keeps the 501 restNotImplemented stubs for the user write verbs.
+func (s *Server) WithUserWrites(uw *content.UserService) *Server {
+	s.userWrite = uw
+	return s
+}
+
 // WithFeaturedImages wires the featured-image lookup used to populate
 // PostView.FeaturedImageURL on the home, category, and single/page views.
 // featured may be nil, in which case featured images are simply omitted from

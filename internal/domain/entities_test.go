@@ -84,3 +84,70 @@ func TestMediaMetaHasExactlyFourStringFields(t *testing.T) {
 		t.Fatal("MediaMeta fields not wired as strings")
 	}
 }
+
+// TestUserProfileFieldsHasExactlyFourPointerFields asserts domain.UserProfileFields
+// is the write-side value object with EXACTLY DisplayName, Email, URL, Nicename as
+// *string fields and nothing else, mirroring domain.MediaMeta from M10.B. The keyed
+// literal below guards rename/removal at compile time (an added, removed, or renamed
+// field breaks this file); the reflect block guards "nothing else" and the *string
+// kind, matching the TestMediaMetaHasExactlyFourStringFields precedent (Req 3.1).
+func TestUserProfileFieldsHasExactlyFourPointerFields(t *testing.T) {
+	// Keyed literal: naming all four fields makes an add/remove/rename a compile
+	// error here, which is the "exactly four fields and nothing else" intent.
+	display, email, url, nicename := "d", "e@example.com", "https://example.com", "n"
+	_ = UserProfileFields{
+		DisplayName: &display,
+		Email:       &email,
+		URL:         &url,
+		Nicename:    &nicename,
+	}
+
+	ut := reflect.TypeOf(UserProfileFields{})
+
+	want := map[string]struct{}{
+		"DisplayName": {},
+		"Email":       {},
+		"URL":         {},
+		"Nicename":    {},
+	}
+
+	if got := ut.NumField(); got != len(want) {
+		t.Fatalf("domain.UserProfileFields has %d fields, want exactly %d", got, len(want))
+	}
+
+	for i := 0; i < ut.NumField(); i++ {
+		f := ut.Field(i)
+		if _, ok := want[f.Name]; !ok {
+			t.Fatalf("domain.UserProfileFields has unexpected field %q", f.Name)
+		}
+		if f.Type.Kind() != reflect.Ptr || f.Type.Elem().Kind() != reflect.String {
+			t.Fatalf("domain.UserProfileFields.%s type = %s, want *string", f.Name, f.Type)
+		}
+	}
+}
+
+// TestUserProfileFieldsAny asserts the unexported any() helper reports false for an
+// all-nil value object and true as soon as any single field is non-nil (one subtest
+// per field), matching the MediaMeta/any() posture the service's partial-update guard
+// relies on (Req 3.1).
+func TestUserProfileFieldsAny(t *testing.T) {
+	if (UserProfileFields{}).any() {
+		t.Fatal("UserProfileFields{}.any() = true, want false for an all-nil value")
+	}
+
+	v := "x"
+	cases := map[string]UserProfileFields{
+		"DisplayName": {DisplayName: &v},
+		"Email":       {Email: &v},
+		"URL":         {URL: &v},
+		"Nicename":    {Nicename: &v},
+	}
+	for field, f := range cases {
+		f := f
+		t.Run(field, func(t *testing.T) {
+			if !f.any() {
+				t.Fatalf("UserProfileFields{%s set}.any() = false, want true", field)
+			}
+		})
+	}
+}

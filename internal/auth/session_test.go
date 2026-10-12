@@ -81,6 +81,41 @@ func (f *fakeUsers) UpdatePass(_ context.Context, id int64, hash string) error {
 	return nil
 }
 
+// UpdateProfile writes only the non-nil fields to the user's row, returning
+// domain.ErrNotFound on an unknown ID. No auth path calls it; it is here to
+// satisfy the grown domain.UserRepository interface.
+func (f *fakeUsers) UpdateProfile(_ context.Context, id int64, p domain.UserProfileFields) error {
+	u, ok := f.byID[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	if p.DisplayName != nil {
+		u.DisplayName = *p.DisplayName
+	}
+	if p.Email != nil {
+		u.Email = *p.Email
+	}
+	if p.URL != nil {
+		u.URL = *p.URL
+	}
+	if p.Nicename != nil {
+		u.Nicename = *p.Nicename
+	}
+	f.add(u)
+	return nil
+}
+
+// ByEmail mirrors ByLogin, returning domain.ErrNotFound when absent. No auth
+// path calls it; it is here to satisfy domain.UserRepository.
+func (f *fakeUsers) ByEmail(_ context.Context, email string) (domain.User, error) {
+	for _, u := range f.byID {
+		if u.Email == email {
+			return u, nil
+		}
+	}
+	return domain.User{}, domain.ErrNotFound
+}
+
 // fakeMeta is a goroutine-safe in-memory UserMetaRepository fake. The mutex
 // exists purely so tests exercising concurrent ApplicationPasswords calls
 // (Verify vs. Revoke) don't trip -race on the *fake's* own map access —

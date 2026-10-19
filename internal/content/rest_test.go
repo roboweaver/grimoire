@@ -3,6 +3,7 @@ package content
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -651,5 +652,210 @@ func TestRESTMapperMediaExistingFieldsUnchanged(t *testing.T) {
 	}
 	if _, ok := raw["content"]; ok {
 		t.Errorf(`json has "content" key, want absent for media (Req 10.2)`)
+	}
+}
+
+// --- Task 5.1 (RED): The Transform wired into restCommon ---------------------
+//
+// These tests assert that (*RESTMapper).Post and (*RESTMapper).Page emit a
+// TRANSFORMED content.rendered — block comments stripped and wp-image-{id}
+// <img> enhanced — once task 5.2 routes restCommon's Content.Rendered through
+// m.renderContent(ctx, p.Content). RIGHT NOW restCommon still assigns the bare
+// p.Content, so the transform tests below (and the Content.Rendered part of the
+// sibling-fields test) FAIL for the right reason: the comment is still present
+// and the <img> is not enhanced. The byte-identical and sibling-field
+// invariants are guards that must stay green across the 5.2 change (Req 4.4,
+// 4.5). They reuse the parseImg/imgAttr/seededMediaBlob helpers from
+// rest_render_test.go (same package).
+
+// blockImgPost builds a post whose stored Content carries a Gutenberg block
+// comment wrapping a media-library <img class="wp-image-201">. After The
+// Transform the comment is gone and the <img> is enhanced; before 5.2 the raw
+// Content passes straight through.
+func blockImgPost() domain.Post {
+	p := samplePost()
+	p.Content = `<!-- wp:image --><p>cap</p>` +
+		`<img class="wp-image-201" src="https://x/wp-content/uploads/2024/03/photo.jpg">` +
+		`<!-- /wp:image -->`
+	return p
+}
+
+// TestRESTMapperPostContentRenderedTransformed asserts Post emits a transformed
+// content.rendered: the Gutenberg block comment is stripped and the
+// wp-image-{id} <img> is enhanced with loading="lazy", decoding="async", and a
+// non-empty srcset (Req 1.1). FAILS pre-5.2 because restCommon returns the raw
+// p.Content (comment present, <img> not enhanced).
+func TestRESTMapperPostContentRenderedTransformed(t *testing.T) {
+	mapper, _, meta, _ := newTestMapper()
+	meta.attach[201] = seededMediaBlob(t)
+
+	got, err := mapper.Post(context.Background(), blockImgPost())
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+
+	rendered := got.Content.Rendered
+	if strings.Contains(rendered, "wp:image") {
+		t.Errorf("block comment not stripped from content.rendered: %q", rendered)
+	}
+	img := parseImg(t, rendered)
+	if img == nil {
+		t.Fatalf("no <img> in content.rendered: %q", rendered)
+	}
+	if v, ok := imgAttr(img, "loading"); !ok || v != "lazy" {
+		t.Errorf("img loading = %q present=%t, want lazy (rendered=%q)", v, ok, rendered)
+	}
+	if v, ok := imgAttr(img, "decoding"); !ok || v != "async" {
+		t.Errorf("img decoding = %q present=%t, want async (rendered=%q)", v, ok, rendered)
+	}
+	if v, ok := imgAttr(img, "srcset"); !ok || v == "" {
+		t.Errorf("img srcset = %q present=%t, want non-empty (rendered=%q)", v, ok, rendered)
+	}
+}
+
+// TestRESTMapperPageContentRenderedTransformed proves Page — which also flows
+// through restCommon — gets the same transform as Post (Req 1.1). FAILS pre-5.2
+// for the same reason.
+func TestRESTMapperPageContentRenderedTransformed(t *testing.T) {
+	mapper, _, meta, _ := newTestMapper()
+	meta.attach[201] = seededMediaBlob(t)
+	p := blockImgPost()
+	p.Type = "page"
+	p.Slug = "about"
+
+	got, err := mapper.Page(context.Background(), p)
+	if err != nil {
+		t.Fatalf("Page: %v", err)
+	}
+
+	rendered := got.Content.Rendered
+	if strings.Contains(rendered, "wp:image") {
+		t.Errorf("block comment not stripped from page content.rendered: %q", rendered)
+	}
+	img := parseImg(t, rendered)
+	if img == nil {
+		t.Fatalf("no <img> in page content.rendered: %q", rendered)
+	}
+	if v, ok := imgAttr(img, "loading"); !ok || v != "lazy" {
+		t.Errorf("img loading = %q present=%t, want lazy (rendered=%q)", v, ok, rendered)
+	}
+	if v, ok := imgAttr(img, "decoding"); !ok || v != "async" {
+		t.Errorf("img decoding = %q present=%t, want async (rendered=%q)", v, ok, rendered)
+	}
+	if v, ok := imgAttr(img, "srcset"); !ok || v == "" {
+		t.Errorf("img srcset = %q present=%t, want non-empty (rendered=%q)", v, ok, rendered)
+	}
+}
+
+// TestRESTMapperPostContentByteIdenticalWhenNoBlocksOrImages asserts Req 4.5:
+// a comment-free, image-free post's content.rendered is byte-identical to its
+// stored Content. This is a guard — it is green both before 5.2 (raw
+// passthrough == input) and after (renderContent short-circuits the parser for
+// image-free content) — and locks the invariant across the 5.2 change.
+func TestRESTMapperPostContentByteIdenticalWhenNoBlocksOrImages(t *testing.T) {
+	mapper, _, _, _ := newTestMapper()
+	p := samplePost()
+	p.Content = "<p>plain paragraph</p>"
+
+	got, err := mapper.Post(context.Background(), p)
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if got.Content.Rendered != p.Content {
+		t.Errorf("content.rendered = %q, want byte-identical %q", got.Content.Rendered, p.Content)
+	}
+}
+
+// TestRESTMapperPostSiblingFieldsUnchangedByTransform asserts Req 4.4: the
+// transform touches ONLY Content.Rendered — Content.Protected and every sibling
+// field emitted by restCommon are a function of the domain.Post, not of the
+// Content transform, so they are identical to what the pre-10.D mapper produced
+// for samplePost regardless of what Content carries. The block-comment+img post
+// is used so the Content transform is active while the siblings are asserted
+// against samplePost's expected values.
+func TestRESTMapperPostSiblingFieldsUnchangedByTransform(t *testing.T) {
+	mapper, terms, meta, _ := newTestMapper()
+	terms.byPost[42] = map[string][]int64{
+		TaxonomyCategory: {3, 1},
+		taxonomyPostTag:  {9},
+	}
+	meta.featured[42] = 55
+	meta.attach[201] = seededMediaBlob(t)
+
+	got, err := mapper.Post(context.Background(), blockImgPost())
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+
+	// Sibling fields match the TestRESTMapperPostFieldsAndFormats expectations
+	// for samplePost — the Content transform must not perturb any of them.
+	if got.ID != 42 {
+		t.Errorf("ID = %d, want 42", got.ID)
+	}
+	if got.Date != "2024-03-05T10:30:00" {
+		t.Errorf("Date = %q", got.Date)
+	}
+	if got.DateGMT != "2024-03-05T10:30:00" {
+		t.Errorf("DateGMT = %q", got.DateGMT)
+	}
+	if got.Modified != "2024-03-06T11:00:00" {
+		t.Errorf("Modified = %q", got.Modified)
+	}
+	if got.ModifiedGMT != "2024-03-06T11:00:00" {
+		t.Errorf("ModifiedGMT = %q", got.ModifiedGMT)
+	}
+	if got.Slug != "hello-world" {
+		t.Errorf("Slug = %q", got.Slug)
+	}
+	if got.Status != "publish" {
+		t.Errorf("Status = %q", got.Status)
+	}
+	if got.Type != "post" {
+		t.Errorf("Type = %q", got.Type)
+	}
+	if got.Link != "/hello-world" {
+		t.Errorf("Link = %q", got.Link)
+	}
+	if got.GUID.Rendered != "http://example.test/?p=42" {
+		t.Errorf("GUID.Rendered = %q", got.GUID.Rendered)
+	}
+	if got.Title.Rendered != "Hello World" {
+		t.Errorf("Title.Rendered = %q", got.Title.Rendered)
+	}
+	if got.Author != 7 {
+		t.Errorf("Author = %d, want 7", got.Author)
+	}
+	if got.FeaturedMedia != 55 {
+		t.Errorf("FeaturedMedia = %d, want 55", got.FeaturedMedia)
+	}
+	if got.CommentStatus != "open" {
+		t.Errorf("CommentStatus = %q", got.CommentStatus)
+	}
+	if got.PingStatus != "open" {
+		t.Errorf("PingStatus = %q", got.PingStatus)
+	}
+	// Excerpt is derived from Content (block comments stripped), but is NOT
+	// routed through The Transform — it is restCommon's Excerpt(p) and is
+	// unchanged by this milestone (Req 4.3). Asserting it is present and not
+	// perturbed into the img-enhanced form guards that boundary.
+	if strings.Contains(got.Excerpt.Rendered, "loading=") {
+		t.Errorf("excerpt.rendered was routed through The Transform: %q", got.Excerpt.Rendered)
+	}
+
+	// Protected is p.Password != "", independent of Content. false here.
+	if got.Content.Protected {
+		t.Errorf("Content.Protected = true, want false (no password)")
+	}
+
+	// Sub-case: a password-protected post still reports Protected == true, and
+	// the Content transform does not disturb that flag.
+	pp := blockImgPost()
+	pp.Password = "secret"
+	gotPP, err := mapper.Post(context.Background(), pp)
+	if err != nil {
+		t.Fatalf("Post (password): %v", err)
+	}
+	if !gotPP.Content.Protected {
+		t.Errorf("Content.Protected = false, want true (password set)")
 	}
 }

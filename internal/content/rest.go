@@ -1,10 +1,16 @@
 package content
 
 import (
+	"bytes"
 	"context"
-	"html"
+	stdhtml "html"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
+
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
@@ -176,6 +182,14 @@ type RESTMapper struct {
 	// the pre-M9a "/{slug}" links rather than carrying an ambiguous zero
 	// value (M9a Req 6.1, 6.2).
 	permalinks routing.Structure
+
+	// uploadsBaseURL anchors srcset candidates when an <img>'s src carries no
+	// directory of its own (Finding 3): with urlDir(src) == "", a dir(src)
+	// anchor would emit bare basenames, so rewriteImageNode falls back to this
+	// base instead. NewRESTMapper defaults it to WordPress's conventional
+	// "/wp-content/uploads" so a mapper that never saw WithUploadsBaseURL still
+	// produces a usable, site-root-relative anchor rather than an empty one.
+	uploadsBaseURL string
 }
 
 // NewRESTMapper constructs a RESTMapper. prefix is the usermeta key prefix
@@ -185,7 +199,7 @@ func NewRESTMapper(terms domain.PostTermsRepository, meta domain.PostMetaReposit
 	// An empty structure is WordPress's "plain" setting and never fails to
 	// parse, so the error is not reachable here. Mirrors web.NewServer.
 	flat, _ := routing.Parse("", "", "")
-	return &RESTMapper{terms: terms, meta: meta, users: users, prefix: prefix, permalinks: flat}
+	return &RESTMapper{terms: terms, meta: meta, users: users, prefix: prefix, permalinks: flat, uploadsBaseURL: "/wp-content/uploads"}
 }
 
 // WithPermalinks configures the permalink structure used to build the REST
@@ -197,6 +211,16 @@ func NewRESTMapper(terms domain.PostTermsRepository, meta domain.PostMetaReposit
 // decision: routing.Parse returns a usable flat Structure alongside its error.
 func (m *RESTMapper) WithPermalinks(st routing.Structure) *RESTMapper {
 	m.permalinks = st
+	return m
+}
+
+// WithUploadsBaseURL configures the uploads base that anchors srcset candidates
+// when an <img>'s src has no directory of its own (Finding 3). It returns the
+// same RESTMapper for chaining, matching WithPermalinks, so the startup path can
+// hand it the resolved uploads URL alongside the permalink structure without
+// either growing a positional parameter.
+func (m *RESTMapper) WithUploadsBaseURL(base string) *RESTMapper {
+	m.uploadsBaseURL = base
 	return m
 }
 
@@ -241,8 +265,9 @@ func (m *RESTMapper) userLink(u domain.User) string {
 }
 
 // restCommon is a method rather than a plain function because the link field
-// now depends on the mapper's permalink structure.
-func (m *RESTMapper) restCommon(p domain.Post, featuredMedia int64) restItemCommon {
+// now depends on the mapper's permalink structure. It also threads ctx so the
+// content field can be routed through The Transform (renderContent).
+func (m *RESTMapper) restCommon(ctx context.Context, p domain.Post, featuredMedia int64) restItemCommon {
 	return restItemCommon{
 		ID:            p.ID,
 		Date:          restDate(p.Date),
@@ -255,7 +280,7 @@ func (m *RESTMapper) restCommon(p domain.Post, featuredMedia int64) restItemComm
 		Link:          m.postLink(p),
 		GUID:          RESTRendered{Rendered: p.GUID},
 		Title:         RESTRendered{Rendered: p.Title},
-		Content:       RESTContentRendered{Rendered: p.Content, Protected: p.Password != ""},
+		Content:       RESTContentRendered{Rendered: m.renderContent(ctx, p.Content), Protected: p.Password != ""},
 		Excerpt:       RESTRendered{Rendered: Excerpt(p)},
 		Author:        p.Author,
 		FeaturedMedia: featuredMedia,
@@ -287,7 +312,7 @@ func (m *RESTMapper) Post(ctx context.Context, p domain.Post) (RESTPost, error) 
 		tags = []int64{}
 	}
 	return RESTPost{
-		restItemCommon: m.restCommon(p, featured),
+		restItemCommon: m.restCommon(ctx, p, featured),
 		Categories:     categories,
 		Tags:           tags,
 	}, nil
@@ -301,7 +326,7 @@ func (m *RESTMapper) Page(ctx context.Context, p domain.Post) (RESTPage, error) 
 	if err != nil {
 		return RESTPage{}, err
 	}
-	return RESTPage{restItemCommon: m.restCommon(p, featured)}, nil
+	return RESTPage{restItemCommon: m.restCommon(ctx, p, featured)}, nil
 }
 
 // restCommentStatus maps the raw comment_approved enum ("0"/"1"/"spam"/
@@ -334,7 +359,7 @@ func Comment(c domain.Comment) RESTComment {
 		AuthorURL:  c.AuthorURL,
 		Date:       restDate(c.Date),
 		DateGMT:    restDate(c.DateGMT),
-		Content:    RESTRendered{Rendered: html.EscapeString(c.Content)},
+		Content:    RESTRendered{Rendered: stdhtml.EscapeString(c.Content)},
 		Link:       commentLink(c.PostID, c.ID),
 		Status:     restCommentStatus(c.Status),
 	}
@@ -357,6 +382,238 @@ func mediaDetailsFromSerialized(raw string) RESTMediaDetails {
 		return RESTMediaDetails{}
 	}
 	return RESTMediaDetails{Width: phpInt(m["width"]), Height: phpInt(m["height"])}
+}
+
+// sizeVariant is one entry of an attachment's registered image sizes (the
+// "sizes" sub-map of _wp_attachment_metadata): a resized file plus its pixel
+// dimensions. It is the raw material srcsetFromSizes (task 3.x) turns into a
+// WordPress srcset; sizesFromMetadata only decodes and filters, leaving
+// ordering and URL construction to that later consumer.
+type sizeVariant struct {
+	File   string
+	Width  int
+	Height int
+}
+
+// sizesFromMetadata decodes an attachment's _wp_attachment_metadata postmeta
+// into its registered size variants plus the full-size width, tolerating a
+// missing/empty/malformed blob the same way mediaDetailsFromSerialized does:
+// a nil meta port, an AttachmentMetadata error, or an empty/unparseable value
+// is "no variants" ((nil, 0)), never a surfaced error (Req 3.3; Finding 2). A
+// blob with a top-level width but no "sizes" key keeps the full-size width so
+// a caller can still omit srcset while using the dimensions ((nil, fullWidth),
+// Req 2.5). Entries missing a file name or with width <= 0 are skipped rather
+// than emitted as unusable srcset candidates. It is an independent sibling of
+// mediaDetailsFromSerialized and does not alter that function's width/height
+// behavior (Req 3.4).
+func (m *RESTMapper) sizesFromMetadata(ctx context.Context, id int64) ([]sizeVariant, int) {
+	if m.meta == nil {
+		return nil, 0
+	}
+	raw, err := m.meta.AttachmentMetadata(ctx, id)
+	if err != nil || raw == "" {
+		return nil, 0
+	}
+	v, err := php.Unserialize(raw)
+	if err != nil {
+		return nil, 0
+	}
+	top, ok := v.(map[string]any)
+	if !ok {
+		return nil, 0
+	}
+	fullW := phpInt(top["width"])
+	sizesMap, ok := top["sizes"].(map[string]any)
+	if !ok {
+		return nil, fullW
+	}
+	variants := make([]sizeVariant, 0, len(sizesMap))
+	for _, sv := range sizesMap {
+		entry, ok := sv.(map[string]any)
+		if !ok {
+			continue
+		}
+		file, _ := entry["file"].(string)
+		w := phpInt(entry["width"])
+		if file == "" || w <= 0 {
+			continue
+		}
+		variants = append(variants, sizeVariant{File: file, Width: w, Height: phpInt(entry["height"])})
+	}
+	return variants, fullW
+}
+
+// srcsetFromSizes builds the WordPress srcset/sizes attribute pair from an
+// attachment's registered size variants. It sorts a copy of variants ascending
+// by width (never mutating the caller's slice), renders each as
+// "{dir}{file} {width}w" where dir is urlDir(base), and joins them with ", "
+// (Req 2.2). The sizes string is "(max-width: {w}px) 100vw, {w}px" for a
+// positive fullWidth and empty otherwise, so a zero width never emits a
+// nonsensical "0px" form (Req 2.3, 2.5).
+func srcsetFromSizes(base string, variants []sizeVariant, fullWidth int) (srcset, sizes string) {
+	cp := append([]sizeVariant(nil), variants...)
+	sort.Slice(cp, func(i, j int) bool { return cp[i].Width < cp[j].Width })
+	dir := urlDir(base)
+	candidates := make([]string, 0, len(cp))
+	for _, v := range cp {
+		candidates = append(candidates, dir+v.File+" "+strconv.Itoa(v.Width)+"w")
+	}
+	srcset = strings.Join(candidates, ", ")
+	if fullWidth > 0 {
+		sizes = "(max-width: " + strconv.Itoa(fullWidth) + "px) 100vw, " + strconv.Itoa(fullWidth) + "px"
+	}
+	return srcset, sizes
+}
+
+// resolveAttachmentID extracts a WordPress attachment id from an <img>'s class
+// list by scanning its space-separated tokens for a "wp-image-{digits}" entry
+// (Req 3.1). It never reads src, so a URL that merely contains "wp-image-" does
+// not match; a zero, absent, or non-numeric id yields (0, false).
+func resolveAttachmentID(n *html.Node) (int64, bool) {
+	for _, tok := range strings.Fields(attrValue(n, "class")) {
+		rest, ok := strings.CutPrefix(tok, "wp-image-")
+		if !ok {
+			continue
+		}
+		id, err := strconv.ParseInt(rest, 10, 64)
+		if err == nil && id > 0 {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
+// urlDir returns everything up to and including the final "/" in s, or "" when
+// s contains no slash. It is the directory prefix srcsetFromSizes prepends to
+// each variant file name.
+func urlDir(s string) string {
+	i := strings.LastIndex(s, "/")
+	if i < 0 {
+		return ""
+	}
+	return s[:i+1]
+}
+
+// attrValue returns the value of n's first attribute named key, or "" when no
+// such attribute is present.
+func attrValue(n *html.Node, key string) string {
+	for _, a := range n.Attr {
+		if a.Key == key {
+			return a.Val
+		}
+	}
+	return ""
+}
+
+// setIfAbsent appends a key=val attribute to n only when no attribute named key
+// already exists, leaving an existing value untouched and never duplicating it
+// (Req 2.6 idempotence).
+func setIfAbsent(n *html.Node, key, val string) {
+	for _, a := range n.Attr {
+		if a.Key == key {
+			return
+		}
+	}
+	n.Attr = append(n.Attr, html.Attribute{Key: key, Val: val})
+}
+
+// containsIMG is the cheap, case-folded probe renderContent uses to decide
+// whether the far more expensive parse/rewrite path is worth entering at all.
+// A case-insensitive strings.Contains for "<img" catches "<IMG"/"<Img" alike;
+// a false positive (the literal text "<img" outside a real tag) merely costs a
+// parse that finds no atom.Img, never a wrong rewrite.
+func containsIMG(s string) bool {
+	return strings.Contains(strings.ToLower(s), "<img")
+}
+
+// renderContent is "The Transform": it strips Gutenberg block comments and then
+// enhances the post's <img> tags (loading/decoding/srcset/sizes). It strips
+// first via the shared StripBlockComments, then short-circuits — returning the
+// stripped string untouched — when there is no attachment metadata port to read
+// (m.meta == nil, the D6/Finding-2 nil-guard) or the stripped content holds no
+// <img> at all. Only when both an image and a meta port are present does it
+// delegate to rewriteImages. The short-circuit is also the Req 4.5 byte-identical
+// guarantee: comment-free, image-free content never reaches html.ParseFragment/
+// html.Render, so no serializer round-trip can perturb it.
+func (m *RESTMapper) renderContent(ctx context.Context, rendered string) string {
+	stripped := StripBlockComments(rendered)
+	if m.meta == nil || !containsIMG(stripped) {
+		return stripped
+	}
+	return m.rewriteImages(ctx, stripped)
+}
+
+// rewriteImages parses s as an HTML fragment, enhances every <img>, and
+// re-serializes it. It parses with html.ParseFragment against a bare
+// &html.Node{body} context node — not a full-document parse — so the output is a
+// fragment with no synthesized <html>/<head>/<body> wrapper (D3). x/net/html is
+// forgiving and rarely errors; the ParseFragment error guard returns s unchanged
+// as the belt-and-braces Req 5.3 parse-failure passthrough. Each top-level node
+// is walked for <img> descendants, then re-rendered with a per-node html.Render
+// into a shared buffer so the fragment's node order is preserved; a Render error
+// likewise falls back to the untouched s.
+func (m *RESTMapper) rewriteImages(ctx context.Context, s string) string {
+	ctxNode := &html.Node{Type: html.ElementNode, Data: "body", DataAtom: atom.Body}
+	nodes, err := html.ParseFragment(strings.NewReader(s), ctxNode)
+	if err != nil {
+		return s
+	}
+	for _, n := range nodes {
+		m.walkAndRewrite(ctx, n)
+	}
+	var buf bytes.Buffer
+	for _, n := range nodes {
+		if err := html.Render(&buf, n); err != nil {
+			return s
+		}
+	}
+	return buf.String()
+}
+
+// walkAndRewrite descends n depth-first, calling rewriteImageNode on every
+// element whose atom is atom.Img and recursing into every child so <img> tags
+// nested inside other elements (figures, links, paragraphs) are reached too.
+func (m *RESTMapper) walkAndRewrite(ctx context.Context, n *html.Node) {
+	if n.Type == html.ElementNode && n.DataAtom == atom.Img {
+		m.rewriteImageNode(ctx, n)
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		m.walkAndRewrite(ctx, c)
+	}
+}
+
+// rewriteImageNode enhances a single <img>. loading="lazy" and decoding="async"
+// are always set-if-absent, even for an <img> whose attachment id can't be
+// resolved, since they need no metadata (Req 3.2). It then resolves the
+// wp-image-{id} class to an attachment id — returning early if none is present —
+// and reads that attachment's registered size variants; with no variants it
+// stops after loading/decoding (Req 2.5, 3.3). Otherwise it builds the
+// srcset/sizes pair anchored on the directory of the img's own src, falling back
+// to m.uploadsBaseURL when src carries no directory (urlDir(src) == "", the
+// Finding-3 fallback): srcsetFromSizes derives its dir from urlDir(base), so a
+// base ending in "/" anchors candidates on exactly that uploads directory. Both
+// attributes are set-if-absent and only when a non-empty srcset was produced, so
+// an author-supplied srcset is never overwritten (Req 2.6, 5.4 idempotence).
+func (m *RESTMapper) rewriteImageNode(ctx context.Context, n *html.Node) {
+	setIfAbsent(n, "loading", "lazy")
+	setIfAbsent(n, "decoding", "async")
+	id, ok := resolveAttachmentID(n)
+	if !ok {
+		return
+	}
+	variants, fullW := m.sizesFromMetadata(ctx, id)
+	if len(variants) == 0 {
+		return
+	}
+	base := attrValue(n, "src")
+	if urlDir(base) == "" {
+		base = strings.TrimRight(m.uploadsBaseURL, "/") + "/"
+	}
+	srcset, sizes := srcsetFromSizes(base, variants, fullW)
+	if srcset != "" {
+		setIfAbsent(n, "srcset", srcset)
+		setIfAbsent(n, "sizes", sizes)
+	}
 }
 
 // phpInt normalizes a decoded PHP scalar (int from php.Unserialize's integer

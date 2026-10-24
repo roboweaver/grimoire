@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/roboweaver/grimoire/internal/auth/password"
 	"github.com/roboweaver/grimoire/internal/domain"
 )
@@ -375,8 +377,8 @@ func TestSessionManager_LoginRehashesPhpass(t *testing.T) {
 	if !ok {
 		t.Fatal("expected password to be rehashed on successful phpass login")
 	}
-	if !strings.HasPrefix(newHash, "$2") {
-		t.Errorf("rehashed password = %q, want a bcrypt hash", newHash)
+	if !strings.HasPrefix(newHash, "$wp$") {
+		t.Errorf("rehashed password = %q, want a $wp$ hash", newHash)
 	}
 }
 
@@ -406,6 +408,82 @@ func TestSessionManager_LoginWPHashNoRehash(t *testing.T) {
 	if newHash, ok := users.updated[7]; ok {
 		t.Fatalf("a $wp$ hash must NOT be rehashed on login; UpdatePass wrote %q", newHash)
 	}
+}
+
+// TestSessionManager_LoginUpgradesLegacyToWP asserts the M10.G issuance change:
+// a successful login against a legacy plain-bcrypt or phpass row rehashes it to
+// a "$wp$" hash (because password.Hash now emits $wp$ and NeedsRehash now flags
+// plain bcrypt), while a "$wp$" row is never rehashed and a wrong password
+// upgrades nothing.
+func TestSessionManager_LoginUpgradesLegacyToWP(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("plain bcrypt row upgrades to $wp$", func(t *testing.T) {
+		m, users, _, _ := newTestManager(now)
+		// Build a legacy plain-bcrypt hash directly (NOT password.Hash, which now
+		// emits $wp$), so the row starts as the pre-10.G format.
+		bc, err := bcrypt.GenerateFromPassword([]byte("s3cret!"), bcrypt.DefaultCost)
+		if err != nil {
+			t.Fatalf("bcrypt: %v", err)
+		}
+		users.add(domain.User{ID: 11, Login: "bcryptuser", Pass: string(bc)})
+
+		if _, _, err := m.Login(context.Background(), "bcryptuser", "s3cret!"); err != nil {
+			t.Fatalf("Login(plain bcrypt): %v", err)
+		}
+		newHash, ok := users.updated[11]
+		if !ok {
+			t.Fatal("expected a plain-bcrypt row to be upgraded on successful login")
+		}
+		if !strings.HasPrefix(newHash, "$wp$") {
+			t.Errorf("upgraded hash = %q, want a $wp$ hash", newHash)
+		}
+	})
+
+	t.Run("phpass row upgrades to $wp$", func(t *testing.T) {
+		m, users, _, _ := newTestManager(now)
+		// Known phpass vector for password "admin".
+		users.add(domain.User{ID: 12, Login: "phpassuser", Pass: "$P$6Salt.AbCUzpPVIK9ZXMm5j8H0Tczx."})
+
+		if _, _, err := m.Login(context.Background(), "phpassuser", "admin"); err != nil {
+			t.Fatalf("Login(phpass): %v", err)
+		}
+		newHash, ok := users.updated[12]
+		if !ok {
+			t.Fatal("expected a phpass row to be upgraded on successful login")
+		}
+		if !strings.HasPrefix(newHash, "$wp$") {
+			t.Errorf("upgraded hash = %q, want a $wp$ hash", newHash)
+		}
+	})
+
+	t.Run("$wp$ row is not upgraded", func(t *testing.T) {
+		m, users, _, _ := newTestManager(now)
+		users.add(domain.User{ID: 13, Login: "wpuser", Pass: wpGoldenHash})
+
+		if _, _, err := m.Login(context.Background(), "wpuser", wpGoldenLogin); err != nil {
+			t.Fatalf("Login($wp$): %v", err)
+		}
+		if newHash, ok := users.updated[13]; ok {
+			t.Fatalf("a $wp$ row must NOT be upgraded; UpdatePass wrote %q", newHash)
+		}
+	})
+
+	t.Run("wrong password upgrades nothing", func(t *testing.T) {
+		m, users, _, _ := newTestManager(now)
+		bc, err := bcrypt.GenerateFromPassword([]byte("s3cret!"), bcrypt.DefaultCost)
+		if err != nil {
+			t.Fatalf("bcrypt: %v", err)
+		}
+		users.add(domain.User{ID: 14, Login: "bcryptuser2", Pass: string(bc)})
+
+		if _, _, err := m.Login(context.Background(), "bcryptuser2", "wrong"); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("Login(wrong) err = %v, want ErrInvalidCredentials", err)
+		}
+		if newHash, ok := users.updated[14]; ok {
+			t.Fatalf("a failed login must not upgrade; UpdatePass wrote %q", newHash)
+		}
+	})
 }
 
 func TestSessionManager_AuthenticateSuccessAndRollingRefresh(t *testing.T) {

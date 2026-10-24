@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -253,4 +254,276 @@ func latestPost(t *testing.T, repos *storage.Repositories, want string) domain.P
 	}
 	t.Fatalf("no stored post with title %q found (write never reached the writer)", want)
 	return domain.Post{}
+}
+
+// Task 1.1 (M10.E) — REST post/page write capability matrix. A single
+// table-driven test that pins the CURRENT authorization contract of the three
+// wp-json post-write routes (POST /posts create, PUT /posts/{id} update, DELETE
+// /posts/{id} delete) as enforced today by handleRESTPostCreate/Update/Delete
+// (rest_posts.go) over the REAL content.PostWriteService and the real
+// auth.CanCreatePost/CanEditPost/CanDeletePost capability path. This asserts an
+// ALREADY-shipped contract (no new production code), so every cell is written
+// to PASS against the live handler the moment it lands.
+//
+// Harness/helpers reused: newRESTPostWriteRouter(t, fake) (wires the REAL
+// PostWriteService over the live SQLite PostWriter), decodeRESTErrCode, and
+// repos.AdminPosts.ListForAdmin / repos.PostWriter.ByID for the no-state-change
+// readback. Each principal is built through the real auth.NewPrincipal /
+// auth.CapabilitiesForRoles path (via postMatrixFake) — never a hand-forged
+// capability set.
+//
+// Auth mechanism: session fake + CSRF. Each non-anonymous cell carries the
+// session cookie and the matching X-CSRF-Token "matrix-token"; the anonymous
+// cell (fake == nil) sends neither (a bare request through an empty
+// &fakeSessions{}), so no principal is resolved and the capability check sees
+// the empty set.
+//
+// Seeded fixture pinned (storagetest.SeedFixtures / postArgs): post 1 is
+// {id:1, author:1, type:"post", status:"publish", title:"Hello One",
+// content:"<p>body</p>"}. So update/delete target /posts/1, "own" means the
+// caller is UserID 1, and because the post is PUBLISHED the own-author cells
+// additionally need edit_published_posts / delete_published_posts (author holds
+// both). The matrix encodes:
+//
+//	CREATE (POST /posts):
+//	  anonymous            draft   → 403 rest_cannot_create
+//	  subscriber (uid 1)   draft   → 403 rest_cannot_create  (lacks edit_posts)
+//	  contributor (uid 1)  draft   → 201
+//	  author (uid 1)       draft   → 201
+//	  editor (uid 1)       draft   → 201
+//	  administrator (uid 1)draft   → 201
+//	  contributor (uid 1)  publish → 403 rest_cannot_create  (lacks publish_posts)
+//	  author (uid 1)       publish → 201
+//	  editor (uid 1)       publish → 201
+//	UPDATE (PUT /posts/1, stored author 1, published):
+//	  anonymous                    → 403 rest_cannot_edit
+//	  subscriber (uid 1, own)      → 403 rest_cannot_edit     (lacks edit_posts)
+//	  author (uid 1, own)          → 200
+//	  author (uid 7, other)        → 403 rest_cannot_edit     (lacks edit_others_posts)
+//	  editor (uid 7, other)        → 200
+//	  administrator (uid 7, other) → 200
+//	DELETE (DELETE /posts/1): same ownership shape as update; forbidden reuses
+//	  403 rest_cannot_edit (handler reuses the edit code, rest_posts.go).
+
+// postMatrixFake wraps a matrix principal in the fakeSessions shape the REST
+// post-write requests expect: a session carrying the shared "matrix-token" CSRF
+// token so a request built with matrixPostReq (which sets X-CSRF-Token:
+// matrix-token) clears the M4 synchronizer check and reaches the capability
+// decision. The principal is resolved through the real auth.NewPrincipal /
+// auth.CapabilitiesForRoles path for the given role. The anonymous case is a
+// bare &fakeSessions{}, not this helper.
+func postMatrixFake(userID int64, login, role string) *fakeSessions {
+	return &fakeSessions{
+		authPrincipal: auth.NewPrincipal(userID, login, []string{role}),
+		authSession:   domain.Session{ID: "sm", UserID: userID, CSRFToken: "matrix-token"},
+	}
+}
+
+// matrixPostReq builds a session-authenticated wp-json post-write request
+// carrying the session cookie and the matching "matrix-token" CSRF token (the
+// token every postMatrixFake uses).
+func matrixPostReq(method, target, body string) *http.Request {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.AddCookie(&http.Cookie{Name: "grimoire_session", Value: "anything"})
+	req.Header.Set("X-CSRF-Token", "matrix-token")
+	return req
+}
+
+func TestRESTPostWriteCapabilityMatrix(t *testing.T) {
+	t.Run("create", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			fake     *fakeSessions // nil → anonymous (bare &fakeSessions{})
+			status   string        // "draft" or "publish"
+			wantCode int
+			wantErr  string // "" when wantCode is 201
+		}{
+			{"anonymous-draft", nil, "draft", http.StatusForbidden, "rest_cannot_create"},
+			{"subscriber-draft", postMatrixFake(1, "sub", auth.RoleSubscriber), "draft", http.StatusForbidden, "rest_cannot_create"},
+			{"contributor-draft", postMatrixFake(1, "contrib", auth.RoleContributor), "draft", http.StatusCreated, ""},
+			{"author-draft", postMatrixFake(1, "author", auth.RoleAuthor), "draft", http.StatusCreated, ""},
+			{"editor-draft", postMatrixFake(1, "editor", auth.RoleEditor), "draft", http.StatusCreated, ""},
+			{"administrator-draft", postMatrixFake(1, "admin", auth.RoleAdministrator), "draft", http.StatusCreated, ""},
+			// Publish sub-cases: publish_posts is now required. Contributor
+			// lacks it → 403; author and up hold it → 201.
+			{"contributor-publish", postMatrixFake(1, "contrib", auth.RoleContributor), "publish", http.StatusForbidden, "rest_cannot_create"},
+			{"author-publish", postMatrixFake(1, "author", auth.RoleAuthor), "publish", http.StatusCreated, ""},
+			{"editor-publish", postMatrixFake(1, "editor", auth.RoleEditor), "publish", http.StatusCreated, ""},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				fake := tc.fake
+				if fake == nil {
+					fake = &fakeSessions{}
+				}
+				h, repos := newRESTPostWriteRouter(t, fake)
+
+				// A per-cell unique title so the no-state-change readback can
+				// scan for exactly this cell's submission.
+				title := "Matrix Create " + tc.name
+				body := `{"title":"` + title + `","content":"body","status":"` + tc.status + `"}`
+				var req *http.Request
+				if tc.fake == nil {
+					// Anonymous: no session cookie, no CSRF token.
+					req = httptest.NewRequest(http.MethodPost, "/wp-json/wp/v2/posts", strings.NewReader(body))
+				} else {
+					req = matrixPostReq(http.MethodPost, "/wp-json/wp/v2/posts", body)
+				}
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, req)
+
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantErr != "" {
+					if code := decodeRESTErrCode(t, rec); code != tc.wantErr {
+						t.Errorf("error code = %q, want %q", code, tc.wantErr)
+					}
+					// Fail closed: a rejected create persisted no post with the
+					// submitted title.
+					assertNoPostWithTitle(t, repos, title)
+				}
+			})
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			fake     *fakeSessions // nil → anonymous
+			wantCode int
+			wantErr  string // "" when wantCode is 200
+		}{
+			{"anonymous", nil, http.StatusForbidden, "rest_cannot_edit"},
+			// Subscriber lacks edit_posts entirely → 403 even as the owner.
+			{"subscriber-owner", postMatrixFake(1, "sub", auth.RoleSubscriber), http.StatusForbidden, "rest_cannot_edit"},
+			// OWN edit (caller is user 1, the stored author of post 1):
+			// edit_posts + edit_published_posts suffice (post 1 is published).
+			{"author-owner", postMatrixFake(1, "author", auth.RoleAuthor), http.StatusOK, ""},
+			// OTHER-author edit (caller is user 7, stored author is 1):
+			// edit_others_posts required. Author lacks it → 403; editor and
+			// administrator hold it → 200.
+			{"author-other", postMatrixFake(7, "author7", auth.RoleAuthor), http.StatusForbidden, "rest_cannot_edit"},
+			{"editor-other", postMatrixFake(7, "editor7", auth.RoleEditor), http.StatusOK, ""},
+			{"administrator-other", postMatrixFake(7, "admin7", auth.RoleAdministrator), http.StatusOK, ""},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				fake := tc.fake
+				if fake == nil {
+					fake = &fakeSessions{}
+				}
+				h, repos := newRESTPostWriteRouter(t, fake)
+
+				before, err := repos.PostWriter.ByID(context.Background(), 1)
+				if err != nil {
+					t.Fatalf("PostWriter.ByID(1) before: %v", err)
+				}
+
+				body := `{"title":"Matrix Updated ` + tc.name + `","content":"matrix new body ` + tc.name + `"}`
+				var req *http.Request
+				if tc.fake == nil {
+					req = httptest.NewRequest(http.MethodPut, "/wp-json/wp/v2/posts/1", strings.NewReader(body))
+				} else {
+					req = matrixPostReq(http.MethodPut, "/wp-json/wp/v2/posts/1", body)
+				}
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, req)
+
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				after, err := repos.PostWriter.ByID(context.Background(), 1)
+				if err != nil {
+					t.Fatalf("PostWriter.ByID(1) after: %v", err)
+				}
+				if tc.wantErr != "" {
+					if code := decodeRESTErrCode(t, rec); code != tc.wantErr {
+						t.Errorf("error code = %q, want %q", code, tc.wantErr)
+					}
+					// Fail closed: a rejected edit left Title/Content unchanged.
+					if after.Title != before.Title {
+						t.Errorf("a 403 edit persisted a title change: before=%q after=%q", before.Title, after.Title)
+					}
+					if after.Content != before.Content {
+						t.Errorf("a 403 edit persisted a content change: before=%q after=%q", before.Content, after.Content)
+					}
+				} else if after.Title == before.Title && after.Content == before.Content {
+					t.Errorf("a permitted edit did not persist; Title/Content unchanged (Title=%q Content=%q)", after.Title, after.Content)
+				}
+			})
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			fake     *fakeSessions // nil → anonymous
+			wantCode int
+			wantErr  string // "" when wantCode is 200
+		}{
+			{"anonymous", nil, http.StatusForbidden, "rest_cannot_edit"},
+			{"subscriber-owner", postMatrixFake(1, "sub", auth.RoleSubscriber), http.StatusForbidden, "rest_cannot_edit"},
+			// OWN delete (caller is user 1): delete_posts + delete_published_posts.
+			{"author-owner", postMatrixFake(1, "author", auth.RoleAuthor), http.StatusOK, ""},
+			// OTHER-author delete (caller is user 7): delete_others_posts
+			// required. Author lacks it → 403; editor/administrator hold it → 200.
+			{"author-other", postMatrixFake(7, "author7", auth.RoleAuthor), http.StatusForbidden, "rest_cannot_edit"},
+			{"editor-other", postMatrixFake(7, "editor7", auth.RoleEditor), http.StatusOK, ""},
+			{"administrator-other", postMatrixFake(7, "admin7", auth.RoleAdministrator), http.StatusOK, ""},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				fake := tc.fake
+				if fake == nil {
+					fake = &fakeSessions{}
+				}
+				h, repos := newRESTPostWriteRouter(t, fake)
+
+				var req *http.Request
+				if tc.fake == nil {
+					req = httptest.NewRequest(http.MethodDelete, "/wp-json/wp/v2/posts/1", nil)
+				} else {
+					req = matrixPostReq(http.MethodDelete, "/wp-json/wp/v2/posts/1", "")
+				}
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, req)
+
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantErr != "" {
+					if code := decodeRESTErrCode(t, rec); code != tc.wantErr {
+						t.Errorf("error code = %q, want %q", code, tc.wantErr)
+					}
+					// Fail closed: a rejected delete left post 1 resolvable.
+					if _, err := repos.PostWriter.ByID(context.Background(), 1); err != nil {
+						t.Errorf("a 403 delete removed post 1 (it must still resolve): %v", err)
+					}
+				} else {
+					// A permitted delete removed post 1: it no longer resolves.
+					if _, err := repos.PostWriter.ByID(context.Background(), 1); !errors.Is(err, domain.ErrNotFound) {
+						t.Errorf("a permitted delete did not remove post 1; ByID err = %v, want domain.ErrNotFound", err)
+					}
+				}
+			})
+		}
+	})
+}
+
+// assertNoPostWithTitle fails if any post carries the given title, proving a
+// rejected create persisted nothing. It scans the admin list (which, unlike the
+// public collection, includes draft/pending posts) so a would-be draft create
+// is caught too.
+func assertNoPostWithTitle(t *testing.T, repos *storage.Repositories, title string) {
+	t.Helper()
+	all, err := repos.AdminPosts.ListForAdmin(context.Background(), domain.AdminPostFilter{Types: []string{"post"}, Limit: 100})
+	if err != nil {
+		t.Fatalf("ListForAdmin: %v", err)
+	}
+	for _, p := range all {
+		if p.Title == title {
+			t.Errorf("a rejected create persisted a post: id=%d title=%q", p.ID, p.Title)
+		}
+	}
 }

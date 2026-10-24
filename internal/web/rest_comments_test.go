@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -147,5 +148,183 @@ func TestRESTCommentCreateLoggedInEditorUsesForPrincipalTierC(t *testing.T) {
 	}
 	if stored != raw {
 		t.Errorf("tier-C bypass not applied for unfiltered_html holder (For(p) not used?):\n got  %q\n want %q (byte-identical)", stored, raw)
+	}
+}
+
+// TestRESTCommentCreateCapabilityMatrix is the M10.E consolidated coverage
+// matrix for the REST comment-create route (POST /wp-json/wp/v2/comments).
+//
+// NOTE (Finding 2 — this is an AUTHORIZATION-CONTRACT matrix, NOT an
+// allowed-vs-forbidden *capability* split like the other M10 write-route
+// matrices. Comment create is ANONYMOUS-ALLOWED: handleRESTCommentCreate builds
+// sanitize.Anonymous() when no principal is present and proceeds, and the only
+// capability in the path — moderate_comments — gates comment *status/moderation*
+// (isModerator), never whether a comment may be CREATED. There is no caller for
+// whom create returns a capability 403. So this table enumerates the outcomes the
+// route genuinely distinguishes — the anonymous/subscriber/editor success path,
+// the sanitize-to-empty 400, the closed-comments 403, and the session-CSRF 403 —
+// rather than a create capability that does not exist.
+//
+// Every principal is built through the real auth path (auth.NewPrincipal →
+// auth.CapabilitiesForRoles), never a hand-forged capability set. Auth mechanism:
+// a bare request (no session cookie, no CSRF) for the anonymous-allowed cell
+// (matching TestRESTCommentCreateAnonymousSanitizesTierABeforeWriter); a session
+// fake carrying the principal + a domain.Session{CSRFToken} with a matching
+// grimoire_session cookie and X-CSRF-Token header for the logged-in cells.
+//
+// No-state-change on forbidden: for every non-201 cell the test scans
+// repos.Comments.List(ctx, domain.CommentFilter{PostID: ...}) by that cell's
+// unique author_email and asserts the comment is absent.
+func TestRESTCommentCreateCapabilityMatrix(t *testing.T) {
+	// A session fake carrying the given principal + CSRF token, mirroring the
+	// logged-in cells of TestRESTCommentCreateLoggedInEditorUsesForPrincipalTierC.
+	sessionFake := func(p auth.Principal) *fakeSessions {
+		return &fakeSessions{
+			authPrincipal: p,
+			authSession:   domain.Session{ID: "s1", UserID: p.UserID, CSRFToken: "correct-token"},
+		}
+	}
+
+	const (
+		postOpen   = 1  // seeded published post that accepts comments
+		postClosed = 50 // seeded published post with comment_status="closed" (newAppPasswordRESTRouter)
+	)
+
+	cases := []struct {
+		name string
+		fake *fakeSessions
+		// authEmail is the unique author_email this cell submits — used both as
+		// the request's author_email and as the no-state-change scan key.
+		authEmail string
+		// post is the target post id (postOpen unless the cell targets the
+		// closed-comments post).
+		post int
+		// addSession attaches the grimoire_session cookie (logged-in cells).
+		addSession bool
+		// csrf, when non-empty, sets the X-CSRF-Token header. Left empty on the
+		// missing-CSRF cell to exercise the session-CSRF 403 seam.
+		csrf string
+		// content overrides the default non-empty body content (used by the
+		// markup-only-sanitizes-to-empty cell).
+		content  string
+		wantCode int
+		// wantErr is the expected flat wp-json error code for a non-201 cell.
+		wantErr string
+		// wantPersist is true when the cell expects the comment to reach the
+		// writer (the 201 cells); false cells assert the comment is absent.
+		wantPersist bool
+	}{
+		{
+			name:        "anonymous allowed → 201 persisted",
+			fake:        &fakeSessions{},
+			authEmail:   "matrix-anon@example.com",
+			post:        postOpen,
+			wantCode:    http.StatusCreated,
+			wantPersist: true,
+		},
+		{
+			name:        "subscriber (session+CSRF) → 201 persisted",
+			fake:        sessionFake(auth.NewPrincipal(1, "subscriber", []string{auth.RoleSubscriber})),
+			authEmail:   "matrix-subscriber@example.com",
+			post:        postOpen,
+			addSession:  true,
+			csrf:        "correct-token",
+			wantCode:    http.StatusCreated,
+			wantPersist: true,
+		},
+		{
+			name:        "editor moderate_comments (session+CSRF) → 201 persisted",
+			fake:        sessionFake(auth.NewPrincipal(1, "editor", []string{auth.RoleEditor})),
+			authEmail:   "matrix-editor@example.com",
+			post:        postOpen,
+			addSession:  true,
+			csrf:        "correct-token",
+			wantCode:    http.StatusCreated,
+			wantPersist: true,
+		},
+		{
+			name:      "markup-only body sanitizes to empty at tier A → 400 rest_comment_content_invalid",
+			fake:      &fakeSessions{},
+			authEmail: "matrix-empty@example.com",
+			post:      postOpen,
+			// Non-empty at the handler's required-field guard, but tier-A
+			// sanitize reduces it to empty inside CommentService.Create, which
+			// returns content.ErrCommentEmpty → the existing 400 branch.
+			content:     "<script>alert(1)</script>",
+			wantCode:    http.StatusBadRequest,
+			wantErr:     "rest_comment_content_invalid",
+			wantPersist: false,
+		},
+		{
+			name:        "closed-comments post → 403 rest_comment_closed",
+			fake:        &fakeSessions{},
+			authEmail:   "matrix-closed@example.com",
+			post:        postClosed,
+			wantCode:    http.StatusForbidden,
+			wantErr:     "rest_comment_closed",
+			wantPersist: false,
+		},
+		{
+			name:        "session cell with missing CSRF → 403 rest_forbidden",
+			fake:        sessionFake(auth.NewPrincipal(1, "subscriber", []string{auth.RoleSubscriber})),
+			authEmail:   "matrix-nocsrf@example.com",
+			post:        postOpen,
+			addSession:  true,
+			csrf:        "", // deliberately omitted: exercises requireSessionCSRFREST
+			wantCode:    http.StatusForbidden,
+			wantErr:     "rest_forbidden",
+			wantPersist: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, repos, _ := newAppPasswordRESTRouter(t, tc.fake, false, "")
+
+			content := tc.content
+			if content == "" {
+				content = "Matrix comment body"
+			}
+			body := `{"post":` + strconv.Itoa(tc.post) +
+				`,"author_name":"Matrix","author_email":"` + tc.authEmail +
+				`","content":"` + content + `"}`
+			req := httptest.NewRequest(http.MethodPost, "/wp-json/wp/v2/comments", strings.NewReader(body))
+			req.RemoteAddr = "198.51.100.7:9999"
+			if tc.addSession {
+				req.AddCookie(&http.Cookie{Name: "grimoire_session", Value: "anything"})
+			}
+			if tc.csrf != "" {
+				req.Header.Set("X-CSRF-Token", tc.csrf)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if tc.wantErr != "" {
+				if code := decodeRESTErrCode(t, rec); code != tc.wantErr {
+					t.Errorf("error code = %q, want %q", code, tc.wantErr)
+				}
+			}
+
+			// Read back through the real store by this cell's unique email.
+			items, err := repos.Comments.List(context.Background(), domain.CommentFilter{PostID: int64(tc.post)})
+			if err != nil {
+				t.Fatalf("Comments.List: %v", err)
+			}
+			var persisted bool
+			for _, c := range items {
+				if c.AuthorEmail == tc.authEmail {
+					persisted = true
+				}
+			}
+			if tc.wantPersist && !persisted {
+				t.Errorf("expected comment for %q to be persisted, but it was absent", tc.authEmail)
+			}
+			if !tc.wantPersist && persisted {
+				t.Errorf("no-state-change violated: a non-201 cell persisted a comment for %q", tc.authEmail)
+			}
+		})
 	}
 }

@@ -23,6 +23,27 @@ const (
 // isWPHash reports whether hash is a WordPress 6.8 wrapped-bcrypt hash.
 func isWPHash(hash string) bool { return strings.HasPrefix(hash, wpPrefix) }
 
+// HashWP returns grimoire's issued password hash: a WordPress 6.8 "$wp$"
+// wrapped-bcrypt hash, "$wp$" + bcrypt(wpPreHash(password)) at DefaultCost. The
+// HMAC-SHA384 pre-hash (wpPreHash) domain-separates the input and bounds its
+// length to 64 bytes, within bcrypt's 72-byte limit, so a password longer than
+// 72 bytes is not silently truncated. The embedded bcrypt is Go's "$2a$", which
+// wpVerify reads back through normalizeBcrypt; a WordPress-written "$wp$2y$..."
+// and a grimoire-written "$wp$2a$..." both verify. It reproduces WordPress's
+// wp_hash_password.
+func HashWP(password string) (string, error) {
+	b, err := bcrypt.GenerateFromPassword(wpPreHash(password), DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	// wpPrefix ("$wp$") already carries the '$' that opens the embedded bcrypt
+	// hash (which starts "$2a$..."). Concatenate on the literal "$wp" so the
+	// result is "$wp" + "$2a$..." = "$wp$2a$...", the exact shape wpVerify reads
+	// back via hash[len("$wp"):] -- not "$wp$" + "$2a$..." = "$wp$$2a$..." (a
+	// double '$' bcrypt cannot parse).
+	return "$wp" + string(b), nil
+}
+
 // wpPreHash reproduces WordPress's pre-hash of the password:
 // base64_encode( hash_hmac('sha384', password, 'wp-sha384', true) ). SHA-384 is
 // provided by crypto/sha512 as New384.

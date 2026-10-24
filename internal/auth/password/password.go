@@ -26,13 +26,12 @@ const DefaultCost = bcrypt.DefaultCost
 // bcrypt nor a phpass portable hash.
 var ErrUnknownFormat = errors.New("password: unrecognized hash format")
 
-// Hash returns a bcrypt hash of password at DefaultCost.
+// Hash returns a hash of password in grimoire's issued format. It delegates to
+// HashWP, so every issued hash is a WordPress 6.8 "$wp$" wrapped-bcrypt hash;
+// bcrypt and phpass are verify-only legacy formats after this (see HashWP in
+// wp.go). All issuance sites call Hash unchanged, so they inherit the format.
 func Hash(password string) (string, error) {
-	b, err := bcrypt.GenerateFromPassword([]byte(password), DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return HashWP(password)
 }
 
 // Verify reports whether password matches the stored hash. A wrong password
@@ -115,11 +114,11 @@ func NeedsRehash(hash string) bool {
 	case phpass.Identify(hash):
 		return true
 	case isBcrypt(hash):
-		cost, err := bcrypt.Cost([]byte(normalizeBcrypt(hash)))
-		if err != nil {
-			return true
-		}
-		return cost < DefaultCost
+		// Plain bcrypt (any cost) is now a verify-only legacy format: flag it
+		// for upgrade to $wp$ on the next successful login (D2). The $wp$ case
+		// is handled above and returns false first, so an issued $wp$ hash's
+		// embedded bcrypt is never reached here and stays terminal.
+		return true
 	default:
 		return true
 	}

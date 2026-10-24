@@ -12,8 +12,8 @@ func TestHashAndVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Hash error: %v", err)
 	}
-	if !strings.HasPrefix(h, "$2") {
-		t.Fatalf("Hash = %q, want a bcrypt $2 hash", h)
+	if !strings.HasPrefix(h, "$wp$") {
+		t.Fatalf("Hash = %q, want a $wp$ (WordPress 6.8 wrapped-bcrypt) hash", h)
 	}
 	ok, err := Verify("s3cret-passphrase", h)
 	if err != nil || !ok {
@@ -22,6 +22,57 @@ func TestHashAndVerify(t *testing.T) {
 	ok, err = Verify("wrong", h)
 	if err != nil || ok {
 		t.Fatalf("Verify(wrong) = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+// TestHashWP asserts the new issuer emits a "$wp$" (WordPress 6.8 wrapped-bcrypt)
+// hash that round-trips through Verify, and that the HMAC-SHA384 pre-hash defeats
+// bcrypt's 72-byte input truncation: two passwords sharing an identical first 72
+// bytes but differing afterward must NOT collide (bare bcrypt would truncate both
+// to the same 72-byte prefix and accept either).
+func TestHashWP(t *testing.T) {
+	h, err := HashWP("grimoire-test-123")
+	if err != nil {
+		t.Fatalf("HashWP error: %v", err)
+	}
+	if !strings.HasPrefix(h, "$wp$") {
+		t.Fatalf("HashWP = %q, want a $wp$-prefixed hash", h)
+	}
+	ok, err := Verify("grimoire-test-123", h)
+	if err != nil || !ok {
+		t.Fatalf("Verify(correct) = (%v, %v), want (true, nil)", ok, err)
+	}
+	ok, err = Verify("wrong", h)
+	if err != nil || ok {
+		t.Fatalf("Verify(wrong) = (%v, %v), want (false, nil)", ok, err)
+	}
+
+	// Truncation-defeat: shared 72-byte prefix, different tails.
+	prefix := strings.Repeat("a", 72)
+	pwA := prefix + "X"
+	pwB := prefix + "Y"
+	hA, err := HashWP(pwA)
+	if err != nil {
+		t.Fatalf("HashWP(pwA): %v", err)
+	}
+	hB, err := HashWP(pwB)
+	if err != nil {
+		t.Fatalf("HashWP(pwB): %v", err)
+	}
+	if ok, _ := Verify(pwA, hA); !ok {
+		t.Errorf("Verify(pwA, HashWP(pwA)) = false, want true")
+	}
+	if ok, _ := Verify(pwB, hB); !ok {
+		t.Errorf("Verify(pwB, HashWP(pwB)) = false, want true")
+	}
+	// The pre-hash must feed the whole password to bcrypt, so pwB must NOT
+	// verify against pwA's hash (and vice versa) despite the shared 72-byte
+	// prefix.
+	if ok, _ := Verify(pwB, hA); ok {
+		t.Errorf("Verify(pwB, HashWP(pwA)) = true, want false (bcrypt 72-byte truncation not defeated)")
+	}
+	if ok, _ := Verify(pwA, hB); ok {
+		t.Errorf("Verify(pwA, HashWP(pwB)) = true, want false (bcrypt 72-byte truncation not defeated)")
 	}
 }
 
@@ -115,6 +166,19 @@ func TestVerifyWPHash(t *testing.T) {
 	}
 }
 
+// TestNeedsRehashFreshHashIsTerminal asserts a freshly issued Hash output (now
+// "$wp$") is terminal: NeedsRehash returns false, so a just-upgraded row is not
+// re-upgraded on the next login.
+func TestNeedsRehashFreshHashIsTerminal(t *testing.T) {
+	h, err := Hash("pw")
+	if err != nil {
+		t.Fatalf("Hash: %v", err)
+	}
+	if NeedsRehash(h) {
+		t.Fatalf("NeedsRehash(fresh Hash output %q) = true, want false ($wp$ is terminal)", h)
+	}
+}
+
 func TestNeedsRehashWPHash(t *testing.T) {
 	// "$wp$" is WordPress's current strong standard (HMAC-SHA384 pre-hash +
 	// bcrypt); grimoire verifies it in place and never rehashes it.
@@ -139,7 +203,7 @@ func TestNeedsRehash(t *testing.T) {
 		want bool
 	}{
 		{"phpass always rehash", "$P$6WXYZ7890QmrM8eXI0pZSYhKFDWsuF0", true},
-		{"bcrypt default cost", string(strong), false},
+		{"bcrypt default cost now upgrades to $wp$", string(strong), true},
 		{"bcrypt below default cost", string(weak), true},
 		{"unknown format", "garbage", true},
 	}

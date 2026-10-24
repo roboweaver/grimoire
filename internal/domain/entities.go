@@ -212,3 +212,35 @@ type NavMenuItem struct {
 	Order    int
 	Children []NavMenuItem
 }
+
+// NavMenuPatch is a partial menu update; a nil field is left unchanged (Req 1.2).
+type NavMenuPatch struct {
+	Name *string
+	Slug *string
+}
+
+// NavMenuItemInput is a fully-specified item for CreateItem (the service has
+// sanitized Label, validated URL for type=custom, validated Type, and validated
+// ParentID). It maps 1:1 to the five _menu_item_* keys plus post_title/menu_order
+// the read path reads back (Req 6.1).
+type NavMenuItemInput struct {
+	Label    string // -> post_title (sanitized)
+	URL      string // -> _menu_item_url (custom only; validated)
+	Type     string // -> _menu_item_type (custom|post_type|taxonomy)
+	Object   string // -> _menu_item_object
+	ObjectID int64  // -> _menu_item_object_id (stored as-is)
+	ParentID int64  // -> _menu_item_menu_item_parent (0 = top-level)
+	Order    int    // -> menu_order
+}
+
+// NavMenuItemPatch is a partial item update; a nil field is left unchanged
+// (Req 2.2). Only the supplied _menu_item_* keys / post columns are rewritten.
+type NavMenuItemPatch struct {
+	Label    *string
+	URL      *string
+	Type     *string
+	Object   *string
+	ObjectID *int64
+	ParentID *int64
+	Order    *int
+}

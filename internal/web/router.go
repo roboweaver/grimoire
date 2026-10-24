@@ -75,6 +75,13 @@ type Server struct {
 	// write verbs. Harnesses that omit it still compile and serve the stubs.
 	userWrite *content.UserService
 
+	// navMenuWrite backs the admin-API nav-menu write surface (POST/PUT/DELETE
+	// on /admin/api/menus and /menus/{id}/items, M10.F); nil until
+	// WithNavMenuWrites, in which case adminAPIRouter does not register the
+	// write group and the server keeps serving the existing GET read routes
+	// unchanged (Req 3.3). main.go wires it in task 5.1.
+	navMenuWrite *content.NavMenuWriteService
+
 	// Application Password auth (Req 8); appPasswords nil until
 	// WithApplicationPasswords, in which case ApplicationPasswordAuth is
 	// not mounted and Basic-auth credentials on /wp-json are ignored.

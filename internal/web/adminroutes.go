@@ -126,6 +126,18 @@ func (s *Server) adminAPIRouter() http.Handler {
 			gr.Method(http.MethodDelete, "/terms/{id}", s.jsonHandler(s.adminTermDelete))
 		})
 	}
+	if s.navMenuWrite != nil {
+		r.Group(func(gr chi.Router) {
+			gr.Use(s.requireCapabilityJSON("edit_theme_options"))
+			gr.Use(s.csrfJSONMiddleware)
+			gr.Method(http.MethodPost, "/menus", s.jsonHandler(s.adminMenuCreate))
+			gr.Method(http.MethodPut, "/menus/{id}", s.jsonHandler(s.adminMenuUpdate))
+			gr.Method(http.MethodDelete, "/menus/{id}", s.jsonHandler(s.adminMenuDelete))
+			gr.Method(http.MethodPost, "/menus/{id}/items", s.jsonHandler(s.adminMenuItemCreate))
+			gr.Method(http.MethodPut, "/menus/{id}/items/{itemId}", s.jsonHandler(s.adminMenuItemUpdate))
+			gr.Method(http.MethodDelete, "/menus/{id}/items/{itemId}", s.jsonHandler(s.adminMenuItemDelete))
+		})
+	}
 	r.Group(func(gr chi.Router) {
 		gr.Use(s.requireCapabilityJSON("moderate_comments"))
 		gr.Method(http.MethodGet, "/comments", s.jsonHandler(s.adminComments))

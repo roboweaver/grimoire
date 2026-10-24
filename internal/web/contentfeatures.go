@@ -31,6 +31,16 @@ func (s *Server) WithUserWrites(uw *content.UserService) *Server {
 	return s
 }
 
+// WithNavMenuWrites enables the admin-API menu write surface (POST/PUT/DELETE on
+// /admin/api/menus and /menus/{id}/items, M10.F Req 1, 2). When nmw is nil the
+// write group is not registered and the server keeps serving the existing GET
+// read routes unchanged (Req 3.3). It returns the same Server for chaining,
+// mirroring WithMediaWrites/WithUserWrites.
+func (s *Server) WithNavMenuWrites(nmw *content.NavMenuWriteService) *Server {
+	s.navMenuWrite = nmw
+	return s
+}
+
 // WithFeaturedImages wires the featured-image lookup used to populate
 // PostView.FeaturedImageURL on the home, category, and single/page views.
 // featured may be nil, in which case featured images are simply omitted from

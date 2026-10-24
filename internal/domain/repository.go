@@ -247,6 +247,56 @@ type NavMenuRepository interface {
 	MenuByLocation(ctx context.Context, theme, location string) (NavMenu, error)
 }
 
+// NavMenuWriter creates, updates, and deletes nav_menu terms and their
+// nav_menu_item posts. It is the write counterpart of the read-only
+// NavMenuRepository; wprepo.NavMenuRepo implements both. Every method writes the
+// same {prefix}terms / {prefix}term_taxonomy / {prefix}posts / {prefix}postmeta /
+// {prefix}term_relationships layout the read path assembles, so a written menu
+// round-trips through Menus/MenuByID unchanged (Req 3.2, 6.1).
+type NavMenuWriter interface {
+	// CreateMenu inserts one nav_menu term (a {prefix}terms row plus a
+	// {prefix}term_taxonomy row, taxonomy="nav_menu") and returns its term_id.
+	// name and slug are already sanitized/normalized by the service; slug is
+	// already collision-resolved (CreateMenu does the final uniqueness check in
+	// its transaction to close the create/create race). (Req 1.1)
+	CreateMenu(ctx context.Context, name, slug string) (int64, error)
+
+	// UpdateMenu applies a partial update to an existing nav_menu term's
+	// name/slug. A nil field is left unchanged (Req 1.2). Returns
+	// domain.ErrNotFound when id is not a nav_menu term (Req 1.4).
+	UpdateMenu(ctx context.Context, id int64, patch NavMenuPatch) error
+
+	// DeleteMenu removes the menu term, its term_taxonomy row, every linked
+	// nav_menu_item post, those items' _menu_item_* postmeta rows, and the
+	// term_relationships rows for the menu term, in one transaction, leaving no
+	// orphan (Req 6.3). Returns domain.ErrNotFound when id is not a nav_menu
+	// term (Req 1.4).
+	DeleteMenu(ctx context.Context, id int64) error
+
+	// CreateItem inserts one nav_menu_item post linked to menuID's term, writes
+	// its _menu_item_* postmeta, and returns the new item's post ID. The item's
+	// fields are fully specified (the service has sanitized label, validated a
+	// custom URL, and validated the type and parent). Returns domain.ErrNotFound
+	// when menuID is not a nav_menu term (Req 2.1, 2.4).
+	CreateItem(ctx context.Context, menuID int64, item NavMenuItemInput) (int64, error)
+
+	// UpdateItem applies a partial update to itemID (which must be a
+	// nav_menu_item linked to menuID). A nil field is left unchanged (Req 2.2).
+	// Returns domain.ErrNotFound when itemID is not an item of menuID (Req 2.4).
+	UpdateItem(ctx context.Context, menuID, itemID int64, patch NavMenuItemPatch) error
+
+	// DeleteItem removes itemID's {prefix}posts row, its _menu_item_* postmeta,
+	// and its term_relationships row for menuID's term (Req 2.3, 6.3). Returns
+	// domain.ErrNotFound when itemID is not an item of menuID (Req 2.4).
+	DeleteItem(ctx context.Context, menuID, itemID int64) error
+
+	// ItemBelongsToMenu reports whether itemID is a nav_menu_item linked to
+	// menuID's term. The service uses it for the parent-item validation of
+	// Req 5.4 (a non-zero parent must be another item of the same menu) without
+	// a second round-trip through the read port, which reads whole menus only.
+	ItemBelongsToMenu(ctx context.Context, menuID, itemID int64) (bool, error)
+}
+
 // CommentSpamFilter classifies anonymous comment submissions before persistence.
 type CommentSpamFilter interface {
 	Evaluate(ctx context.Context, c Comment, post Post) (string, error)

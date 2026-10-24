@@ -142,6 +142,17 @@ func main() {
 	userWrite := content.NewUserService(repos.Users, repos.UserMeta, cfg.Database.TablePrefix, content.WithUserContentPolicy(contentPolicy))
 	termWrite := content.NewTermWriteService(termRW)
 	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
+	// navMenuWrite backs the admin-API menu write surface (POST/PUT/DELETE on
+	// /admin/api/menus and /menus/{id}/items). The factory's repos.NavMenus is a
+	// concrete *wprepo.NavMenuRepo, which implements BOTH domain.NavMenuRepository
+	// (read) and domain.NavMenuWriter (write); the type assertion recovers the
+	// write view of that same instance so the writer (arg 1) and the read-back
+	// reader (arg 2) are one object -- a write round-trips through the existing
+	// read path -- without widening the factory Set shape, exactly as the
+	// termReadWriter adapter does for terms. It shares the process-wide
+	// contentPolicy so menu name/label fields sanitize at the write boundary like
+	// every other write path (Req 3.1, 4, 9.1).
+	navMenuWrite := content.NewNavMenuWriteService(repos.NavMenus.(domain.NavMenuWriter), repos.NavMenus, content.WithNavMenuContentPolicy(contentPolicy))
 
 	// The archive routes M9b registers need two opt-in dependencies beyond the
 	// M8 counter: WithHierarchy supplies the taxonomy read CategoryArchive's
@@ -158,7 +169,7 @@ func main() {
 		options,
 		eng,
 		log,
-	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithMediaWrites(mediaWrite).WithUserWrites(userWrite).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
+	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithMediaWrites(mediaWrite).WithUserWrites(userWrite).WithNavMenuWrites(navMenuWrite).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

@@ -90,3 +90,57 @@ func TestExcerptPreservesEscapedEntities(t *testing.T) {
 		t.Fatalf("auto excerpt must not emit live markup from escaped content; got %q", got)
 	}
 }
+
+// TestStripBlockComments: the package-visible StripBlockComments removes
+// Gutenberg block-delimiter comments (opening and closing, including the
+// whitespace variants the existing blockCommentRE matches) while preserving the
+// inner block content, and leaves comment-free content unchanged.
+//
+// This documents the helper that Excerpt will delegate to; the existing Excerpt
+// tests remain the real guard that the forthcoming refactor is
+// behavior-preserving.
+func TestStripBlockComments(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "opening and closing delimiters removed, inner preserved",
+			in:   "<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->",
+			want: "<p>Hi</p>",
+		},
+		{
+			name: "closing delimiter alone removed",
+			in:   "<p>Hi</p><!-- /wp:paragraph -->",
+			want: "<p>Hi</p>",
+		},
+		{
+			name: "no-space whitespace variant removed",
+			in:   "<!--wp:image--><img/>",
+			want: "<img/>",
+		},
+		{
+			name: "extra-space whitespace variant removed",
+			in:   "<!--  wp:list  --><ul></ul>",
+			want: "<ul></ul>",
+		},
+		{
+			name: "self-closing/void block comment removed",
+			in:   "before<!-- wp:spacer /-->after",
+			want: "beforeafter",
+		},
+		{
+			name: "comment-free content unchanged",
+			in:   "<p>plain</p>",
+			want: "<p>plain</p>",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := StripBlockComments(tt.in); got != tt.want {
+				t.Fatalf("StripBlockComments(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}

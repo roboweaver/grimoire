@@ -28,6 +28,16 @@ var (
 	wsRE = regexp.MustCompile(`\s+`)
 )
 
+// StripBlockComments removes Gutenberg block-delimiter comments
+// (<!-- wp:… --> and their closing <!-- /wp:… --> forms, including the
+// self-closing /--> variant), preserving the inner block content. It is the
+// single shared definition reused by both Excerpt and renderContent, backed by
+// the existing blockCommentRE so there is one pattern in one place.
+// Comment-free input is returned unchanged.
+func StripBlockComments(s string) string {
+	return blockCommentRE.ReplaceAllString(s, "")
+}
+
 // Excerpt returns the list-view summary for a post, matching WordPress
 // the_excerpt() semantics.
 //
@@ -50,7 +60,7 @@ func Excerpt(p domain.Post) string {
 		return p.Excerpt
 	}
 
-	text := blockCommentRE.ReplaceAllString(p.Content, "")
+	text := StripBlockComments(p.Content)
 	text = shortcodeRE.ReplaceAllString(text, "")
 	text = tagRE.ReplaceAllString(text, "")
 	text = strings.TrimSpace(wsRE.ReplaceAllString(text, " "))

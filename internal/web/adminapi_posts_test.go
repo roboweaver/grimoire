@@ -731,3 +731,256 @@ func TestAdminPostCreateEmptySanitizedTitleMapsErrTitleEmptyTo400(t *testing.T) 
 		t.Errorf("a title that sanitizes to empty must not persist a post; stored = %+v", mem.store[1])
 	}
 }
+
+// --- M10.E task 1.3: admin post write capability matrix (Req 2.3, 2.6, 2.7; D1) ---
+//
+// TestAdminPostWriteCapabilityMatrix is the table-driven capability matrix for
+// the admin post create/update/delete authorization contract. It consolidates
+// the scattered single-case forbidden tests (TestAdminPostUpdateForbidden,
+// TestAdminPostDeleteMissingRecordIsForbidden) into one allowed-vs-forbidden
+// table and asserts the contract AS IT STANDS TODAY (no production change).
+//
+// Mechanism (per design.md "Test designs per route" #3): the matrix drives the
+// REAL *content.PostWriteService (via newEndToEndWriteServer) over the
+// in-memory memPostWriter, with the acting principal injected directly into the
+// request context by withAuth(ctx, auth.NewPrincipal(uid, name, roles), sess).
+// Every principal is built through the real auth tables (auth.NewPrincipal ->
+// CapabilitiesForRoles), never a hand-forged capability set (Req 2.6). Because
+// the service loads the stored record and evaluates CanCreatePost/CanEditPost/
+// CanDeletePost against the stored Author/Status, the ownership decision is
+// genuine rather than a stub's canned return.
+//
+// This matrix deliberately exercises ONLY the handler + service authorization
+// seam -- the handler's content.ErrForbidden -> 403 "forbidden" mapping
+// (adminapi.go:47-48). It does NOT re-run the router-level
+// requireCapabilityJSON("edit_posts") gate; that gate is separate,
+// already-proven middleware.
+//
+// Principals and the effective capabilities that drive each cell:
+//   - subscriber (RoleSubscriber): "read" only -> lacks edit_posts, cannot
+//     create (CanCreatePost false).
+//   - author  as UserID 1 (RoleAuthor): holds edit_posts/publish_posts/
+//     delete_posts (and the *_published_* variants) but NOT edit_others_posts
+//     or delete_others_posts -> may write its OWN (author 1) post, forbidden on
+//     another author's post.
+//   - author  as UserID 7 (RoleAuthor): same caps, but now a non-owner of the
+//     author-1 stored post -> forbidden (lacks edit_others_posts /
+//     delete_others_posts).
+//   - editor  as UserID 7 (RoleEditor): adds edit_others_posts /
+//     delete_others_posts -> may write the author-1 post it does not own.
+//
+// The updatable/deletable post is seeded directly into mem as author 1, type
+// "post", status "draft" (so the own-author cells need only edit_posts /
+// delete_posts, and the non-owner cells turn purely on edit_others_posts /
+// delete_others_posts), with a known Modified the update body echoes back so
+// the optimistic-concurrency check passes for the allowed cells. This mirrors
+// how the sibling TestAdminPostUpdateSanitizesContentExcerptAndTitleEndToEnd
+// seeds mem.store directly.
+
+func TestAdminPostWriteCapabilityMatrix(t *testing.T) {
+	const storedModified = "2024-01-01T00:00:00Z"
+	seededModified := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// authCtx attaches a principal built through the real auth tables, plus a
+	// session (as SessionMiddleware would), to a fresh context.
+	authCtx := func(uid int64, login string, roles ...string) context.Context {
+		p := auth.NewPrincipal(uid, login, roles)
+		sess := domain.Session{ID: "s", UserID: uid, CSRFToken: "csrf-token-123"}
+		return withAuth(context.Background(), p, sess)
+	}
+
+	// seedServer builds an end-to-end server over a fresh mem holding a single
+	// author-1 draft post at id 1 (for update/delete cells). It returns both so
+	// the no-state-change assertions can read mem.get(id) back.
+	seedServer := func() (*Server, *memPostWriter) {
+		mem := newMemPostWriter()
+		mem.store[1] = domain.Post{
+			ID: 1, Author: 1, Type: "post", Status: "draft",
+			Title: "Seeded", Content: "<p>seeded</p>", Excerpt: "seeded",
+			Date:     time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC),
+			Modified: seededModified,
+		}
+		mem.nextID = 2
+		return newEndToEndWriteServer(mem), mem
+	}
+
+	// ---- CREATE cells (POST /admin/api/posts) ----
+	t.Run("create", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			ctx      context.Context
+			wantCode int
+			wantErr  string // admin-JSON error code; "" means success
+		}{
+			{
+				name:     "subscriber forbidden (lacks edit_posts)",
+				ctx:      authCtx(2, "subscriber", auth.RoleSubscriber),
+				wantCode: http.StatusForbidden,
+				wantErr:  "forbidden",
+			},
+			{
+				name:     "author as owner created",
+				ctx:      authCtx(1, "author", auth.RoleAuthor),
+				wantCode: http.StatusCreated,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				s, mem := seedServer()
+				// id 1 is the seeded post; a successful create takes the next
+				// id (2). The unique title lets the no-write check scan mem.
+				body := `{"title":"CreatedByMatrix","content":"body","status":"draft"}`
+				req := httptest.NewRequest(http.MethodPost, "/admin/api/posts", strings.NewReader(body)).WithContext(tc.ctx)
+				rec := httptest.NewRecorder()
+				s.jsonHandler(s.adminPostCreate).ServeHTTP(rec, req)
+
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d, body=%s", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantErr != "" {
+					assertJSONError(t, rec, tc.wantErr)
+					// No-state-change: a forbidden create must add no row; mem
+					// gained no post beyond the seeded id 1.
+					if _, ok := mem.store[2]; ok {
+						t.Errorf("forbidden create persisted a row: %+v", mem.store[2])
+					}
+					for id, p := range mem.store {
+						if p.Title == "CreatedByMatrix" {
+							t.Errorf("forbidden create persisted the submitted title at id %d: %+v", id, p)
+						}
+					}
+				} else {
+					// Allowed create: the new row exists, authored by the actor.
+					created := mem.get(2)
+					if created.ID != 2 || created.Title != "CreatedByMatrix" {
+						t.Errorf("created row = %+v, want id 2 title CreatedByMatrix", created)
+					}
+				}
+			})
+		}
+	})
+
+	// ---- UPDATE cells (PUT /admin/api/posts/1, seeded author 1) ----
+	t.Run("update", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			ctx      context.Context
+			wantCode int
+			wantErr  string
+		}{
+			{
+				name:     "author as owner ok",
+				ctx:      authCtx(1, "author", auth.RoleAuthor),
+				wantCode: http.StatusOK,
+			},
+			{
+				name:     "author as other forbidden (lacks edit_others_posts)",
+				ctx:      authCtx(7, "author7", auth.RoleAuthor),
+				wantCode: http.StatusForbidden,
+				wantErr:  "forbidden",
+			},
+			{
+				name:     "editor as other ok (has edit_others_posts)",
+				ctx:      authCtx(7, "editor7", auth.RoleEditor),
+				wantCode: http.StatusOK,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				s, mem := seedServer()
+				before := mem.get(1)
+				body := `{"title":"UpdatedByMatrix","content":"<p>updated</p>","status":"draft","modified":"` + storedModified + `"}`
+				req := httptest.NewRequest(http.MethodPut, "/admin/api/posts/1", strings.NewReader(body)).WithContext(tc.ctx)
+				req = withURLParam(req, "id", "1")
+				rec := httptest.NewRecorder()
+				s.jsonHandler(s.adminPostUpdate).ServeHTTP(rec, req)
+
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d, body=%s", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantErr != "" {
+					assertJSONError(t, rec, tc.wantErr)
+					// No-state-change: the stored post is unchanged.
+					after := mem.get(1)
+					if after.Title != before.Title || after.Content != before.Content {
+						t.Errorf("forbidden update mutated the stored post: before=%+v after=%+v", before, after)
+					}
+				} else {
+					after := mem.get(1)
+					if after.Title != "UpdatedByMatrix" {
+						t.Errorf("allowed update did not persist; title = %q, want UpdatedByMatrix", after.Title)
+					}
+				}
+			})
+		}
+	})
+
+	// ---- DELETE cells (DELETE /admin/api/posts/{id}) ----
+	t.Run("delete", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			ctx      context.Context
+			id       string
+			wantCode int
+			wantErr  string
+			missing  bool // target a non-existent record
+		}{
+			{
+				name:     "author as owner deleted",
+				ctx:      authCtx(1, "author", auth.RoleAuthor),
+				id:       "1",
+				wantCode: http.StatusNoContent,
+			},
+			{
+				name:     "author as other forbidden (lacks delete_others_posts)",
+				ctx:      authCtx(7, "author7", auth.RoleAuthor),
+				id:       "1",
+				wantCode: http.StatusForbidden,
+				wantErr:  "forbidden",
+			},
+			{
+				name:     "editor as other deleted (has delete_others_posts)",
+				ctx:      authCtx(7, "editor7", auth.RoleEditor),
+				id:       "1",
+				wantCode: http.StatusNoContent,
+			},
+			{
+				// Consolidates TestAdminPostDeleteMissingRecordIsForbidden:
+				// PostWriteService maps a missing record to ErrForbidden (never
+				// ErrNotFound), so existence is not leaked.
+				name:     "missing record forbidden (not leaked as 404)",
+				ctx:      authCtx(1, "author", auth.RoleAuthor),
+				id:       "999",
+				wantCode: http.StatusForbidden,
+				wantErr:  "forbidden",
+				missing:  true,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				s, mem := seedServer()
+				req := httptest.NewRequest(http.MethodDelete, "/admin/api/posts/"+tc.id, nil).WithContext(tc.ctx)
+				req = withURLParam(req, "id", tc.id)
+				rec := httptest.NewRecorder()
+				s.jsonHandler(s.adminPostDelete).ServeHTTP(rec, req)
+
+				if rec.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d, body=%s", rec.Code, tc.wantCode, rec.Body.String())
+				}
+				if tc.wantErr != "" {
+					assertJSONError(t, rec, tc.wantErr)
+					if !tc.missing {
+						// No-state-change: a forbidden delete leaves the post present.
+						if _, ok := mem.store[1]; !ok {
+							t.Errorf("forbidden delete removed the stored post at id 1")
+						}
+					}
+				} else {
+					if _, ok := mem.store[1]; ok {
+						t.Errorf("allowed delete did not remove the stored post at id 1: %+v", mem.store[1])
+					}
+				}
+			})
+		}
+	})
+}

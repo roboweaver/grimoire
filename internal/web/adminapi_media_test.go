@@ -254,3 +254,173 @@ func TestAdminMediaUploadAuthorsAttachmentToActingAdmin(t *testing.T) {
 		t.Fatalf("stored attachment AuthorID = %d, want acting admin %d", got, adminUserID)
 	}
 }
+
+// newMediaUploadMultipart builds a multipart body carrying a minimal PNG
+// signature under the "file" field, so http.DetectContentType sniffs
+// image/png and the upload handler's MIME allowlist does not reject it. It
+// returns the body and the Content-Type header value the request must carry.
+func newMediaUploadMultipart(t *testing.T) (*bytes.Buffer, string) {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("file", "photo.png")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	// Minimal PNG signature so DetectContentType sniffs image/png.
+	if _, err := fw.Write([]byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}); err != nil {
+		t.Fatalf("write PNG signature: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("multipart close: %v", err)
+	}
+	return &body, mw.FormDataContentType()
+}
+
+// TestAdminMediaUploadCapabilityMatrix asserts the admin media upload route's
+// CURRENT authorization contract as a table-driven capability matrix, driven
+// through the real admin router (SessionMiddleware -> requireLoginJSON ->
+// requireCapabilityJSON -> adminMediaUpload). It is TEST-ONLY and passes
+// against the live handler with no new production code (Req 2.4, 2.6, 2.7;
+// Finding 3; D1).
+//
+// Finding 3 — DECISION B discrepancy (asserting OBSERVED behavior):
+// The spec's Finding 3 states the effective gate is edit_posts, wired at
+// adminroutes.go:84. The live router does NOT match that claim: the media
+// group is gated by requireCapabilityJSON("upload_files"), not edit_posts
+// (see internal/web/adminroutes.go, the `gr.Use(s.requireCapabilityJSON(
+// "upload_files"))` group mounting GET/POST /media and POST /media/{id}/
+// attach). Per the no-production-change rule, this matrix asserts the OBSERVED
+// gate (upload_files) rather than the claimed one. The three cells named in
+// the task (administrator 201, subscriber 403, anonymous 401) produce the same
+// outcomes under either capability because administrator holds BOTH caps and
+// subscriber holds NEITHER. To make the matrix actively prove which capability
+// gates the route, a fourth cell is added: a contributor principal, which
+// holds edit_posts but NOT upload_files (see internal/auth/roles.go
+// capabilitySets). Under the observed gate (upload_files) contributor is
+// forbidden (403); had the gate truly been edit_posts, contributor would have
+// been allowed (201). The contributor->403 assertion therefore distinguishes
+// the two and records the discrepancy as a potential Finding.
+//
+// Confirmed codes against current code:
+//   - success: 201 (adminMediaUpload's writeJSON(w, http.StatusCreated, ...)).
+//   - forbidden (authenticated, lacks capability): 403, envelope code
+//     "forbidden" (requireCapabilityJSON).
+//   - anonymous (no session principal): 401, envelope code "unauthorized"
+//     (requireLoginJSON runs first via r.Use, so the no-principal case is 401,
+//     NOT 403).
+func TestAdminMediaUploadCapabilityMatrix(t *testing.T) {
+	const actingUserID int64 = 7
+
+	cases := []struct {
+		name string
+		// roles is the principal's role set; nil means anonymous (no session
+		// cookie, no injected principal).
+		roles []string
+		// sendCSRF controls whether a valid X-CSRF-Token header is attached.
+		// Allowed cells must send it (the handler enforces CSRF after the
+		// gate); forbidden/anonymous cells are rejected at the gate before CSRF
+		// is ever checked, so it is irrelevant there.
+		sendCSRF    bool
+		wantCode    int
+		wantErrCode string // admin-JSON envelope error.code; "" for success
+		wantRows    int    // writer.created length after the request
+	}{
+		{
+			// administrator holds upload_files (and edit_posts): allowed -> 201.
+			name:     "administrator_holds_upload_files_allowed",
+			roles:    []string{auth.RoleAdministrator},
+			sendCSRF: true,
+			wantCode: http.StatusCreated,
+			wantRows: 1,
+		},
+		{
+			// author holds upload_files: allowed -> 201 (control confirming the
+			// gate is upload_files, which author has).
+			name:     "author_holds_upload_files_allowed",
+			roles:    []string{auth.RoleAuthor},
+			sendCSRF: true,
+			wantCode: http.StatusCreated,
+			wantRows: 1,
+		},
+		{
+			// DECISION B discriminator: contributor holds edit_posts but NOT
+			// upload_files. Observed gate is upload_files -> 403 forbidden. Had
+			// the gate been edit_posts (Finding 3's claim) this would be 201.
+			name:        "contributor_has_edit_posts_but_not_upload_files_forbidden",
+			roles:       []string{auth.RoleContributor},
+			sendCSRF:    true,
+			wantCode:    http.StatusForbidden,
+			wantErrCode: "forbidden",
+			wantRows:    0,
+		},
+		{
+			// subscriber holds neither upload_files nor edit_posts -> 403.
+			name:        "subscriber_lacks_upload_files_forbidden",
+			roles:       []string{auth.RoleSubscriber},
+			sendCSRF:    true,
+			wantCode:    http.StatusForbidden,
+			wantErrCode: "forbidden",
+			wantRows:    0,
+		},
+		{
+			// anonymous (no session) -> 401 unauthorized (requireLoginJSON).
+			name:        "anonymous_no_session_unauthorized",
+			roles:       nil,
+			sendCSRF:    false,
+			wantCode:    http.StatusUnauthorized,
+			wantErrCode: "unauthorized",
+			wantRows:    0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			writer := &authorCapturingMediaWriter{}
+			srv := NewServer(nil, nil, nil, nil, nil)
+			if tc.roles != nil {
+				srv.auth = fakeSessions{
+					p: auth.NewPrincipal(actingUserID, "acting", tc.roles),
+					s: domain.Session{CSRFToken: "token"},
+				}
+			}
+			srv.media = content.NewMediaService(&capturingMediaRepo{}, writer, content.MediaConfig{UploadsDir: t.TempDir(), BaseURL: "/wp-content/uploads"})
+
+			body, contentType := newMediaUploadMultipart(t)
+			r := srv.SessionMiddleware(srv.adminAPIRouter())
+			req := httptest.NewRequest(http.MethodPost, "/media", body)
+			req.Header.Set("Content-Type", contentType)
+			if tc.roles != nil {
+				// A session cookie is required for SessionMiddleware to resolve
+				// the fakeSessions principal into the request context.
+				req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "x"})
+			}
+			if tc.sendCSRF {
+				req.Header.Set("X-CSRF-Token", "token")
+			}
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body=%s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+
+			if tc.wantErrCode != "" {
+				var payload map[string]map[string]string
+				if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+					t.Fatalf("body not JSON envelope: %v (%s)", err, rec.Body.String())
+				}
+				if got := payload["error"]["code"]; got != tc.wantErrCode {
+					t.Fatalf("error.code = %q, want %q (%s)", got, tc.wantErrCode, rec.Body.String())
+				}
+			}
+
+			// No-state-change: every forbidden/unauthorized cell must leave the
+			// capturing writer untouched (zero Create calls); the allowed cell
+			// records exactly one row.
+			if len(writer.created) != tc.wantRows {
+				t.Fatalf("writer.created length = %d, want %d", len(writer.created), tc.wantRows)
+			}
+		})
+	}
+}

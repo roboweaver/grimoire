@@ -875,7 +875,7 @@ the read-only hierarchy M9b exposes.
 > Roadmap-depth requirements. Each is testable, but implementation does not
 > start from this document alone — see "Specification depth" above.
 
-### Requirement 28: Opt-in Sanitization Backfill
+### Requirement 28: Opt-in Sanitization Backfill  ✅ shipped (M14, PR #70)
 
 **User Story:** As a site owner who imported a WordPress database or ran
 grimoire before M10a, I want a way to retroactively sanitize content stored
@@ -899,7 +899,7 @@ post body is removed rather than left inert-but-present.
    identifying every modified row, so the operation is auditable and
    reversible-aware.
 
-### Requirement 29: M14 Exclusions and Test Coverage
+### Requirement 29: M14 Exclusions and Test Coverage  ✅ shipped (M14, PR #70)
 
 #### Acceptance Criteria
 

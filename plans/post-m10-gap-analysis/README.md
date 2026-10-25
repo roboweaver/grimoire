@@ -6,9 +6,9 @@
 > complete through its final group (M10.G). Each candidate below is a documented,
 > code-verified limitation of the current implementation, written up so a future
 > milestone can refine it into its own `requirements.md`/`design.md`/`tasks.md`.
-> **M11 (REST delete parity) has since been specified and merged** — see
-> [`../11-rest-delete-parity`](../11-rest-delete-parity) (PR #64). The remaining
-> candidates (M12–M16) are still open; pick one and spec it first.
+> **M11 (REST delete parity, PR #64) and M13 (term re-parenting, PR #67) have
+> since been specified and merged.** The remaining candidates (M12, M14, M15,
+> M16) are still open; pick one and spec it first.
 
 Every gap is traced to where it is already acknowledged in
 [`../../docs/compatibility.md`](../../docs/compatibility.md) or the root
@@ -51,7 +51,7 @@ database's own rows and/or configuration, since grimoire has no PHP
 single routing, and the capability model. Large; would likely split into
 read-first then write-parity sub-milestones.
 
-### M13 — Term re-parenting and hierarchy writes
+### M13 — Term re-parenting and hierarchy writes  ✅ shipped (`../13-term-reparenting`, PR #67)
 
 **Gap.** M9b *reads* `term_taxonomy.parent` into `domain.Term.ParentID`, but
 nothing *writes* it — no admin or REST path re-parents or nests a term
@@ -106,9 +106,9 @@ and documented.
 ## Recommended ordering
 
 1. ~~**M11 (REST delete)**~~ — ✅ shipped (PR #64).
-2. **M13 (term re-parenting)** — small, high-value, builds on M9b + M10.F. **Next.**
+2. ~~**M13 (term re-parenting)**~~ — ✅ shipped (PR #67).
 3. **M14 (sanitization backfill)** — closes the one standing security caveat
-   from M10a; CLI-only.
+   from M10a; CLI-only. **Next.**
 4. **M15 (hierarchical page URLs)** — completes WordPress routing parity.
 5. **M12 (custom post types/taxonomies)** — largest; the biggest real-site
    parity win, best tackled once the smaller gaps are closed.

@@ -821,6 +821,9 @@ term archives and term-scoped navigation keep working.
 
 ## M13 — Term Re-parenting & Hierarchy Writes Requirements
 
+> **✅ Shipped (M13, PR #67 — `plans/13-term-reparenting`).** Requirements 26–27 are
+> delivered; see that spec for the implementation-ready detail.
+
 > Roadmap-depth requirements. Each is testable, but implementation does not
 > start from this document alone — see "Specification depth" above.
 

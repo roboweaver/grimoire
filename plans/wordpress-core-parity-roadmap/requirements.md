@@ -24,6 +24,21 @@ milestones below are ordered accordingly:
 - **M10 — REST Write & Content Safety Parity**: a write-boundary content
   safety policy first, then REST media/user writes, then `content.rendered`
   rendering improvements.
+- **M11 — REST Delete Parity**: REST media and user delete over WordPress's
+  `force`/`reassign` contract, closing the last deferred write verb (✅ shipped).
+- **M12 — Custom Post Types & Taxonomies**: read-then-write parity for post
+  types and taxonomies beyond `post`/`page`/`category`/`post_tag`, sourced from
+  the database's own rows and configuration.
+- **M13 — Term Re-parenting & Hierarchy Writes**: a `parent` field on term
+  create/update, so an editor can nest and re-parent categories as in WordPress.
+- **M14 — Pre-M10a Content Sanitization Backfill**: an opt-in CLI that
+  retroactively applies M10a's sanitization policy to content stored before
+  M10a closed the write boundary.
+- **M15 — Hierarchical Page URLs**: serve child pages under their parent-page
+  ancestry (`/{parent}/{child}`) and `301` the flat/dated form to it.
+- **M16 — Archive Pagination Path-Form Parity**: WordPress's `/page/{n}/`
+  archive pagination and `?m=YYYYMM` date-query forms (optional, lowest
+  priority — the current `?page=N` behavior is correct and documented).
 
 ### Milestone numbering note
 
@@ -46,6 +61,16 @@ milestone-index row for this spec supersedes that forward reference.
   (new `requirements.md`/`design.md`/`tasks.md`, e.g. under
   `plans/09-routing-taxonomy-parity` and
   `plans/10-rest-write-content-safety-parity`) before implementation begins.
+- **M11 is fully specified and shipped** in its own
+  `plans/11-rest-delete-parity` spec (`requirements.md`/`design.md`/`tasks.md`,
+  merged via PR #64); Requirements 20–22 below record its delivered behavior at
+  roadmap depth and defer to that spec for the implementation-ready detail.
+- **M12–M16 are specified at roadmap depth**: each requirement below is still
+  testable and EARS-worded, but neither milestone's task list is bite-sized.
+  Each explicitly requires its own follow-up spec
+  (new `requirements.md`/`design.md`/`tasks.md`) before implementation begins —
+  the same posture M9 and M10 carried before they were refined into their own
+  specs.
 
 ### Compatibility boundary (applies to every requirement below)
 
@@ -56,6 +81,14 @@ milestone-index row for this spec supersedes that forward reference.
   `category`, `post_tag`), and full Gutenberg block-editor rendering. A
   requirement that would require executing untrusted plugin/theme PHP is out
   of scope by definition, since grimoire has no PHP runtime.
+- **M12 deliberately revisits this boundary.** Custom post types and custom
+  taxonomies move from "out of scope" to "a scoped future milestone": M12
+  (Requirements 23–25) sources a post-type/taxonomy registry from the
+  database's own rows and configuration — grimoire still has no PHP
+  `register_post_type` — rather than from executing plugin code. This is an
+  explicit, deliberate expansion of the boundary above, not a silent
+  contradiction of it; plugin/theme PHP execution remains permanently out of
+  scope regardless of M12.
 - UI acceptance is **behavioral parity with the WordPress workflow**,
   evaluated with a side-by-side visual review at desktop and mobile sizes —
   not pixel-identical output, and Adobe React Spectrum remains the admin
@@ -613,3 +646,360 @@ WordPress's rendering conventions.
    file-level, bite-sized tasks, per "Specification depth" above, with the
    content-safety policy (Requirement 15) implemented and reviewed *before*
    Requirements 16–17's write endpoints are enabled.
+
+---
+
+## M11 — REST Delete Parity Requirements
+
+> Fully specified and shipped in its own `plans/11-rest-delete-parity` spec
+> (PR #64). The requirements below record M11's delivered behavior at roadmap
+> depth; see that spec for the implementation-ready acceptance criteria.
+
+### Requirement 20: REST Media Delete
+
+**User Story:** As an integrator using WordPress REST tooling against a
+grimoire site, I want to delete an attachment through
+`DELETE /wp-json/wp/v2/media/{id}`, so that existing WordPress media clients
+can remove media unchanged.
+
+#### Acceptance Criteria
+
+1. WHEN a caller authorized by per-attachment ownership (`delete_posts` for an
+   attachment whose stored `post_author` equals the caller's user ID,
+   `delete_others_posts` otherwise) sends `DELETE /wp-json/wp/v2/media/{id}`
+   with `force=true` for an existing attachment THE system SHALL hard-delete
+   the attachment — removing its `{prefix}posts` row, every `{prefix}postmeta`
+   row, every `{prefix}term_relationships` row, and the on-disk file backing it
+   (the `_wp_attached_file` path under the uploads directory) — and SHALL
+   respond `200` with the envelope `{"deleted": true, "previous": <object>}`,
+   where `previous` is the attachment representation a `GET` of the same ID
+   would have returned immediately before deletion.
+2. IF a `DELETE /wp-json/wp/v2/media/{id}` request omits `force=true` THEN THE
+   system SHALL respond `400` with code `rest_trash_not_supported` and SHALL
+   NOT delete the attachment, its metadata, its term relationships, or its
+   on-disk file, because attachments have no trash lifecycle.
+3. IF the caller lacks the required per-attachment capability (including an
+   unauthenticated caller) THEN THE system SHALL respond `403` with code
+   `rest_cannot_delete` and SHALL NOT delete anything, evaluating the capability
+   against the stored `post_author` row, never a value taken from the request.
+4. IF the `{id}` path segment does not resolve to a positive integer or to an
+   existing attachment THEN THE system SHALL respond `404` and SHALL NOT delete
+   anything.
+
+✅ Shipped (M11, PR #64 — `plans/11-rest-delete-parity`).
+
+### Requirement 21: REST User Delete
+
+**User Story:** As a site administrator using the WordPress REST API, I want to
+delete a user through `DELETE /wp-json/wp/v2/users/{id}`, so that existing
+WordPress user-management tooling can remove users unchanged.
+
+#### Acceptance Criteria
+
+1. WHEN a caller holding `delete_users` sends `DELETE /wp-json/wp/v2/users/{id}`
+   with `force=true` and a valid `reassign` parameter for an existing user whose
+   ID differs from the caller's own THE system SHALL delete the user — removing
+   the `{prefix}users` row and its `{prefix}usermeta` — and SHALL reassign or
+   delete that user's authored content transactionally per `reassign`, then SHALL
+   respond `200` with the envelope `{"deleted": true, "previous": <object>}`,
+   where `previous` is the edit-context user representation a `GET` of the same
+   ID would have returned immediately before deletion.
+2. IF a `DELETE /wp-json/wp/v2/users/{id}` request omits `force=true` THEN THE
+   system SHALL respond `400` with code `rest_trash_not_supported` and SHALL NOT
+   delete the user or alter any authored content, because users have no trash
+   lifecycle.
+3. IF the `reassign` parameter is absent, is neither `false` nor a parseable
+   positive integer, or is an ID that does not resolve to an existing user THEN
+   THE system SHALL respond `400` with code `rest_user_invalid_reassign` and
+   SHALL NOT delete the user; WHEN `reassign=<id>` resolves to an existing user
+   THE system SHALL reassign the deleted user's authored `{prefix}posts` rows to
+   that user, and WHEN `reassign=false` THE system SHALL delete the user's
+   authored content, all within a single transaction.
+4. IF the caller lacks `delete_users` (including an unauthenticated caller), or
+   targets their own resolved user ID THEN THE system SHALL respond `403` with
+   code `rest_user_cannot_delete` and SHALL NOT delete anything.
+5. THE collection-level `DELETE /wp-json/wp/v2/users` route SHALL continue to
+   respond `501`, unchanged.
+
+✅ Shipped (M11, PR #64 — `plans/11-rest-delete-parity`).
+
+### Requirement 22: M11 Exclusions and Test Coverage
+
+#### Acceptance Criteria
+
+1. Collection-level delete, bulk delete (deleting multiple media or users in one
+   request), and the admin-UI delete surfaces (`internal/web/adminapi_*`) SHALL
+   remain out of scope for M11; this milestone enables only the two `wp-json`
+   REST `DELETE` verbs on `/media/{id}` and `/users/{id}`.
+2. Every delete route SHALL be covered by a capability-matrix test (allowed vs.
+   forbidden caller, including the per-attachment ownership split for media and
+   the self-delete `403` for users) and a behavior test proving the `force`,
+   `reassign`, envelope, and storage-round-trip contracts above.
+3. M11 had its own `requirements.md`/`design.md`/`tasks.md` — the
+   `plans/11-rest-delete-parity` spec, already shipped via PR #64 — refining
+   Requirements 20–21 into concrete, file-level, bite-sized tasks, per
+   "Specification depth" above.
+
+✅ Shipped (M11, PR #64 — `plans/11-rest-delete-parity`).
+
+---
+
+## M12 — Custom Post Types & Taxonomies Requirements
+
+> Roadmap-depth requirements. Each is testable, but implementation does not
+> start from this document alone — see "Specification depth" above.
+
+### Requirement 23: Custom Post Type Read, Routing, and REST
+
+**User Story:** As a site owner whose WordPress database contains custom post
+types (rows with a `post_type` beyond `post`/`page`), I want grimoire to serve
+them the way it serves posts and pages, so that a real-site import does not lose
+its custom content.
+
+#### Acceptance Criteria
+
+1. WHEN grimoire starts THE system SHALL build a registry of known post types
+   sourced from the database's own rows and configuration (the system has no PHP
+   `register_post_type`), rather than from the hard-coded
+   `post_type IN ('post','page')` filter in
+   `internal/storage/wprepo/adminreads.go` and the `post_type = 'post'` filter
+   in `internal/storage/wprepo/repo.go`.
+2. WHEN a registered custom post type is marked publicly queryable THE system
+   SHALL serve its archive and single routes using the same permalink-structure
+   and pagination machinery M8/M9 already apply to posts and pages.
+3. WHEN a REST client requests a registered custom post type's collection or
+   single route under `/wp-json/wp/v2/{rest_base}` THE system SHALL serve read
+   responses in the same envelope shape used for posts, pages, and media.
+4. THE system SHALL gate every custom-post-type read and write on the capability
+   model derived from that type's registry entry, defaulting to the
+   post/page capability set when the registry does not specify otherwise.
+
+### Requirement 24: Custom Taxonomy Read, Routing, and REST
+
+**User Story:** As a site owner whose WordPress database contains custom
+taxonomies (terms in a taxonomy beyond `category`/`post_tag`), I want grimoire
+to serve those taxonomies the way it serves categories and tags, so that custom
+term archives and term-scoped navigation keep working.
+
+#### Acceptance Criteria
+
+1. WHEN grimoire starts THE system SHALL extend the post-type registry
+   (Requirement 23.1) with the known taxonomies sourced from the database's own
+   `{prefix}term_taxonomy` rows and configuration, rather than from the
+   hard-coded `category`/`post_tag` handling.
+2. WHEN a registered custom taxonomy is marked publicly queryable THE system
+   SHALL serve its term archive routes using the same base-segment,
+   nested-hierarchy, and pagination machinery M9 applies to categories and tags.
+3. WHEN a REST client requests a registered custom taxonomy's terms under
+   `/wp-json/wp/v2/{rest_base}` THE system SHALL serve read responses in the
+   same envelope shape used for categories and tags.
+4. THE system SHALL read a custom taxonomy's `term_taxonomy.parent` into the
+   `domain.Term` parent reference exactly as M9b does for categories, so nested
+   custom-taxonomy terms resolve the same way.
+
+### Requirement 25: M12 Exclusions and Test Coverage
+
+#### Acceptance Criteria
+
+1. Executing arbitrary plugin or theme PHP to discover or register post
+   types/taxonomies SHALL remain permanently out of scope; M12's registry SHALL
+   derive only from the database's own rows and from grimoire configuration.
+2. M12's read, routing, and REST behavior SHALL be covered by cross-vendor
+   repository contract tests and by at least one fixture-based test against an
+   imported real-WordPress-database export that contains a custom post type and
+   a custom taxonomy, mirroring the real-WordPress-DB validation approach from
+   `plans/02.1-wp-hash-real-db`.
+3. Before implementation, M12 SHALL have its own `requirements.md`/
+   `design.md`/`tasks.md` refining Requirements 23–24 into concrete,
+   file-level, bite-sized tasks, per "Specification depth" above, split into a
+   read-first group and a later write-parity group. That spec SHALL record that
+   M12 deliberately expands the compatibility boundary (custom post
+   types/taxonomies move from "out of scope" to "a scoped milestone"), per the
+   Compatibility boundary note above.
+
+---
+
+## M13 — Term Re-parenting & Hierarchy Writes Requirements
+
+> Roadmap-depth requirements. Each is testable, but implementation does not
+> start from this document alone — see "Specification depth" above.
+
+### Requirement 26: Term Parent Write
+
+**User Story:** As a content editor, I want to set and change a category's
+parent through the admin API and the REST API, so that I can nest and
+re-organize my taxonomy the way WordPress lets me, instead of being limited to
+the read-only hierarchy M9b exposes.
+
+#### Acceptance Criteria
+
+1. WHEN a caller holding `manage_categories` creates or updates a term through
+   the admin API or `POST /wp-json/wp/v2/categories` with a `parent` field THE
+   system SHALL write `term_taxonomy.parent` for that term, building on M9b's
+   read of `term_taxonomy.parent` into `domain.Term.ParentID` and M10.F's
+   write-group pattern.
+2. IF a requested `parent` value would create a cycle (a term made a descendant
+   of itself, directly or transitively) THEN THE system SHALL reject the write
+   and SHALL leave the existing hierarchy unchanged.
+3. WHEN a term is re-parented THE system SHALL keep descendant-aware post counts
+   and the `EXISTS`-semijoin archive semantics M9b established correct, so that a
+   parent archive's pagination totals and single-post-appears-once guarantee
+   continue to hold after re-parenting.
+4. IF the caller lacks `manage_categories` THEN THE system SHALL respond with the
+   same forbidden-write status its REST/admin write siblings use and SHALL NOT
+   alter any term's parent.
+
+### Requirement 27: M13 Exclusions and Test Coverage
+
+#### Acceptance Criteria
+
+1. Term create/update for taxonomies beyond those grimoire already models SHALL
+   follow M12's registry rather than being introduced ad hoc by M13; M13's scope
+   is the `parent` write on already-modeled hierarchical taxonomies
+   (`category`).
+2. M13's re-parenting behavior SHALL be covered by cross-vendor repository
+   contract tests (including the cycle-prevention and count-correctness cases)
+   and by REST/admin handler tests exercising the `manage_categories` gate.
+3. Before implementation, M13 SHALL have its own `requirements.md`/
+   `design.md`/`tasks.md` refining Requirement 26 into concrete, file-level,
+   bite-sized tasks, per "Specification depth" above, building directly on
+   M9b's read model and M10.F's write-group pattern.
+
+---
+
+## M14 — Pre-M10a Content Sanitization Backfill Requirements
+
+> Roadmap-depth requirements. Each is testable, but implementation does not
+> start from this document alone — see "Specification depth" above.
+
+### Requirement 28: Opt-in Sanitization Backfill
+
+**User Story:** As a site owner who imported a WordPress database or ran
+grimoire before M10a, I want a way to retroactively sanitize content stored
+before the write boundary was closed, so that a pre-M10a stored `<script>` in a
+post body is removed rather than left inert-but-present.
+
+#### Acceptance Criteria
+
+1. WHEN an operator runs an opt-in `grimoire-cli` backfill command THE system
+   SHALL walk `{prefix}posts`, apply M10a's tier-B sanitization policy to each
+   row's `post_content` and `post_excerpt`, and report what it would change —
+   the command SHALL NEVER run automatically as part of normal operation,
+   because it mutates a database grimoire may not own.
+2. WHEN the backfill command is run without an explicit apply flag THE system
+   SHALL perform a dry run that reports the rows and fields it would rewrite and
+   SHALL NOT modify any row.
+3. WHEN the backfill is applied and then run a second time THE system SHALL make
+   no further changes on the second run (idempotent), because already-sanitized
+   content is a fixed point of the tier-B policy.
+4. WHEN the backfill applies changes THE system SHALL produce a report
+   identifying every modified row, so the operation is auditable and
+   reversible-aware.
+
+### Requirement 29: M14 Exclusions and Test Coverage
+
+#### Acceptance Criteria
+
+1. M14 SHALL add no new web surface: it is a `grimoire-cli` command plus reuse
+   of M10a's existing sanitization policy, and SHALL NOT change any HTTP handler
+   or render path.
+2. M14's backfill behavior SHALL be covered by cross-vendor repository contract
+   tests proving the walk, the tier-B application, idempotence (a second run is
+   a no-op), and the dry-run-makes-no-changes guarantee.
+3. Before implementation, M14 SHALL have its own `requirements.md`/
+   `design.md`/`tasks.md` refining Requirement 28 into concrete, file-level,
+   bite-sized tasks, per "Specification depth" above.
+
+---
+
+## M15 — Hierarchical Page URLs Requirements
+
+> Roadmap-depth requirements. Each is testable, but implementation does not
+> start from this document alone — see "Specification depth" above.
+
+### Requirement 30: Nested Page Routing
+
+**User Story:** As a site owner with a nested page structure in WordPress (e.g.
+"About > Team"), I want grimoire to serve child pages under their parent-page
+ancestry, so that a child page's URL matches WordPress's
+`/{parent-slug}/{child-slug}` form instead of the flat or dated permalink.
+
+#### Acceptance Criteria
+
+1. THE system SHALL walk `post_parent` on `page` rows to build each page's
+   canonical nested path (`/{parent}/{child}`), reconciling the M9a divergence
+   recorded in `docs/compatibility.md` ("Pages follow the post structure"),
+   where pages are currently served at the configured permalink structure rather
+   than under their parent-page ancestry.
+2. WHEN a page has one or more ancestors THE system SHALL serve it at its nested
+   canonical path and SHALL `301` the flat and dated permalink forms to that
+   canonical path, preserving the query string, mirroring M9b's nested-category
+   redirect behavior.
+3. IF the parent walk encounters an orphaned parent or a cycle THEN THE system
+   SHALL degrade safely (terminating the walk and serving the shorter resolvable
+   path) rather than hanging or erroring, mirroring M9b's corrupted-hierarchy
+   handling.
+4. WHEN a page has no parent THE system SHALL serve it exactly as today, with no
+   change to top-level page URLs.
+
+### Requirement 31: M15 Exclusions and Test Coverage
+
+#### Acceptance Criteria
+
+1. M15's scope is `page`-row nesting over `post_parent`; hierarchical URLs for
+   custom post types SHALL follow M12's registry rather than being introduced by
+   M15.
+2. M15's nested-page routing SHALL be covered by cross-vendor repository
+   contract tests for the `post_parent` walk and by handler tests covering the
+   canonical `200`, the flat/dated `301`, and the corrupted-hierarchy
+   degradation, plus at least one fixture-based test against an imported
+   real-WordPress-database export, mirroring M9b's nested-category validation.
+3. Before implementation, M15 SHALL have its own `requirements.md`/
+   `design.md`/`tasks.md` refining Requirement 30 into concrete, file-level,
+   bite-sized tasks, per "Specification depth" above, paralleling M9b's
+   nested-category walk but over `post_parent` instead of `term_taxonomy.parent`.
+
+---
+
+## M16 — Archive Pagination Path-Form Parity Requirements
+
+> Roadmap-depth requirements. Each is testable, but implementation does not
+> start from this document alone — see "Specification depth" above. This
+> milestone is the lowest priority in the roadmap and is optional.
+
+### Requirement 32: `/page/{n}/` and `?m=` Archive Forms
+
+**User Story:** As a site owner who wants byte-for-byte URL parity with
+WordPress, I want archive pagination served at `/page/{n}/` and date queries
+served via `?m=YYYYMM`, so that links using WordPress's own path forms resolve
+without a redirect.
+
+#### Acceptance Criteria
+
+1. WHERE `/page/{n}/`-form archive pagination parity is explicitly enabled THE
+   system SHALL serve archive pagination at `/page/{n}/` in addition to the
+   current `?page=N` form, disambiguating the `page` segment from a child term
+   slugged `page` (e.g. by reserving the segment or a structure-aware classifier
+   rule), the ambiguity `docs/compatibility.md` records as the reason the
+   `?page=N` form was chosen.
+2. WHERE the `?m=YYYYMM` date-query form is explicitly enabled THE system SHALL
+   resolve it to the corresponding date archive, matching WordPress's
+   plain-permalink date-query behavior.
+3. THE current `?page=N` archive pagination behavior SHALL remain correct and
+   supported; M16 adds path-form parity rather than replacing the query form,
+   which `docs/compatibility.md` documents as a deliberate, correct divergence.
+
+### Requirement 33: M16 Exclusions and Test Coverage
+
+#### Acceptance Criteria
+
+1. M16 SHALL be undertaken only if `/page/{n}/`-form archive pagination parity
+   is explicitly wanted; absent that explicit decision, the current `?page=N`
+   behavior stands as the documented, correct form and no M16 work is required.
+2. M16's path-form behavior SHALL be covered by handler tests proving the
+   `/page/{n}/` and `?m=YYYYMM` forms resolve correctly, that the `page` segment
+   is disambiguated from a child term slugged `page`, and that the existing
+   `?page=N` form continues to work unchanged.
+3. Before implementation, M16 SHALL have its own `requirements.md`/
+   `design.md`/`tasks.md` refining Requirement 32 into concrete, file-level,
+   bite-sized tasks, per "Specification depth" above.

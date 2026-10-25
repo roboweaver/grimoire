@@ -22,6 +22,17 @@
 > item below carries its shipped-via note. The historical framing in this file —
 > that each group requires its own spec before code — was honored: every group
 > got one.
+>
+> **M11–M16 folded in from the post-M10 gap analysis.** The candidate milestones
+> M11–M16 drafted in [`../post-m10-gap-analysis/README.md`](../post-m10-gap-analysis/README.md)
+> are now part of this roadmap so it is the single source of truth again.
+> **M11 (REST delete parity) is complete** — shipped via its own dedicated spec
+> [`../11-rest-delete-parity`](../11-rest-delete-parity) (PR #64), its box below
+> ticked with a shipped-via note. **M12–M16 are open roadmap-level task groups,
+> each requiring its own dedicated spec** (`requirements.md`/`design.md`/
+> `tasks.md`) before implementation begins — the same posture M8/M9/M10 carried
+> here before each was refined into its own spec; this file does not authorize
+> writing M12–M16 application code.
 
 This file is the actionable roadmap for M8/M9/M10. M8's tasks are
 implementation-ready: each cites exact files, exact existing symbols, and
@@ -890,3 +901,133 @@ Security Considerations section).
       wording must be reconciled in the same design, along with a
       `NeedsRehash` upgrade policy for existing bcrypt rows.
       (Shipped via the `10.6-wp-hash-issuance` spec (PR #59, `75db2d3`): `password.Hash` now issues WordPress 6.8 `$wp$` via `HashWP`, and `NeedsRehash` upgrades legacy bcrypt/phpass rows to `$wp$` on login. This supersedes 10.C's single-hash-scheme wording: `$wp$` replaces bcrypt as the one issued scheme.)
+
+---
+
+## M11 — REST Delete Parity (roadmap-level task groups)
+
+M11 closes the last deferred REST write verb — `DELETE` — on both the media
+and users endpoints. Shipped via its own dedicated spec; the group below is
+ticked with a shipped-via note.
+
+- [x] **11.A — REST media + user delete.** Replace the two
+      `restNotImplemented` `501` `DELETE` stubs — `DELETE /media/{id}`
+      (`internal/web/rest_media.go:51`) and `DELETE /users/{id}`
+      (`internal/web/rest_users.go:50`) — with real handlers over two new
+      domain ports, `domain.MediaWriter.Delete(ctx, id)` and
+      `domain.UserRepository.Delete(ctx, id, reassignTo)`, implemented in
+      `internal/storage/wprepo` mirroring the existing `PostWriter.Delete`
+      pattern (`internal/domain/repository.go:440`). Media is a hard delete
+      requiring `force=true` (else `400 rest_trash_not_supported`), gated by
+      per-attachment `post_author` ownership via `auth.CanDeletePost`
+      (`delete_posts`/`delete_others_posts`), removing the `{prefix}posts` row,
+      `{prefix}postmeta`, `{prefix}term_relationships`, and the on-disk
+      `_wp_attached_file` under `MediaConfig.UploadsDir`. User delete requires
+      `force=true` plus a `reassign` parameter (id or `false`, else
+      `400 rest_user_invalid_reassign`), gated by `delete_users` via
+      `auth.CanDeleteUsers` with a self-delete `403 rest_user_cannot_delete`
+      guard, performing the reassign-or-delete of authored content and the user
+      removal in one transaction. Both return `{"deleted":true,"previous":<object>}`;
+      collection-level `DELETE` stays `501`.
+      (Shipped via the `11-rest-delete-parity` spec (PR #64, `d40671b`): `MediaWriter.Delete`/`UserRepository.Delete` domain ports + wprepo impls, `MediaWriteService.Delete`/`UserService.Delete`, and the two REST handlers — media per-attachment `CanDeletePost` gate with on-disk file unlink, user `reassign` (id or `false`) with self-delete/`delete_users` guards and transactional reassign-or-delete, the `{"deleted":true,"previous":...}` envelope; collection-level DELETE left `501`. Capability-matrix + behavior + storage-round-trip tests, SQLite-only, no new dependency.)
+
+---
+
+## M12 — Custom Post Types & Taxonomies (roadmap-level task groups)
+
+M12 is the largest parity gap against real WordPress sites, which routinely
+register custom post types and taxonomies. Each group below requires M12's own
+dedicated spec before implementation; M12 deliberately expands the
+compatibility boundary (see `requirements.md`'s Compatibility boundary note).
+
+- [ ] **12.A — Custom post type / taxonomy read + routing.** Replace the
+      hard-coded `post_type IN ('post','page')` admin filter
+      (`internal/storage/wprepo/adminreads.go:118`) and the
+      `post_type = 'post'` public filter (`internal/storage/wprepo/repo.go:93`),
+      and the hard-coded `category`/`post_tag` taxonomy handling, with a registry
+      of known post types and taxonomies sourced from the database's own
+      `{prefix}posts`/`{prefix}term_taxonomy` rows and grimoire configuration
+      (grimoire has no PHP `register_post_type`). Serve publicly-queryable
+      types' archive and single routes, and taxonomies' term archives, through
+      the existing M8/M9 permalink-structure, nested-hierarchy
+      (`term_taxonomy.parent`/`domain.Term.ParentID`), and pagination machinery.
+- [ ] **12.B — Custom post type / taxonomy REST read.** Serve registered custom
+      post types and taxonomies under `/wp-json/wp/v2/{rest_base}` in the same
+      envelope shapes used for posts, pages, media, categories, and tags, gated
+      on each registry entry's capability model (defaulting to the post/page set).
+- [ ] **12.C — Custom post type / taxonomy write.** Enable REST and admin-API
+      create/update for registered custom post types and taxonomies over the
+      existing writer ports, passed through M10a's sanitization policy at the
+      write boundary, following the M10.B/M10.C/M10.F write-group pattern. This
+      is the later write-parity half; 12.A/12.B land read-first.
+
+---
+
+## M13 — Term Re-parenting (roadmap-level task groups)
+
+M13 is small, high-value, and builds directly on M9b's read model and M10.F's
+write-group pattern. The group below requires M13's own dedicated spec before
+implementation.
+
+- [ ] **13.A — Term parent write.** Add a `parent` field to term create/update
+      through the admin API and `POST /wp-json/wp/v2/categories`, writing
+      `term_taxonomy.parent` for the term — the column M9b already *reads* into
+      `domain.Term.ParentID` (`internal/storage/wprepo/repo.go`'s term reads) but
+      nothing writes. Prevent cycles (a term made its own descendant), keep
+      descendant-aware post counts and the `EXISTS`-semijoin archive semantics
+      M9b established correct under re-parenting, and gate on `manage_categories`,
+      following M10.F's write-group pattern (new `edit`-style admin-API group plus
+      the REST handler).
+
+---
+
+## M14 — Content Sanitization Backfill (roadmap-level task groups)
+
+M14 closes the one standing security caveat from M10a — M10a "closes the inflow;
+it does not drain the pool." CLI-only, no new web surface. The group below
+requires M14's own dedicated spec before implementation.
+
+- [ ] **14.A — Opt-in backfill CLI.** Add an opt-in `grimoire-cli` command that
+      walks `{prefix}posts`, applies M10a's tier-B sanitization policy
+      (`internal/sanitize`) to each row's `post_content`/`post_excerpt`, and
+      rewrites rows — dry-run-first (no apply without an explicit flag),
+      idempotent (a second run is a no-op), and producing an auditable report.
+      It SHALL never run automatically: it mutates a database grimoire may not
+      own, so it must be explicit and reversible-aware. No HTTP handler or render
+      path changes.
+
+---
+
+## M15 — Hierarchical Page URLs (roadmap-level task groups)
+
+M15 completes WordPress routing parity by serving child pages under their
+parent-page ancestry. It parallels M9b's nested-category walk but over
+`post_parent`. The group below requires M15's own dedicated spec before
+implementation.
+
+- [ ] **15.A — Nested page routing.** Walk `post_parent` on `page` rows to build
+      each page's canonical nested path (`/{parent}/{child}`), serve pages there
+      as canonical, and `301` the flat/dated permalink form to it (preserving the
+      query string), reconciling the M9a "pages follow the post structure"
+      divergence recorded in `docs/compatibility.md`. Degrade safely on an
+      orphaned parent or a parent cycle (terminate the walk, serve the shorter
+      resolvable path), mirroring M9b's corrupted-hierarchy handling; top-level
+      pages are served unchanged.
+
+---
+
+## M16 — Archive Pagination Path-Form (roadmap-level task groups)
+
+M16 is optional and the lowest priority in the roadmap — the current `?page=N`
+archive pagination is correct and documented. The group below requires M16's own
+dedicated spec before implementation, and is undertaken only if `/page/{n}/`
+parity is explicitly wanted.
+
+- [ ] **16.A — /page/{n}/ + ?m= forms.** *(Optional, lowest priority.)* Serve
+      `/page/{n}/`-form archive pagination in addition to the current `?page=N`
+      form, disambiguating the `page` segment from a child term slugged `page`
+      (e.g. reserving the segment or a structure-aware classifier rule in
+      `internal/routing`) — the ambiguity `docs/compatibility.md` records as the
+      reason `?page=N` was chosen — and resolve the `?m=YYYYMM` date-query form
+      to the corresponding date archive. The existing `?page=N` behavior stays
+      correct and supported; M16 adds path-form parity rather than replacing it.

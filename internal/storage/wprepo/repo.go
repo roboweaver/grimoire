@@ -330,7 +330,19 @@ func (r *PostRepo) UpdateContentFields(ctx context.Context, id int64, content, e
 	if err != nil {
 		return err
 	}
-	return errNotFoundIfZero(res)
+	// errNotFoundIfMissing (not errNotFoundIfZero) because MySQL's default
+	// driver reports RowsAffected=0 for a matched-but-unchanged UPDATE — the
+	// idempotent case where a row's content is rewritten to the tier-B value it
+	// already holds (Req 5). SQLite/PostgreSQL report 1 for that same no-op, so
+	// the naive zero-rows check would 404 a legitimate idempotent rewrite on
+	// MySQL specifically. Consult existence of the {prefix}posts row to tell a
+	// genuine missing ID from a value-unchanged update.
+	return errNotFoundIfMissing(ctx, res, func(ctx context.Context) (bool, error) {
+		return r.db.NewSelect().
+			TableExpr("?", bun.Ident(r.prefix+"posts")).
+			Where("? = ?", bun.Ident("ID"), id).
+			Exists(ctx)
+	})
 }
 
 // TermRepo resolves taxonomy terms.

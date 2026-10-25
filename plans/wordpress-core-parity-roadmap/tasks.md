@@ -719,7 +719,7 @@ them. Every group in this section is therefore closed.
     env-gated real-WordPress-database checks
     (`internal/routing/realdb_test.go`, `test/e2e/m9_permalinks_realdb_test.go`,
     both on `GRIMOIRE_TEST_WP_DSN`) — and both of those have now passed against a
-    live WordPress database (the `accuweaverllc/scripts` podman stack: MySQL 8.0,
+    live WordPress database (a local Podman dev stack: MySQL 8.0,
     prefix `accuweaver`, structure `/%year%/%monthnum%/%day%/%postname%/`, 145
     published posts; 25 real permalinks validated in the routing check, 5
     end-to-end). Still missing at that point: the cross-vendor `Term.ParentID`
@@ -744,8 +744,8 @@ them. Every group in this section is therefore closed.
     `internal/routing.TestRealWordPressNestedCategories` plus
     `test/e2e.TestM9bNestedCategoriesRealDBE2E`, on M9a's existing
     `GRIMOIRE_TEST_WP_DSN`/`GRIMOIRE_TEST_WP_PREFIX` gating — no new mechanism —
-    and both **have now passed against the live WordPress database** (same
-    `accuweaverllc/scripts` podman stack, MySQL 8.0, prefix `accuweaver`,
+    and both **have now passed against the live WordPress database** (the same
+    local Podman dev stack, MySQL 8.0, prefix `accuweaver`,
     structure `/%year%/%monthnum%/%day%/%postname%/`, `category_base` empty so
     it resolves to the default `category`): **33 category terms, 28 nested, all
     33 derived paths round-tripped through `Classify`** — each derived

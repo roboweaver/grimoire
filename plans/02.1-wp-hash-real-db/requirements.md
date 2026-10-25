@@ -6,7 +6,8 @@ M2 gave grimoire password authentication against WordPress phpass (`$P$`/`$H$`)
 and bcrypt (`$2y$`/`$2a$`) hashes, transparently upgrading legacy phpass to bcrypt
 on login. M2 **explicitly deferred** WordPress 6.8+'s new `$wp$`-prefixed hashes.
 
-Restoring a **real** WordPress 7.1 database (accuweaver.com, 118,958 users) into
+Restoring a **real** WordPress 7.1 database (the restored production site,
+118,958 users) into
 local MariaDB and pointing grimoire at it surfaced the cost of that deferral. A
 hash-format census of the real `{prefix}users` table:
 

@@ -230,7 +230,7 @@ in-page with a placeholder domain (`wordpress.example.test` /
 in most fields; the one exception is the WordPress response's stored
 `guid.rendered` value, which is emitted verbatim as originally recorded in
 the database and was not part of the capture-time substitution, so it still
-shows the original database host (`accuweaver.com`) rather than the
+shows the original production host of the restored site rather than the
 placeholder domain — disclosed here rather than silently edited, to keep
 the displayed JSON faithful to what the server actually returns. Aside from
 that one field, all other JSON structure and values are exactly as returned

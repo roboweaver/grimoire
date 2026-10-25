@@ -306,8 +306,8 @@ so the SEO posture is the requirement rather than a side effect:
 5. **Real-WordPress fixture, env-gated** — mirrors
    `../02.1-wp-hash-real-db`'s approach: skipped unless a DSN env var is set, so
    CI stays hermetic. Verifies against real data shapes, specifically a dated
-   structure and a non-default table prefix, since the podman stack in
-   `accuweaverllc/scripts` provides exactly that (`accuweaver` prefix,
+   structure and a non-default table prefix, since a local Podman dev stack
+   provides exactly that (`accuweaver` prefix,
    `/%year%/%monthnum%/%day%/%postname%/`).
 
 ## Traceability

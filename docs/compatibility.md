@@ -325,8 +325,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     of scope, unchanged by this milestone. Editing a term's parent is still
     not possible: M9b adds a read path.
 
-  Validated read-only against the reference WordPress database (the
-  `accuweaverllc/scripts` podman stack, MySQL 8.0, `permalink_structure`
+  Validated read-only against a reference WordPress database (a local
+  Podman dev stack, MySQL 8.0, `permalink_structure`
   `/%year%/%monthnum%/%day%/%postname%/`, `category_base` empty): **33
   category terms, 28 of them nested**, every one of the 33 derived paths
   round-tripping back through the classifier to the same segments and the

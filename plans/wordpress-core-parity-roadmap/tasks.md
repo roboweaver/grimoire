@@ -17,9 +17,11 @@
 > what shipped. 9.E was ticked last, after 9.D, because the cross-vendor
 > `Term.ParentID` coverage it asks for depends on it. M9 now has no open group.
 >
-> **M10 is deliberately unticked** — that is accurate, not drift. None of it has
-> been implemented, and it still requires its own spec before any code, as the
-> M10 section below states.
+> **M10 is complete.** All seven milestones (10.A–10.G) shipped via their own
+> dedicated specs under `plans/10.*` and are merged to `main` (PRs #53–#59); each
+> item below carries its shipped-via note. The historical framing in this file —
+> that each group requires its own spec before code — was honored: every group
+> got one.
 
 This file is the actionable roadmap for M8/M9/M10. M8's tasks are
 implementation-ready: each cites exact files, exact existing symbols, and
@@ -806,7 +808,7 @@ Security Considerations section).
       bluemonday + golang.org/x/net/html) applied at the comment and
       admin/REST post write boundaries, post_title reduced to plain text,
       comment render backstop. Groups 10.B–10.G remain open.)
-- [ ] **10.B — REST media write parity.** Replace
+- [x] **10.B — REST media write parity.** Replace
       `restNotImplemented` registrations in `internal/web/rest_media.go`
       for `POST /media` (create) and `PUT`/`PATCH`/`POST /media/{id}`
       (update — WordPress's REST API accepts `POST` as an update verb on
@@ -821,7 +823,8 @@ Security Considerations section).
       criteria) — its `restNotImplemented` registration SHALL remain
       unchanged, continuing to respond `501`, not be silently reinterpreted
       as a create/update path.
-- [ ] **10.C — REST user write parity.** Replace `restNotImplemented`
+      (Shipped via the `10.1-rest-media-write` spec (PR #54, `e6f1528`): real `POST /media` binary-upload create and `PUT`/`PATCH`/`POST /media/{id}` metadata update over `domain.MediaWriter`, gated on `upload_files`, sanitized through 10.A's policy; `DELETE` left `501`.)
+- [x] **10.C — REST user write parity.** Replace `restNotImplemented`
       registrations in `internal/web/rest_users.go` for `POST /users`
       (create) and `PUT`/`PATCH`/`POST /users/{id}` (update — same
       WordPress POST-as-update convention as 10.B, already stubbed at
@@ -836,18 +839,21 @@ Security Considerations section).
       milestone (Requirement 17 has no delete acceptance criteria) — its
       `restNotImplemented` registration SHALL remain unchanged, continuing
       to respond `501`.
-- [ ] **10.D — `content.rendered` improvements.** Strip `<!-- wp:* -->`/
+      (Shipped via the `10.2-rest-user-write` spec (PR #55, `adbee55`): real `POST /users` create and `PUT`/`PATCH`/`POST /users/{id}` profile/password/role update over `domain.UserRepository` (new `UpdateProfile`), gated on `create_users`/`edit_users`/`promote_users`; `DELETE` left `501`. Its single-hash-scheme wording is reconciled by 10.G below.)
+- [x] **10.D — `content.rendered` improvements.** Strip `<!-- wp:* -->`/
       `<!-- /wp:* -->` delimiters and add `srcset`/`sizes`/`loading`/
       `decoding` attributes to rendered `<img>` tags in the REST
       `content.rendered` field only (not the public HTML templates); scope
       explicitly excludes rendering arbitrary block visual output.
-- [ ] **10.E — M10 test coverage.** A capability-matrix test (allowed vs.
+      (Shipped via the `10.3-rest-content-rendered` spec (PR #56, `af0105b`): block-comment stripping and `srcset`/`sizes`/`loading`/`decoding` on rendered `<img>` in the REST `content.rendered` field only, public templates untouched.)
+- [x] **10.E — M10 test coverage.** A capability-matrix test (allowed vs.
       forbidden caller) for each of 10.B/10.C's newly enabled write routes;
       a content-safety test proving 10.A's policy is applied on every
       newly enabled write route and on the pre-existing admin/comment
       write paths it now also covers. This requirement extends to 10.F and
       10.G below.
-- [ ] **10.F — Navigation menu editing.** Folded in from M4's deferral,
+      (Shipped via the `10.4-m10-test-coverage` spec (PR #57, `d9917b2`): capability-matrix tests for the post/comment/admin/media write routes and a consolidated `coverage-matrix.md`.)
+- [x] **10.F — Navigation menu editing.** Folded in from M4's deferral,
       which shipped nav menus read-only and recorded "Menu **editing**
       deferred" with no milestone attached. `internal/web/adminroutes.go`
       registers only `GET /menus` and `GET /menus/{id}` today; there is no
@@ -864,7 +870,8 @@ Security Considerations section).
       only — note the existing read path gates on `edit_posts` instead, so
       decide deliberately whether editing tightens to administrator or
       matches the read gate.
-- [ ] **10.G — `$wp$` as grimoire's issued password format.** Folded in
+      (Shipped via the `10.5-nav-menu-editing` spec (PR #58, `64e8a1b`): the first menu write path — create/update/delete of menus and items with reorder/nest — in a new `edit_theme_options` + CSRF admin-API group, sanitized through 10.A's policy; the read routes keep their `edit_posts` gate.)
+- [x] **10.G — `$wp$` as grimoire's issued password format.** Folded in
       from M2.1's deferral, recorded under "Open decisions" in
       [`../README.md`](../README.md) with "Target: a later auth milestone"
       and no milestone attached.
@@ -882,3 +889,4 @@ Security Considerations section).
       changes that scheme deliberately. Whichever way this is decided, 10.C's
       wording must be reconciled in the same design, along with a
       `NeedsRehash` upgrade policy for existing bcrypt rows.
+      (Shipped via the `10.6-wp-hash-issuance` spec (PR #59, `75db2d3`): `password.Hash` now issues WordPress 6.8 `$wp$` via `HashWP`, and `NeedsRehash` upgrades legacy bcrypt/phpass rows to `$wp$` on login. This supersedes 10.C's single-hash-scheme wording: `$wp$` replaces bcrypt as the one issued scheme.)

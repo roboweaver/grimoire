@@ -96,6 +96,10 @@ Run any of them with `-h` for the full per-subcommand guidance.
   secrets must already exist; `up` prints the `openssl … | podman secret create`
   command to run if one is missing (secrets are created out of band on purpose
   so no password ever lands in a flag or this process's arguments).
+  `-restart-always` sets `--restart always` on the three stack containers so an
+  autostart policy survives a down/up recreate; even without the flag, `up`
+  auto-reapplies that policy when autostart is already configured (see
+  [autostart](#macos-autostart--two-layers)).
 - **`down`** — removes the three pods but keeps the volumes, secrets and
   network, so the database, the `wp-content` tree and the generated passwords
   all survive. There is deliberately no `destroy` here.
@@ -126,10 +130,29 @@ MCP helper, not part of this stack, so it is intentionally out of scope here.)
 `podman machine start <machine>` with `RunAtLoad`, logging to
 `/tmp/podman-machine-autostart.log`, then `launchctl load`s it.
 
+**The restart policy survives a recreate.** `autostart install` also writes a
+small marker file (under `~/.local/share/grimoire/podman-autostart`) recording
+that autostart is configured. The former lost-on-recreate behavior is fixed: the
+`--restart always` policy Layer A sets used to be dropped the next time `up`
+recreated a container after a `down`, because a recreated container loses its
+restart policy. Now `up` **auto-reapplies `--restart always`** whenever it sees
+that marker (or, as a fallback, the LaunchAgent plist), printing a one-line
+notice when it does — so an autostart policy can no longer be silently lost. You
+can also force the policy without configuring autostart at all with
+`up -restart-always`, which sets `--restart always` on the three stack
+containers at create time. `autostart uninstall` removes the marker along with
+both layers.
+
 > **Caveat:** a LaunchAgent fires at **user login**, not at the pre-login boot
 > screen, so the stack returns after you log in, not before. Starting the VM
 > before login would need a rootful machine plus a system LaunchDaemon — a
 > bigger change that this command does not make.
+
+**Help is consistent across the group.** A bare `autostart` with no action, and
+`autostart -h` / `--help` / `help`, now print the subcommand usage and exit `0`
+(they previously errored with `unknown action "-h"`). `autostart install -h` and
+`autostart uninstall -h` print help and exit `0` as well; a genuinely unknown
+action such as `autostart frobnicate` still errors.
 
 ---
 
@@ -152,6 +175,7 @@ built-in default**.
 | `-wordpress-image` | — | `docker.io/library/wordpress:latest` | |
 | `-db-name` / `-db-user` | — | `wordpress` / `wordpress` | |
 | `-uploads-mount` | — | `/var/www/html/wp-content` | Shared wp-content mount path |
+| `-restart-always` (on `up`) | — | off | Set `--restart always` on the stack containers so autostart survives a down/up recreate; auto-applied when autostart is already configured |
 
 ---
 

@@ -43,8 +43,11 @@ web (net/http + chi) → content services → domain (entities + repository port
 - `internal/storage/<vendor>` provides adapters; vendor SQL never leaks upward.
 - `internal/render` turns domain data into HTML via themes (folders of templates).
 
-See [`plans/`](./plans) for the full, Kiro-format specifications. For a
-deeper look at WordPress interoperability, see
+See [`plans/`](./plans) for the full, Kiro-format specifications. For
+end-to-end usage, see [`docs/user-guide.md`](./docs/user-guide.md) (what
+grimoire is, architecture, running it, the admin, REST, permalinks, themes and
+known gaps) and [`docs/cli.md`](./docs/cli.md) (the complete `grimoire` /
+`grimoire-cli` reference). For a deeper look at WordPress interoperability, see
 [`docs/compatibility.md`](./docs/compatibility.md) (the compatibility guide)
 and [`docs/wordpress-compatibility-tour.md`](./docs/wordpress-compatibility-tour.md)
 (a visual, side-by-side tour).
@@ -68,11 +71,14 @@ and [`docs/wordpress-compatibility-tour.md`](./docs/wordpress-compatibility-tour
 ## Running
 
 grimoire ships two binaries: `grimoire` (the HTTP server) and `grimoire-cli`
-(`migrate`, `seed`, `createadmin`, `sessions gc`). Configuration is a YAML file
-(see [`configs/`](./configs)); every field can be overridden by an environment
-variable (`GRIMOIRE_SERVER_ADDR`, `GRIMOIRE_THEME`,
+(`migrate`, `seed`, `createadmin`, `sessions gc`, `podman`). Configuration is a
+YAML file (see [`configs/`](./configs)); every field can be overridden by an
+environment variable (`GRIMOIRE_SERVER_ADDR`, `GRIMOIRE_THEME`,
 `GRIMOIRE_DATABASE_VENDOR`, `GRIMOIRE_DATABASE_DSN`,
-`GRIMOIRE_DATABASE_TABLE_PREFIX`).
+`GRIMOIRE_DATABASE_TABLE_PREFIX`). [`docs/cli.md`](./docs/cli.md) is the full
+flag and environment reference for both binaries, and
+[`docs/user-guide.md`](./docs/user-guide.md) walks through running on SQLite and
+against an existing WordPress database.
 
 ### SQLite (zero external services)
 

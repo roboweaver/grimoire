@@ -1,14 +1,15 @@
 # Post-M10 Gap Analysis — Candidate Milestones (M11+)
 
-> **Status: 📝 Proposal (M11 ✅ shipped).** This document is a gap analysis, not a
+> **Status: 📝 Proposal (M11, M13, M14 ✅ shipped).** This document is a gap analysis, not a
 > committed roadmap. The WordPress-core-parity roadmap
 > ([`../wordpress-core-parity-roadmap`](../wordpress-core-parity-roadmap)) is
 > complete through its final group (M10.G). Each candidate below is a documented,
 > code-verified limitation of the current implementation, written up so a future
 > milestone can refine it into its own `requirements.md`/`design.md`/`tasks.md`.
-> **M11 (REST delete parity, PR #64) and M13 (term re-parenting, PR #67) have
-> since been specified and merged.** The remaining candidates (M12, M14, M15,
-> M16) are still open; pick one and spec it first.
+> **M11 (REST delete parity, PR #64), M13 (term re-parenting, PR #67), and M14
+> (sanitization backfill, PR #70) have since been specified and merged.** The
+> remaining candidates (M12, M15, M16) are still open; pick one and spec it
+> first.
 
 Every gap is traced to where it is already acknowledged in
 [`../../docs/compatibility.md`](../../docs/compatibility.md) or the root
@@ -63,7 +64,7 @@ lets an editor set a category's parent.
 re-parenting, and the capability gate (`manage_categories`). Small-to-medium;
 builds directly on M9b's read model and M10.F's write-group pattern.
 
-### M14 — One-time sanitization backfill for pre-M10a content
+### M14 — One-time sanitization backfill for pre-M10a content  ✅ shipped (`../14-sanitization-backfill`, PR #70)
 
 **Gap.** M10a "closes the inflow; it does not drain the pool"
 (compatibility.md:470). Every value *written* from M10a onward is sanitized, but
@@ -76,6 +77,16 @@ applies the M10a tier-B policy to `post_content`/`post_excerpt`, and rewrites
 rows — idempotent, dry-run-first, with a report. Careful: it mutates a database
 grimoire may not own, so it must be explicit, reversible-aware, and never
 automatic. Medium; mostly a CLI + the existing policy, no new web surface.
+
+**Shipped in M14:** the `grimoire-cli backfill-content` subcommand (dry-run by
+default, `-apply` to write, never automatic) walking post_type {post, page,
+revision} across all statuses via a new keyset-paginated backfill read port;
+tier-B `SanitizeAt` applied to `post_content`/`post_excerpt` with change-detection
+so only differing rows are rewritten through a new narrow content-only update
+port that does **not** bump `post_modified`; a body-free auditable report (per-row
+ID/type/field(s)/byte-length + totals); fail-safe per-row sanitize errors; and a
+cross-vendor storagetest contract + command-level coverage. No migration, no web
+surface, no new capability.
 
 ### M15 — Hierarchical page URLs
 
@@ -107,9 +118,9 @@ and documented.
 
 1. ~~**M11 (REST delete)**~~ — ✅ shipped (PR #64).
 2. ~~**M13 (term re-parenting)**~~ — ✅ shipped (PR #67).
-3. **M14 (sanitization backfill)** — closes the one standing security caveat
-   from M10a; CLI-only. **Next.**
-4. **M15 (hierarchical page URLs)** — completes WordPress routing parity.
+3. ~~**M14 (sanitization backfill)**~~ — ✅ shipped (PR #70); closed the one
+   standing security caveat from M10a, CLI-only.
+4. **M15 (hierarchical page URLs)** — completes WordPress routing parity. **Next.**
 5. **M12 (custom post types/taxonomies)** — largest; the biggest real-site
    parity win, best tackled once the smaller gaps are closed.
 6. **M16 (pagination path form)** — optional polish.

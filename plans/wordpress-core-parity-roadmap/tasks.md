@@ -988,14 +988,17 @@ M14 closes the one standing security caveat from M10a — M10a "closes the inflo
 it does not drain the pool." CLI-only, no new web surface. The group below
 requires M14's own dedicated spec before implementation.
 
-- [ ] **14.A — Opt-in backfill CLI.** Add an opt-in `grimoire-cli` command that
-      walks `{prefix}posts`, applies M10a's tier-B sanitization policy
-      (`internal/sanitize`) to each row's `post_content`/`post_excerpt`, and
-      rewrites rows — dry-run-first (no apply without an explicit flag),
-      idempotent (a second run is a no-op), and producing an auditable report.
-      It SHALL never run automatically: it mutates a database grimoire may not
-      own, so it must be explicit and reversible-aware. No HTTP handler or render
-      path changes.
+- [x] **14.A — Opt-in backfill CLI.** ✅ shipped (`../14-sanitization-backfill`,
+      PR #70). Added the opt-in `grimoire-cli backfill-content` command that
+      walks `{prefix}posts` (post_type {post,page,revision}, all statuses, keyset-
+      paginated), applies M10a's tier-B sanitization policy (`internal/sanitize`,
+      via `SanitizeAt(PostContent/PostExcerpt, TierB, …)`) to each row's
+      `post_content`/`post_excerpt`, and rewrites only the rows that differ —
+      dry-run-first (no apply without the `-apply` flag), idempotent (a second run
+      is a no-op), with an auditable body-free report. Never runs automatically.
+      Two additive storage ports (paginated backfill read + narrow content-only
+      update that does not bump `post_modified`); no HTTP handler, render path,
+      migration, or capability changes.
 
 ---
 

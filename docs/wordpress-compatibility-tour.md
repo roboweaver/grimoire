@@ -164,8 +164,10 @@ rather than a live filter; it has not been recaptured for M8.
 uploads directory. `git_user` — the one attachment actually parented to the
 selected post — appears in both screenshots.
 
-**Intentional differences:** Layout and metadata presentation differ; no
-upload or REST-write capability is implied.
+**Intentional differences:** Layout and metadata presentation differ. (The
+screenshot pair shows reading the library only; grimoire does support media
+writes — the admin UI uploads attachments, and REST media create/update
+shipped in M10.B — they are simply not exercised in this capture.)
 
 **Current limits:** These two screenshots use different, non-equivalent
 filters. The WordPress screenshot uses its native free-text admin search
@@ -210,17 +212,19 @@ than a live filter; it has not been recaptured for M8.
 and return the same post's fields — both responses are for post `id: 400774`.
 
 **Intentional differences:** Key order and some optional fields may differ.
-The `content.rendered` field itself differs semantically between the two
-responses in two ways. First, WordPress strips Gutenberg block-comment
-delimiters (for example `<!-- wp:paragraph -->`) from the rendered HTML;
-grimoire retains them un-stripped. Second, for the embedded `<img>` tag both
-responses emit the *same* root-relative `src` (no host), but WordPress
-additionally injects responsive-image attributes — `srcset` (with
-width-keyed URLs that *are* absolute, on WordPress's own host), `sizes`,
-`loading`, and `decoding` — that grimoire's rendering does not add. Both
-represent the same underlying post content, but a consumer parsing
-`content.rendered` as final, fully-processed HTML should account for both
-differences. Both responses also have their local capture hostname replaced
+Key order and some optional fields may differ. The two historical
+`content.rendered` differences this pair once documented — grimoire
+retaining Gutenberg block-comment delimiters (for example
+`<!-- wp:paragraph -->`) that WordPress strips, and grimoire omitting the
+responsive-image attributes WordPress injects on `<img>` (`srcset`, `sizes`,
+`loading`, `decoding`) — were **closed by M10.D**: grimoire now strips those
+block-comment delimiters and adds `srcset`/`sizes`/`loading`/`decoding` to
+rendered `<img>` tags in `content.rendered`. **Note:** the committed grimoire
+screenshot in this pair predates M10.D, so it still shows the un-stripped,
+no-`srcset` form; the live response now matches WordPress on both points. The
+screenshot has deliberately not been recaptured. (WordPress's `srcset` URLs
+are absolute, on its own host; grimoire anchors its candidates on the image's
+own `src`.) Both responses also have their local capture hostname replaced
 in-page with a placeholder domain (`wordpress.example.test` /
 `grimoire.example.test`) before capture so no local network detail is shown
 in most fields; the one exception is the WordPress response's stored

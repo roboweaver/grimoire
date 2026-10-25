@@ -1,5 +1,13 @@
 # WordPress Compatibility Visual Tour: Requirements
 
+> **Status: ✅ Implemented.** `docs/wordpress-compatibility-tour.md`, the
+> refreshed `docs/compatibility.md`, and the 14 paired PNGs under
+> `docs/images/compatibility/` all shipped. The prose of both compatibility docs
+> has since been carried forward to the current M1–M10 state (the
+> `content.rendered` section notes that M10.D closed the two differences this
+> tour originally documented, with the committed screenshot predating M10.D).
+> This spec is retained as the historical record of the tour as first captured.
+
 ## Introduction
 
 This documentation-only follow-up gives prospective users a focused visual

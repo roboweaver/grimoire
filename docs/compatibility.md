@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M9b)
+# WordPress Compatibility (M1-M10)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -55,11 +55,13 @@ Type mappings from the WordPress MySQL schema are translated per vendor
 - **M5 — Extensions and REST API:** the compiled `pkg/extensions` hook
   registry and a WordPress-compatible REST API at `/wp-json/wp/v2/*` — read
   parity for posts/pages/comments/media/users, plus write endpoints for
-  comments, posts/pages, and categories/tags. The REST media and user
-  endpoints specifically still return `501` for every write verb — that
-  501 is scoped to the REST API surface only; media uploads and user
-  creation both have working, authorized write paths elsewhere (M4's admin
-  UI for media, and `create_users`-gated calls / CLI bootstrap for users).
+  comments, posts/pages, and categories/tags. At M5 the REST media and user
+  endpoints offered read only; their write verbs returned `501`. Media
+  create/update and user create/update were later enabled by M10.B and
+  M10.C respectively (see the M10 bullets below); only the `DELETE` verb
+  for media and users still returns `501`. Authorized write paths also
+  exist outside REST (M4's admin UI for media, and `create_users`-gated
+  calls / CLI bootstrap for users).
   Non-anonymous REST auth uses WordPress Application Passwords.
 - **M6 — Admin CRUD editor:** full content editing, status transitions, and
   optimistic concurrency in the admin UI.
@@ -332,6 +334,49 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   over real HTTP — canonical path `200`, flat form `301` to it, query
   string preserved.
 
+- **M10a — Write-boundary content safety:** grimoire's first HTML
+  sanitizer. A single capability-aware policy sits above storage in front
+  of the write paths that already shipped (public comment submit, admin/
+  REST post create and update), selecting one of three allow-list tiers by
+  field kind and `unfiltered_html`: a tight comment list, the broad
+  post-content list for writers lacking `unfiltered_html`, and a
+  byte-identical bypass for `unfiltered_html` holders (WordPress's `kses`
+  exemption). `post_title` is reduced to plain text, and comment content is
+  backstopped at the tight tier on render as well as on write. The
+  guarantee is scoped: every value written from M10a onward is sanitized at
+  the writer's tier; pre-M10a stored content is not retroactively
+  sanitized. M10a added no new REST write route (see the REST section
+  above).
+- **M10.B — REST media write:** `POST /wp-json/wp/v2/media` (binary upload
+  create) and `PUT`/`PATCH`/`POST /media/{id}` (metadata update) over the
+  existing `domain.MediaWriter`, gated on `upload_files` and sanitized
+  through M10a's policy; a new attachment's `post_author` is the uploader.
+  `DELETE /media/{id}` stays `501`.
+- **M10.C — REST user write:** `POST /wp-json/wp/v2/users` (create) and
+  `PUT`/`PATCH`/`POST /users/{id}` (profile/password/role update) over a new
+  `domain.UserRepository.UpdateProfile`, gated on `create_users`/
+  `edit_users`/`promote_users` and sanitized through the policy.
+  `DELETE /users/{id}` stays `501`.
+- **M10.D — `content.rendered` improvements:** the REST `content.rendered`
+  field strips Gutenberg `<!-- wp:* -->` block-comment delimiters and adds
+  `srcset`/`sizes`/`loading`/`decoding` to rendered `<img>` tags. This
+  changes the REST response field only — the public HTML templates are
+  untouched and stored `post_content` is never rewritten.
+- **M10.E — M10 write-route test coverage:** capability-matrix tests
+  (allowed vs. forbidden caller) for each write route plus a consolidated
+  content-safety coverage matrix; test-only, no behavior change.
+- **M10.F — Navigation menu editing:** the first menu write path —
+  create/update/delete of menus and items, reorder via `menu_order`, nest
+  via parent item — in a new admin-API route group gated on
+  `edit_theme_options` with CSRF, item labels/names/custom-URLs sanitized
+  and validated through M10a's policy. Menu reads keep their existing
+  `edit_posts` gate; nav-menu editing was deferred read-only from M4.
+- **M10.G — `$wp$` as grimoire's issued password format:** grimoire now
+  *issues* WordPress 6.8 `$wp$` hashes (HMAC-SHA384 pre-hash → bcrypt), not
+  bare bcrypt, and `NeedsRehash` upgrades a legacy bcrypt or phpass row to
+  `$wp$` on the user's next successful login. A password changed in grimoire
+  now round-trips to a live WordPress 6.8 install and back.
+
 ## Public read guarantees
 
 - The **public** rendering path (unauthenticated `GET` routes) filters to
@@ -480,13 +525,19 @@ The public page renders allow-listed comment markup, but the REST API's
 would widen a REST response contract this milestone has not specified. The
 resulting asymmetry is a scoped deferral, not an inconsistency nobody noticed.
 
-### No new REST write route
+### REST write routes (M10a added none; M10.B/M10.C enabled them)
 
-M10a enables **no new REST write route**. The `/wp-json/wp/v2/media` and
-`/wp-json/wp/v2/users` writes still answer `501` (`restNotImplemented` in
-`internal/web/rest_media.go` and `internal/web/rest_users.go`). This milestone is
-the capability-aware write-boundary content policy (roadmap group 10.A); media
-writes (10.B), user writes (10.C) and the rest of group 10 remain open.
+M10a itself enabled **no new REST write route** — it was the capability-aware
+write-boundary content policy (roadmap group 10.A) and nothing else. The REST
+media and user write routes were enabled afterward: **M10.B** replaced the
+`501` stubs in `internal/web/rest_media.go` with real `POST /wp-json/wp/v2/media`
+(binary create) and `PUT`/`PATCH`/`POST /media/{id}` (metadata update) handlers,
+and **M10.C** did the same in `internal/web/rest_users.go` for `POST
+/wp-json/wp/v2/users` (create) and `PUT`/`PATCH`/`POST /users/{id}` (profile/
+password/role update). Both pass every caller-supplied field through M10a's
+policy. Only the **`DELETE`** verb for media and users still answers `501`
+(`restNotImplemented`); REST delete is the one write verb group 10 left
+deferred.
 
 ## Excerpts (`the_excerpt`)
 

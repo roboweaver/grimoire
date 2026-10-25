@@ -2,7 +2,7 @@
 
 **A Go-native, WordPress-schema-compatible CMS with a working embedded Adobe React Spectrum admin — no PHP, a swappable database backend, and WordPress-compatible content, auth, and REST surfaces.**
 
-> **Current state:** M1-M8, M9a and M9b are implemented. The public site, embedded Adobe React Spectrum admin, WordPress-compatible content/auth/REST surfaces, revisions/autosave, scheduled publishing, WordPress-equivalent content browsing (public and admin pagination, admin post/media filters), WordPress permalinks with canonical redirects, and nested category, tag, author and date archives all work today. REST write coverage includes posts/pages, comments, and taxonomy terms; media and user writes are not exposed.
+> **Current state:** M1-M10 are implemented. The public site, embedded Adobe React Spectrum admin, WordPress-compatible content/auth/REST surfaces, revisions/autosave, scheduled publishing, WordPress-equivalent content browsing (public and admin pagination, admin post/media filters), WordPress permalinks with canonical redirects, and nested category, tag, author and date archives all work today. REST write coverage includes posts/pages, comments, taxonomy terms, media, and users; a capability-aware HTML sanitizer guards every write boundary, and grimoire issues WordPress 6.8 `$wp$` password hashes.
 
 > ## What's a grimoire?
 > A *grimoire* is a wizard's book of spells and knowledge — a single authoritative
@@ -156,8 +156,8 @@ GRIMOIRE_TEST_POSTGRES_DSN='postgres://user:pass@127.0.0.1:5432/grimoire_test?ss
 grimoire also exposes a WordPress-compatible REST API at `/wp-json/wp/v2/*`
 (read parity for posts/pages/comments/media/users, real WP response shape:
 `_links`, `?_embed`, `X-WP-Total*` pagination headers) plus write endpoints
-for comments, posts/pages, and categories/tags; media and user writes still
-return `501`. Authentication for non-anonymous REST requests is via WordPress
+for comments, posts/pages, categories/tags, media, and users (M10.B/M10.C
+closed the former media/user `501`s). Authentication for non-anonymous REST requests is via WordPress
 **Application Passwords** (HTTP Basic, `wp_fast_hash`/`$generic$`,
 phpass/`$wp$`/bcrypt fallback); self-service management lives at
 `/wp-json/wp/v2/users/me/application-passwords`.
@@ -181,17 +181,20 @@ full specification.
 - ✅ **M8:** [Content browsing parity](./plans/wordpress-core-parity-roadmap) — delivers public and admin pagination with out-of-range 404s, admin post `search`/`status`/`author` filters, and a media library with filters and a grid/list toggle.
 - ✅ **M9a:** [Permalinks and canonical routing](./plans/09-permalinks-canonical-routing) — delivers `permalink_structure`/`category_base`/`tag_base` reads, the `%postname%`/`%post_id%`/`%year%`/`%monthnum%`/`%day%` token set (WordPress's three presets), `301` canonical redirects from every other recognised form, canonical REST `link` values, and the `tag`/`author`/`date` template kinds. Unsupported structures fall back to the flat route with a startup `WARN`.
 - ✅ **M9b:** [Archives and nested categories](./plans/09.1-archives-nested-categories) — delivers the four archive routes M9a left unserved: nested category archives at their full ancestry (`/category/news/local`), with `301` recovery from the flat and wrong-ancestor forms, plus tag, author and date archives. `category_base`/`tag_base` are honored in route registration, path classification, theme links and REST `link` values; a category archive lists and counts its descendants' posts; REST `parent` carries `term_taxonomy.parent`, category/tag `link` values are real archive paths, and a user's `link` is `/author/{nicename}`. Zero schema changes.
-- ✅ **M10a:** [Write-boundary content safety](./plans/10-rest-write-content-safety) — grimoire's first HTML sanitizer. A single capability-aware allow-list policy sanitizes comment content and post content/excerpt/title at the write boundary before storage (three tiers mirroring WordPress's `kses` lists, selected by field kind and `unfiltered_html`), reduces `post_title` to plain text, and backstops comment content at render. Covers the write paths that already shipped in M4/M6; adds **no** new REST write route (media/user writes still `501`). Pre-M10a stored post content is not retroactively sanitized.
-- 📝 **M10 (remaining):** [REST write and content safety parity](./plans/wordpress-core-parity-roadmap) — roadmap-level. The remaining groups (REST media/user writes, closing their `501`s, and `content.rendered` fidelity) each require their own spec before implementation.
+- ✅ **M10a:** [Write-boundary content safety](./plans/10-rest-write-content-safety) — grimoire's first HTML sanitizer. A single capability-aware allow-list policy sanitizes comment content and post content/excerpt/title at the write boundary before storage (three tiers mirroring WordPress's `kses` lists, selected by field kind and `unfiltered_html`), reduces `post_title` to plain text, and backstops comment content at render. Covers the write paths that already shipped in M4/M6; adds **no** new REST write route (the media/user write routes were opened later by M10.B/M10.C). Pre-M10a stored post content is not retroactively sanitized.
+- ✅ **M10.B:** [REST media write](./plans/10.1-rest-media-write) — `POST /media` binary-upload create and `PUT`/`PATCH`/`POST /media/{id}` metadata update over `domain.MediaWriter`, gated on `upload_files`, sanitized through M10a's policy; `DELETE` stays `501`.
+- ✅ **M10.C:** [REST user write](./plans/10.2-rest-user-write) — `POST /users` create and `PUT`/`PATCH`/`POST /users/{id}` profile/password/role update, gated on `create_users`/`edit_users`/`promote_users`; `DELETE` stays `501`.
+- ✅ **M10.D:** [content.rendered improvements](./plans/10.3-rest-content-rendered) — Gutenberg block-comment stripping and `srcset`/`sizes`/`loading`/`decoding` on rendered `<img>` in the REST `content.rendered` field only.
+- ✅ **M10.E:** [M10 write-route test coverage](./plans/10.4-m10-test-coverage) — capability matrices for every write route plus a consolidated content-safety coverage doc.
+- ✅ **M10.F:** [Navigation menu editing](./plans/10.5-nav-menu-editing) — the first menu write path (create/update/delete, reorder, nest) in an `edit_theme_options` + CSRF admin-API group, sanitized through M10a's policy; menu reads keep their `edit_posts` gate.
+- ✅ **M10.G:** [`$wp$` issued password format](./plans/10.6-wp-hash-issuance) — `password.Hash` now issues WordPress 6.8 `$wp$` hashes and `NeedsRehash` upgrades legacy bcrypt/phpass rows to `$wp$` on login, so passwords round-trip with a live WordPress 6.8 database.
 
 ## Status
 
-✅ M1-M8, M9a, M9b and M10a are implemented.
-
-📝 M10's remaining groups (REST media/user writes and `content.rendered`
-fidelity) are scoped at roadmap level in
-[`plans/wordpress-core-parity-roadmap`](./plans/wordpress-core-parity-roadmap)
-but not implemented; each needs its own spec first.
+✅ M1-M10 are implemented. The WordPress-core-parity roadmap
+([`plans/wordpress-core-parity-roadmap`](./plans/wordpress-core-parity-roadmap))
+is complete through its final group (M10.G); every M10 group (10.A–10.G) shipped
+via its own spec under `plans/10.*`.
 
 As of M10a, write-path content is sanitized at the boundary by a
 capability-aware allow-list policy before it is stored: comment content and
@@ -206,9 +209,9 @@ content policy only; it does **not** add any new REST write route.
 
 Known gaps worth knowing before adopting an existing WordPress site:
 
-- **REST writes** for media and users are not exposed (they return `501`).
-  M10a landed the write-boundary content policy first, as planned; the media and
-  user write routes themselves remain deferred to later M10 groups.
+- **REST deletes.** `DELETE /wp-json/wp/v2/media/{id}` and `.../users/{id}`
+  are not exposed (they return `501`). REST *create* and *update* for media and
+  users shipped in M10.B/M10.C; only the delete verb remains deferred.
 - **Taxonomies and post types.** Only `category` and `post_tag` are served, and
   archives list `post` rows only — custom taxonomies and custom post types are
   out of scope. Term hierarchy is read-only: M9b reads `term_taxonomy.parent`,

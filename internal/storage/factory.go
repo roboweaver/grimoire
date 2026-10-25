@@ -60,6 +60,10 @@ type Set struct {
 	// M7 additive ports backing revisions/autosave and the scheduler poll.
 	Revisions domain.RevisionWriter
 	Scheduled domain.ScheduledPostFinder
+
+	// M14 additive ports backing the opt-in sanitization backfill CLI.
+	PostContentBackfill domain.PostContentBackfill // paginated read
+	PostContentUpdater  domain.PostContentUpdater  // narrow content-only write
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -190,6 +194,9 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 
 			Revisions: posts,
 			Scheduled: posts,
+
+			PostContentBackfill: posts,
+			PostContentUpdater:  posts,
 		},
 		db:    db,
 		bunDB: bunDB,

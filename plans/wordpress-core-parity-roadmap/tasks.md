@@ -969,7 +969,7 @@ M13 is small, high-value, and builds directly on M9b's read model and M10.F's
 write-group pattern. The group below requires M13's own dedicated spec before
 implementation.
 
-- [ ] **13.A — Term parent write.** Add a `parent` field to term create/update
+- [x] **13.A — Term parent write.** Add a `parent` field to term create/update
       through the admin API and `POST /wp-json/wp/v2/categories`, writing
       `term_taxonomy.parent` for the term — the column M9b already *reads* into
       `domain.Term.ParentID` (`internal/storage/wprepo/repo.go`'s term reads) but
@@ -978,6 +978,7 @@ implementation.
       M9b established correct under re-parenting, and gate on `manage_categories`,
       following M10.F's write-group pattern (new `edit`-style admin-API group plus
       the REST handler).
+      (Shipped via the `13-term-reparenting` spec (PR #67, `595098b`): `TermRepo.Create`/`Update` write `term_taxonomy.parent` (two-table atomic update); `content.ErrTermParentCycle`/`ErrTermParentInvalid` + `TermWriteService.validateParent` reusing M9b's `TermHierarchy.DescendantIDs` for self/descendant-cycle, nonexistent/cross-taxonomy, and flat-`post_tag` rejection; `parent` threaded through REST `/categories` + admin API with load-and-merge update; `manage_categories` gate unchanged; descendant-aware archive counts proven correct across a re-parent. No schema change, no new port/capability.)
 
 ---
 

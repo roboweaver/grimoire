@@ -19,7 +19,7 @@ func TestPlistContent(t *testing.T) {
 		t.Fatalf("plistContent error: %v", err)
 	}
 	for _, want := range []string{
-		"<string>com.accuweaver.podman-machine</string>",
+		"<string>dev.grimoire.podman-machine</string>",
 		"<string>/opt/homebrew/bin/podman</string>",
 		"<string>machine</string>",
 		"<string>start</string>",

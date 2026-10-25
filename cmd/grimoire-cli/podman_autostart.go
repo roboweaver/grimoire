@@ -26,7 +26,7 @@ import (
 // launchAgentLabel is the reverse-DNS label for the LaunchAgent. Kept stable so
 // install/uninstall and `launchctl` target the same agent and a second one is
 // never spawned alongside it.
-const launchAgentLabel = "com.accuweaver.podman-machine"
+const launchAgentLabel = "dev.grimoire.podman-machine"
 
 // launchAgentLog is where the LaunchAgent writes its stdout/stderr.
 const launchAgentLog = "/tmp/podman-machine-autostart.log"

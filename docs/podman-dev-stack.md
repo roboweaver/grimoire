@@ -126,7 +126,7 @@ interactive login. (The runbook's fourth `ms365-login` container is an external
 MCP helper, not part of this stack, so it is intentionally out of scope here.)
 
 **Layer B — the VM starts at Mac login.** Writes a LaunchAgent at
-`~/Library/LaunchAgents/com.accuweaver.podman-machine.plist` that runs
+`~/Library/LaunchAgents/dev.grimoire.podman-machine.plist` that runs
 `podman machine start <machine>` with `RunAtLoad`, logging to
 `/tmp/podman-machine-autostart.log`, then `launchctl load`s it.
 

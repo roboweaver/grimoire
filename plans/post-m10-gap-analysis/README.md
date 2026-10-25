@@ -1,12 +1,14 @@
 # Post-M10 Gap Analysis — Candidate Milestones (M11+)
 
-> **Status: 📝 Proposal.** This document is a gap analysis, not a committed
-> roadmap. The WordPress-core-parity roadmap
+> **Status: 📝 Proposal (M11 ✅ shipped).** This document is a gap analysis, not a
+> committed roadmap. The WordPress-core-parity roadmap
 > ([`../wordpress-core-parity-roadmap`](../wordpress-core-parity-roadmap)) is
 > complete through its final group (M10.G). Each candidate below is a documented,
-> code-verified limitation of the current M1–M10 implementation, written up so a
-> future milestone can refine it into its own `requirements.md`/`design.md`/
-> `tasks.md`. Nothing here authorizes implementation; pick one and spec it first.
+> code-verified limitation of the current implementation, written up so a future
+> milestone can refine it into its own `requirements.md`/`design.md`/`tasks.md`.
+> **M11 (REST delete parity) has since been specified and merged** — see
+> [`../11-rest-delete-parity`](../11-rest-delete-parity) (PR #64). The remaining
+> candidates (M12–M16) are still open; pick one and spec it first.
 
 Every gap is traced to where it is already acknowledged in
 [`../../docs/compatibility.md`](../../docs/compatibility.md) or the root
@@ -14,7 +16,7 @@ Every gap is traced to where it is already acknowledged in
 
 ## Candidate milestones
 
-### M11 — REST delete parity (media + users)
+### M11 — REST delete parity (media + users)  ✅ shipped (`../11-rest-delete-parity`, PR #64)
 
 **Gap.** `DELETE /wp-json/wp/v2/media/{id}` and `DELETE /wp-json/wp/v2/users/{id}`
 still answer `501` (`restNotImplemented`, `internal/web/rest_media.go:51`,
@@ -30,6 +32,8 @@ delete (reassign authored content to another user), capability gates
 `delete_users` for users), and sanitize/CSRF parity with the create/update
 routes. Likely adds a `domain.MediaWriter.Delete` / `domain.UserRepository.Delete`.
 **Smallest, most self-contained candidate — natural immediate next step.**
+
+**Shipped in M11:** `MediaWriter.Delete`/`UserRepository.Delete` ports + wprepo impls, `MediaWriteService.Delete`/`UserService.Delete`, and the two REST handlers — `force=true` required, media per-attachment `CanDeletePost` gate with on-disk file unlink, user `reassign` (id or `false`) with self-delete/`delete_users` guards, transactional reassign-or-delete, `{"deleted":true,"previous":...}` envelope. Collection-level DELETE stays `501`.
 
 ### M12 — Custom post types and custom taxonomies
 
@@ -101,9 +105,8 @@ and documented.
 
 ## Recommended ordering
 
-1. **M11 (REST delete)** — smallest, closes the last REST write-verb gap, clean
-   follow-on to M10.B/M10.C.
-2. **M13 (term re-parenting)** — small, high-value, builds on M9b + M10.F.
+1. ~~**M11 (REST delete)**~~ — ✅ shipped (PR #64).
+2. **M13 (term re-parenting)** — small, high-value, builds on M9b + M10.F. **Next.**
 3. **M14 (sanitization backfill)** — closes the one standing security caveat
    from M10a; CLI-only.
 4. **M15 (hierarchical page URLs)** — completes WordPress routing parity.

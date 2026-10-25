@@ -102,8 +102,10 @@ grimoire exposes a WordPress-compatible REST API at **`/wp-json/wp/v2/*`** with
 the real WordPress response shape — `_links`, `?_embed`, and `X-WP-Total*`
 pagination headers. It offers read parity for posts, pages, comments, media and
 users, plus write endpoints for comments, posts/pages, categories/tags, media,
-and users. Every write passes through a capability-aware HTML sanitizer at the
-write boundary (see [`compatibility.md`](./compatibility.md) for the tier model).
+and users — including `DELETE` for media and users (which require `force=true`,
+matching WordPress's no-trash semantics for those types). Every write passes
+through a capability-aware HTML sanitizer at the write boundary (see
+[`compatibility.md`](./compatibility.md) for the tier model).
 
 Non-anonymous REST requests authenticate with WordPress **Application
 Passwords** over HTTP Basic auth; self-service management lives at
@@ -156,9 +158,6 @@ Worth knowing before adopting an existing WordPress site (the authoritative,
 fully annotated list is in [`compatibility.md`](./compatibility.md) and the
 [`README.md`](../README.md)):
 
-- **REST deletes return `501`.** `DELETE /wp-json/wp/v2/media/{id}` and
-  `.../users/{id}` are not exposed. REST *create* and *update* for media and
-  users shipped in M10.B/M10.C; only the delete verb remains deferred.
 - **Only `category` and `post_tag` taxonomies, and only `post` archives.**
   Custom taxonomies and custom post types are out of scope, and archives list
   `post` rows only.

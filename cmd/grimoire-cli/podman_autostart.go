@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"text/template"
+	"time"
 )
 
 // launchAgentLabel is the reverse-DNS label for the LaunchAgent. Kept stable so
@@ -89,6 +90,15 @@ func launchAgentPath(home string) string {
 	return filepath.Join(home, "Library", "LaunchAgents", launchAgentLabel+".plist")
 }
 
+// autostartMarkerPath is the on-disk marker `autostart install` writes to record
+// that autostart is configured. `up` checks for it (falling back to the
+// LaunchAgent plist) and, when present, reapplies the --restart always policy so
+// the autostart intent is not silently lost when `up` recreates containers after
+// a `down`.
+func autostartMarkerPath(home string) string {
+	return filepath.Join(home, ".local", "share", "grimoire", "podman-autostart")
+}
+
 // podmanAutostartInstall wires both layers on.
 func podmanAutostartInstall(ctx context.Context, r Runner, w io.Writer, cfg podmanConfig, home, podmanPath string) error {
 	fmt.Fprintln(w, "Autostart — Layer A: containers return when the podman VM restarts.")
@@ -117,6 +127,19 @@ func podmanAutostartInstall(ctx context.Context, r Runner, w io.Writer, cfg podm
 	if err := r.Run(ctx, "launchctl", "load", path); err != nil {
 		return fmt.Errorf("launchctl load: %w", err)
 	}
+
+	// Persist a marker so `up` can detect that autostart is configured and
+	// reapply --restart always when it recreates containers after a `down`.
+	marker := autostartMarkerPath(home)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		return fmt.Errorf("create autostart marker dir: %w", err)
+	}
+	markerContent := "podman autostart installed " + time.Now().UTC().Format(time.RFC3339) + "\n"
+	if err := os.WriteFile(marker, []byte(markerContent), 0o644); err != nil {
+		return fmt.Errorf("write autostart marker: %w", err)
+	}
+	fmt.Fprintf(w, "  wrote autostart marker %s (so `up` reapplies --restart always)\n", marker)
+
 	fmt.Fprintln(w, "Installed. NOTE: the LaunchAgent fires at USER LOGIN, not at the "+
 		"pre-login boot screen, so the stack returns after you log in.")
 	return nil
@@ -133,6 +156,13 @@ func podmanAutostartUninstall(ctx context.Context, r Runner, w io.Writer, cfg po
 		fmt.Fprintf(w, "  (could not remove %s: %v)\n", path, err)
 	} else {
 		fmt.Fprintf(w, "  removed %s\n", path)
+	}
+
+	marker := autostartMarkerPath(home)
+	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(w, "  (could not remove autostart marker %s: %v)\n", marker, err)
+	} else {
+		fmt.Fprintf(w, "  removed autostart marker %s\n", marker)
 	}
 
 	fmt.Fprintln(w, "Layer A: clearing --restart and disabling podman-restart.service.")

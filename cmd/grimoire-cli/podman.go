@@ -113,14 +113,51 @@ func runPodmanUp(ctx context.Context, r Runner, w io.Writer, args []string) erro
 			"prefix; secrets-not-env-vars; overlay-not-greenfield migration; DB-health-before-\n"+
 			"dependents ordering; and cross-pod DNS (WordPress reaches the DB as wp-db-pod:3306,\n"+
 			"not localhost). The wp-db-password / wp-db-root-password secrets must already\n"+
-			"exist; `up` will tell you how to create one if it is missing.")
+			"exist; `up` will tell you how to create one if it is missing.\n\n"+
+			"-restart-always sets `--restart always` on the three stack containers at create\n"+
+			"time so an autostart policy survives a down/up recreate (the Fix-1 bug). Even\n"+
+			"without the flag, `up` auto-reapplies --restart always when autostart is already\n"+
+			"configured (a marker from `autostart install`, or the LaunchAgent plist is\n"+
+			"present), so the policy can never be silently dropped on recreate.")
+	restartAlways := fs.Bool("restart-always", false,
+		"set `--restart always` on the stack containers (wp-mysql, wp-wordpress, "+
+			"grimoire) so autostart survives a down/up recreate. Auto-applied when "+
+			"autostart is already configured.")
 	if done, err := parseFlags(fs, args); done {
 		return err
 	}
 	if err := requirePodman(ctx, r); err != nil {
 		return err
 	}
+
+	// Resolve the restart policy in the thin dispatch layer (podmanUp stays pure
+	// and never touches the filesystem/home). Explicit flag wins; otherwise
+	// auto-reapply when autostart is detected so the Fix-1 bug cannot recur.
+	switch {
+	case *restartAlways:
+		cfg.RestartPolicy = "always"
+	default:
+		if home, err := os.UserHomeDir(); err == nil && autostartConfigured(home) {
+			cfg.RestartPolicy = "always"
+			fmt.Fprintln(w, "Autostart is configured; reapplying --restart always on the "+
+				"stack containers so the autostart policy survives this recreate.")
+		}
+	}
 	return podmanUp(ctx, r, w, *cfg, defaultUpOptions())
+}
+
+// autostartConfigured reports whether autostart has been set up for this user,
+// by the persisted marker `autostart install` writes, or (fallback) the presence
+// of the LaunchAgent plist. Used by `up` to decide whether to reapply the
+// --restart always policy on a recreate.
+func autostartConfigured(home string) bool {
+	if _, err := os.Stat(autostartMarkerPath(home)); err == nil {
+		return true
+	}
+	if _, err := os.Stat(launchAgentPath(home)); err == nil {
+		return true
+	}
+	return false
 }
 
 func runPodmanDown(ctx context.Context, r Runner, w io.Writer, args []string) error {

@@ -124,6 +124,16 @@ type podmanConfig struct {
 
 	// Machine is the podman machine VM name used by autostart Layer B.
 	Machine string
+
+	// RestartPolicy, when non-empty, sets --restart=<policy> on the three
+	// long-lived stack containers (wp-mysql, wp-wordpress, grimoire) at create
+	// time. Empty (the default) omits --restart entirely, preserving the
+	// historical behavior. It is set to "always" by `up` either via the
+	// -restart-always flag or automatically when autostart is detected, so the
+	// autostart policy is not silently lost when `up` recreates containers after
+	// a `down`. It is deliberately NOT wired into addFlags or applyEnv: the only
+	// entry point is the `up` subcommand's -restart-always flag / auto-reapply.
+	RestartPolicy string
 }
 
 // defaultPodmanConfig returns the verified defaults for the live local stack.

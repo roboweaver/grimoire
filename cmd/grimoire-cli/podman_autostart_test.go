@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"io"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -86,6 +89,85 @@ func TestMachineSSHSystemctlArgv(t *testing.T) {
 	if !strings.Contains(disable[len(disable)-1], "disable podman-restart.service") {
 		t.Errorf("disable argv must disable the service; got %v", disable)
 	}
+}
+
+// TestAutostartMarkerInstallUninstall proves Fix-1's persisted marker lifecycle
+// under a temp home, with no live podman/launchctl (the fakeRunner records every
+// call and never executes). install writes the marker; uninstall removes it.
+func TestAutostartMarkerInstallUninstall(t *testing.T) {
+	home := t.TempDir()
+	marker := autostartMarkerPath(home)
+
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("marker should not exist before install; stat err=%v", err)
+	}
+
+	f := newFakeRunner()
+	cfg := defaultPodmanConfig()
+	if err := podmanAutostartInstall(context.Background(), f, io.Discard, cfg, home, "/opt/homebrew/bin/podman"); err != nil {
+		t.Fatalf("install error: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("install must write the marker %s; stat err=%v", marker, err)
+	}
+
+	if err := podmanAutostartUninstall(context.Background(), f, io.Discard, cfg, home); err != nil {
+		t.Fatalf("uninstall error: %v", err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("uninstall must remove the marker; stat err=%v", err)
+	}
+
+	// Uninstall again must be a no-op (marker already gone, os.IsNotExist ignored).
+	if err := podmanAutostartUninstall(context.Background(), f, io.Discard, cfg, home); err != nil {
+		t.Fatalf("second uninstall must not error on a missing marker: %v", err)
+	}
+}
+
+// TestAutostartConfiguredDetection proves `up`'s detection helper: true when the
+// marker exists, true (fallback) when only the LaunchAgent plist exists, false
+// when neither is present.
+func TestAutostartConfiguredDetection(t *testing.T) {
+	// Neither present.
+	empty := t.TempDir()
+	if autostartConfigured(empty) {
+		t.Error("autostartConfigured must be false when nothing is installed")
+	}
+
+	// Marker only.
+	markerHome := t.TempDir()
+	marker := autostartMarkerPath(markerHome)
+	if err := os.MkdirAll(dir(marker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(marker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !autostartConfigured(markerHome) {
+		t.Error("autostartConfigured must be true when the marker exists")
+	}
+
+	// LaunchAgent plist only (fallback path).
+	plistHome := t.TempDir()
+	plist := launchAgentPath(plistHome)
+	if err := os.MkdirAll(dir(plist), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plist, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !autostartConfigured(plistHome) {
+		t.Error("autostartConfigured must fall back to the LaunchAgent plist")
+	}
+}
+
+// dir is a tiny filepath.Dir shim kept local to the test to avoid an import.
+func dir(p string) string {
+	i := strings.LastIndex(p, "/")
+	if i < 0 {
+		return "."
+	}
+	return p[:i]
 }
 
 // TestMachineStartArgv pins the command the LaunchAgent runs.

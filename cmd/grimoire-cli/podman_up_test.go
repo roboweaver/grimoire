@@ -142,6 +142,51 @@ func TestUpDependencyOrder(t *testing.T) {
 	}
 }
 
+// TestUpRestartPolicyFlowsToRunArgv proves Fix-1 end to end: driving podmanUp
+// with a cfg whose RestartPolicy="always" records a `run` for each of
+// wp-mysql/wp-wordpress/grimoire that includes --restart=always, while an empty
+// policy records none.
+func TestUpRestartPolicyFlowsToRunArgv(t *testing.T) {
+	run := func(policy string) [][]string {
+		f := newFakeRunner()
+		f.existsOK["wp-db-password"] = true
+		f.existsOK["wp-db-root-password"] = true
+		f.healthSequence = []string{"healthy"}
+		cfg := defaultPodmanConfig()
+		cfg.RestartPolicy = policy
+		if err := podmanUp(context.Background(), f, io.Discard, cfg, fastUpOptions()); err != nil {
+			t.Fatalf("podmanUp(policy=%q) error: %v", policy, err)
+		}
+		return f.runCalls
+	}
+
+	cfg := defaultPodmanConfig()
+	// With "always": each stack container's run carries --restart=always.
+	withAlways := run("always")
+	for _, ctr := range []string{cfg.DBCtr, cfg.WebCtr, cfg.GrimoireCtr} {
+		found := false
+		for _, call := range withAlways {
+			if isRunOf(call, ctr) && contains(call, "--restart=always") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("run of %s must carry --restart=always; runCalls=%v", ctr, withAlways)
+		}
+	}
+
+	// With "": no run (stack or one-shot) carries --restart in any form.
+	withNone := run("")
+	for _, call := range withNone {
+		for _, a := range call {
+			if strings.HasPrefix(a, "--restart") {
+				t.Errorf("no run should carry --restart with empty policy; got %v", call)
+			}
+		}
+	}
+}
+
 // isRunOf reports whether argv is a `podman run ... --name <ctr> ...`.
 func isRunOf(argv []string, ctr string) bool {
 	if len(argv) < 2 || argv[0] != "podman" || argv[1] != "run" {

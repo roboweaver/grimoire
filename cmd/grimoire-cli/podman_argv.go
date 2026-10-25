@@ -18,6 +18,18 @@ func publish(host, container int) string {
 	return strconv.Itoa(host) + ":" + strconv.Itoa(container)
 }
 
+// restartFlag returns the `--restart=<policy>` token (single-token form) when a
+// restart policy is configured, or nil otherwise. It is appended to the run
+// argv of the three long-lived stack containers so an autostart policy survives
+// a down/up recreate. It is deliberately NOT used by the migrate one-shots
+// (which are --rm throwaways) or by any pod-create argv.
+func (c podmanConfig) restartFlag() []string {
+	if c.RestartPolicy == "" {
+		return nil
+	}
+	return []string{"--restart=" + c.RestartPolicy}
+}
+
 // --- network / volumes / secrets ---------------------------------------------
 
 func (c podmanConfig) networkExistsArgv() []string {
@@ -95,16 +107,19 @@ func (c podmanConfig) podRmArgv(pod string) []string {
 // cap, the healthcheck the up gate polls, and the MySQL server tuning the
 // memory-constrained podman machine needs.
 func (c podmanConfig) dbRunArgv() []string {
-	return []string{
+	argv := []string{
 		"run", "-d", "--pod", c.DBPod, "--name", c.DBCtr,
+	}
+	argv = append(argv, c.restartFlag()...)
+	argv = append(argv,
 		"--secret", c.RootSecret, "--secret", c.UserSecret,
 		// *_FILE: the image reads the password from the mounted secret file, so
 		// the credential never appears in env or in `podman inspect`.
-		"-e", "MYSQL_ROOT_PASSWORD_FILE=/run/secrets/" + c.RootSecret,
-		"-e", "MYSQL_PASSWORD_FILE=/run/secrets/" + c.UserSecret,
-		"-e", "MYSQL_DATABASE=" + c.DBName,
-		"-e", "MYSQL_USER=" + c.DBUser,
-		"-v", c.DBVolume + ":/var/lib/mysql",
+		"-e", "MYSQL_ROOT_PASSWORD_FILE=/run/secrets/"+c.RootSecret,
+		"-e", "MYSQL_PASSWORD_FILE=/run/secrets/"+c.UserSecret,
+		"-e", "MYSQL_DATABASE="+c.DBName,
+		"-e", "MYSQL_USER="+c.DBUser,
+		"-v", c.DBVolume+":/var/lib/mysql",
 		"--memory", c.DBMemory,
 		// Health gate: the up sequence polls {{.State.Health.Status}} until
 		// this reports healthy before starting any dependent.
@@ -116,7 +131,8 @@ func (c podmanConfig) dbRunArgv() []string {
 		"--innodb_buffer_pool_size=128M",
 		"--max_connections=50",
 		"--performance_schema=OFF",
-	}
+	)
+	return argv
 }
 
 // webRunArgv builds the "podman run" for wp-wordpress.
@@ -127,20 +143,24 @@ func (c podmanConfig) dbRunArgv() []string {
 // WORDPRESS_DB_PASSWORD_FILE, never a plaintext env var. WORDPRESS_TABLE_PREFIX
 // carries the same prefix grimoire uses, so they share the same tables.
 func (c podmanConfig) webRunArgv() []string {
-	return []string{
+	argv := []string{
 		"run", "-d", "--pod", c.WebPod, "--name", c.WebCtr,
+	}
+	argv = append(argv, c.restartFlag()...)
+	argv = append(argv,
 		"--secret", c.UserSecret,
-		"-e", "WORDPRESS_DB_HOST=" + c.WordPressDBHost(),
-		"-e", "WORDPRESS_DB_USER=" + c.DBUser,
-		"-e", "WORDPRESS_DB_PASSWORD_FILE=/run/secrets/" + c.UserSecret,
-		"-e", "WORDPRESS_DB_NAME=" + c.DBName,
-		"-e", "WORDPRESS_TABLE_PREFIX=" + c.TablePrefix,
+		"-e", "WORDPRESS_DB_HOST="+c.WordPressDBHost(),
+		"-e", "WORDPRESS_DB_USER="+c.DBUser,
+		"-e", "WORDPRESS_DB_PASSWORD_FILE=/run/secrets/"+c.UserSecret,
+		"-e", "WORDPRESS_DB_NAME="+c.DBName,
+		"-e", "WORDPRESS_TABLE_PREFIX="+c.TablePrefix,
 		"-e", "WORDPRESS_DEBUG=1",
-		"-v", c.HTMLVolume + ":/var/www/html",
-		"-v", c.ContentVolume + ":" + c.UploadsMount,
+		"-v", c.HTMLVolume+":/var/www/html",
+		"-v", c.ContentVolume+":"+c.UploadsMount,
 		"--memory", c.WebMemory,
 		c.WordPressImage,
-	}
+	)
+	return argv
 }
 
 // grimoireRunArgv builds the "podman run" for the grimoire container.
@@ -153,14 +173,18 @@ func (c podmanConfig) webRunArgv() []string {
 // wp-content volume is mounted at the same path WordPress uses, which is what
 // makes the two share uploads (shared-fate).
 func (c podmanConfig) grimoireRunArgv() []string {
-	return []string{
+	argv := []string{
 		"run", "-d", "--pod", c.GrimoirePod, "--name", c.GrimoireCtr,
+	}
+	argv = append(argv, c.restartFlag()...)
+	argv = append(argv,
 		"--secret", c.UserSecret,
-		"-e", "GRIMOIRE_DATABASE_TABLE_PREFIX=" + c.TablePrefix,
-		"-v", c.ContentVolume + ":" + c.UploadsMount,
+		"-e", "GRIMOIRE_DATABASE_TABLE_PREFIX="+c.TablePrefix,
+		"-v", c.ContentVolume+":"+c.UploadsMount,
 		"--memory", c.GrimoireMemory,
 		c.GrimoireImage,
-	}
+	)
+	return argv
 }
 
 // WordPressDBHost is the cross-pod address WordPress uses to reach MySQL:

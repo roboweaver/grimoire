@@ -188,6 +188,70 @@ func TestNonDefaultConfigFlowsIntoArgv(t *testing.T) {
 	}
 }
 
+// TestRestartPolicyArgv pins Fix-1: with RestartPolicy="always", the three
+// long-lived stack run argv each carry the single-token `--restart=always`,
+// placed among the run flags before the image; the migrate one-shots and the
+// pod-create argv never carry --restart.
+func TestRestartPolicyArgv(t *testing.T) {
+	cfg := defaultPodmanConfig()
+	cfg.RestartPolicy = "always"
+
+	for _, tc := range []struct {
+		name string
+		argv []string
+	}{
+		{"db", cfg.dbRunArgv()},
+		{"web", cfg.webRunArgv()},
+		{"grimoire", cfg.grimoireRunArgv()},
+	} {
+		if !slices.Contains(tc.argv, "--restart=always") {
+			t.Errorf("%s run argv must contain --restart=always; got %v", tc.name, tc.argv)
+		}
+		// Single-token form: the two-token "--restart always" must not appear.
+		if hasFlagValue(tc.argv, "--restart", "always") {
+			t.Errorf("%s run argv must use the single-token --restart=always form; got %v", tc.name, tc.argv)
+		}
+		// The flag must sit before the image (among the run flags).
+		restartIdx := slices.Index(tc.argv, "--restart=always")
+		imageIdx := slices.IndexFunc(tc.argv, func(s string) bool {
+			return s == cfg.MySQLImage || s == cfg.WordPressImage || s == cfg.GrimoireImage
+		})
+		if imageIdx >= 0 && restartIdx > imageIdx {
+			t.Errorf("%s --restart=always must come before the image; got %v", tc.name, tc.argv)
+		}
+	}
+
+	// One-shots and pod-create argv must never carry --restart.
+	for _, argv := range [][]string{
+		cfg.cliOneShotArgv("migrate", "-overlay"),
+		cfg.dbPodCreateArgv(), cfg.webPodCreateArgv(), cfg.grimoirePodCreateArgv(),
+	} {
+		if slices.Contains(argv, "--restart=always") || slices.Contains(argv, "--restart") {
+			t.Errorf("one-shot / pod-create argv must not carry --restart; got %v", argv)
+		}
+	}
+}
+
+// TestRestartPolicyEmptyOmitsFlag pins the default (unchanged) behavior: with an
+// empty RestartPolicy none of the run argv carry --restart in any form.
+func TestRestartPolicyEmptyOmitsFlag(t *testing.T) {
+	cfg := defaultPodmanConfig() // RestartPolicy == ""
+	for _, tc := range []struct {
+		name string
+		argv []string
+	}{
+		{"db", cfg.dbRunArgv()},
+		{"web", cfg.webRunArgv()},
+		{"grimoire", cfg.grimoireRunArgv()},
+	} {
+		for _, a := range tc.argv {
+			if strings.HasPrefix(a, "--restart") {
+				t.Errorf("%s run argv must omit --restart when RestartPolicy is empty; got %v", tc.name, tc.argv)
+			}
+		}
+	}
+}
+
 // TestBuildArgv pins the build command shape.
 func TestBuildArgv(t *testing.T) {
 	cfg := defaultPodmanConfig()

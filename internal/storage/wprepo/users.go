@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/storage/rebind"
 	"github.com/uptrace/bun"
 )
 
@@ -364,4 +365,68 @@ func (r *UserMetaRepo) ByUser(ctx context.Context, userID int64) (map[string]str
 		out[m.Key.String] = m.Value.String
 	}
 	return out, nil
+}
+
+// Delete removes a user and reassigns-or-deletes their authored content in one
+// transaction (Req 9). reassignTo > 0 sets post_author = reassignTo on every
+// authored {prefix}posts row (their postmeta/relationships survive under the new
+// author); reassignTo == 0 deletes the authored posts together with their
+// {prefix}postmeta and {prefix}term_relationships (no orphan). In both branches
+// the authored-content step runs BEFORE the {prefix}usermeta and {prefix}users
+// rows are removed. Returns domain.ErrNotFound when no user has the given ID
+// (Req 9.5).
+func (r *UserRepo) Delete(ctx context.Context, id int64, reassignTo int64) error {
+	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		pID := rebind.Ident(vendorOf(r.db), "ID")
+		if reassignTo > 0 {
+			if _, err := tx.ExecContext(ctx,
+				"UPDATE "+r.prefix+"posts SET post_author = ? WHERE post_author = ?", reassignTo, id); err != nil {
+				return err
+			}
+		} else {
+			rows, err := tx.QueryContext(ctx,
+				"SELECT "+pID+" FROM "+r.prefix+"posts WHERE post_author = ?", id)
+			if err != nil {
+				return err
+			}
+			var postIDs []int64
+			for rows.Next() {
+				var pid int64
+				if err := rows.Scan(&pid); err != nil {
+					rows.Close()
+					return err
+				}
+				postIDs = append(postIDs, pid)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return err
+			}
+			rows.Close()
+			for _, pid := range postIDs {
+				if _, err := tx.ExecContext(ctx,
+					"DELETE FROM "+r.prefix+"term_relationships WHERE object_id = ?", pid); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx,
+					"DELETE FROM "+r.prefix+"postmeta WHERE post_id = ?", pid); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.ExecContext(ctx,
+				"DELETE FROM "+r.prefix+"posts WHERE post_author = ?", id); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM "+r.prefix+"usermeta WHERE user_id = ?", id); err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx,
+			"DELETE FROM "+r.prefix+"users WHERE "+pID+" = ?", id)
+		if err != nil {
+			return err
+		}
+		return errNotFoundIfZero(res)
+	})
 }

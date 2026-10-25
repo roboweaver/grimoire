@@ -424,3 +424,5 @@ func TestAdminMediaUploadCapabilityMatrix(t *testing.T) {
 		})
 	}
 }
+
+func (w *authorCapturingMediaWriter) Delete(context.Context, int64) error { return nil }

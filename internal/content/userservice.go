@@ -205,3 +205,23 @@ func (s *UserService) UpdateProfile(ctx context.Context, actor auth.Principal, i
 	}
 	return s.users.ByID(ctx, id) // re-read so the handler envelopes the stored values (Req 7.6)
 }
+
+// Delete authorizes and performs a user hard delete. It requires delete_users
+// (ErrForbidden otherwise, nothing deleted); the self-delete 403 and the
+// reassign-target existence check are the handler's responsibility, so by the
+// time Delete runs the actor is authorized and reassignTo is already validated.
+// It loads the stored user as "previous" (bubbling domain.ErrNotFound) before
+// delegating the transactional reassign/delete to UserRepository.Delete.
+func (s *UserService) Delete(ctx context.Context, actor auth.Principal, id int64, reassignTo int64) (domain.User, error) {
+	if !auth.CanDeleteUsers(actor) {
+		return domain.User{}, ErrForbidden
+	}
+	prev, err := s.users.ByID(ctx, id)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := s.users.Delete(ctx, id, reassignTo); err != nil {
+		return domain.User{}, err
+	}
+	return prev, nil
+}

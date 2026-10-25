@@ -719,3 +719,5 @@ func (b *multipartBuf) writeFile(t *testing.T, field, filename, contentType stri
 		t.Fatalf("close multipart writer: %v", err)
 	}
 }
+
+func (*rollbackFailWriter) Delete(context.Context, int64) error { return nil }

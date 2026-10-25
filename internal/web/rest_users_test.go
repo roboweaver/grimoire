@@ -962,13 +962,13 @@ func TestRESTUserWriteVerbsNilServiceFallBackTo501(t *testing.T) {
 	}
 }
 
-// TestRESTUserDeleteAndCollectionStubsStay501 — Req 8.1/8.2/8.3: even with the
-// User_Write_Service FULLY WIRED (newRESTUserWriteRouter + adminUserFake), the
-// DELETE routes and the collection PUT/PATCH /users routes stay restNotImplemented
-// 501 — they are never reinterpreted as writes and never invoke the service.
-// The admin fake clears auth and CSRF, so a 501 here proves the registration
-// itself is the stub, not an authorization short-circuit.
-func TestRESTUserDeleteAndCollectionStubsStay501(t *testing.T) {
+// TestRESTUserCollectionWriteStubsStay501 — even with the User_Write_Service
+// FULLY WIRED (newRESTUserWriteRouter + adminUserFake), the COLLECTION write
+// verbs DELETE/PUT/PATCH /users stay restNotImplemented 501 — there is no
+// collection-level user write. (The single-item DELETE /users/{id} is live as
+// of M11 — see rest_users_delete_test.go; it is no longer a stub and is not
+// asserted here.)
+func TestRESTUserCollectionWriteStubsStay501(t *testing.T) {
 	deleteReq := func(target string) *http.Request {
 		req := httptest.NewRequest(http.MethodDelete, target, nil)
 		req.AddCookie(&http.Cookie{Name: "grimoire_session", Value: "anything"})
@@ -987,7 +987,6 @@ func TestRESTUserDeleteAndCollectionStubsStay501(t *testing.T) {
 		req  *http.Request
 	}{
 		{"DELETE /users", deleteReq("/wp-json/wp/v2/users")},
-		{"DELETE /users/{id}", deleteReq("/wp-json/wp/v2/users/1")},
 		{"PUT /users (collection)", collectionReq(http.MethodPut)},
 		{"PATCH /users (collection)", collectionReq(http.MethodPatch)},
 	}

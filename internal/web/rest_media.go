@@ -48,7 +48,11 @@ func (s *Server) registerRESTMedia(r chi.Router) {
 			r.Method(m, "/media/{id}", restNotImplemented("rest_cannot_edit", "Updating or deleting media"))
 		}
 	}
-	r.Method(http.MethodDelete, "/media/{id}", restNotImplemented("rest_cannot_edit", "Updating or deleting media"))
+	if s.mediaWrite != nil {
+		r.Method(http.MethodDelete, "/media/{id}", s.handleRESTMediaDelete())
+	} else {
+		r.Method(http.MethodDelete, "/media/{id}", restNotImplemented("rest_cannot_edit", "Updating or deleting media"))
+	}
 }
 
 // handleRESTMediaCollection serves GET .../media: a paginated collection of
@@ -357,4 +361,64 @@ func (s *Server) mapRESTMedia(r *http.Request, m domain.Media) (map[string]any, 
 		return withEnvelope(mapped, b.links, nil)
 	}
 	return withEnvelope(mapped, b.links, embedded)
+}
+
+// handleRESTMediaDelete serves DELETE .../media/{id} (Req 1-4). Auth matches the
+// create/update handlers: an Application Password skips CSRF; a session enforces
+// the M4 X-CSRF-Token contract. {id} must parse to a positive int (else 404
+// rest_post_invalid_id). force=true is mandatory (else 400
+// rest_trash_not_supported), read from the query only. The "previous" envelope
+// is mapRESTMedia(cur) computed BEFORE the service delete; on success it responds
+// 200 {"deleted": true, "previous": ...}.
+func (s *Server) handleRESTMediaDelete() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !isAppPasswordAuth(r.Context()) {
+			if _, hasSession := sessionFrom(r.Context()); hasSession {
+				if !s.requireSessionCSRFREST(w, r) {
+					return
+				}
+			}
+		}
+		principal, _ := PrincipalFrom(r.Context())
+
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid media ID.")
+			return
+		}
+		if !restForceDelete(r) {
+			writeRESTError(w, http.StatusBadRequest, "rest_trash_not_supported",
+				"Supply force=true to delete this media.")
+			return
+		}
+
+		cur, err := s.restMedia.ByID(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid media ID.")
+				return
+			}
+			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not look up media.")
+			return
+		}
+		previous, err := s.mapRESTMedia(r, cur)
+		if err != nil {
+			writeRESTError(w, http.StatusInternalServerError, "rest_delete_failed", "Could not map media.")
+			return
+		}
+
+		if _, err := s.mediaWrite.Delete(r.Context(), principal, id); err != nil {
+			switch {
+			case errors.Is(err, domain.ErrNotFound):
+				writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid media ID.")
+			case errors.Is(err, content.ErrForbidden):
+				writeRESTError(w, http.StatusForbidden, "rest_cannot_delete",
+					"Sorry, you are not allowed to delete this media.")
+			default:
+				writeRESTError(w, http.StatusInternalServerError, "rest_delete_failed", "Could not delete media.")
+			}
+			return
+		}
+		_ = writeRESTResponse(w, r, http.StatusOK, restDeleteEnvelope(previous))
+	}
 }

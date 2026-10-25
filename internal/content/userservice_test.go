@@ -23,6 +23,9 @@ type fakeUserRepo struct {
 	// order, so tests can assert partial-update (only supplied fields) and the
 	// no-call case (a description-only update must NOT touch the users table).
 	updateProfileCalls []updateProfileCall
+
+	deleteCalls []deleteUserCall
+	deleteErr   error
 }
 
 // updateProfileCall captures a single UserRepository.UpdateProfile invocation:
@@ -30,6 +33,11 @@ type fakeUserRepo struct {
 type updateProfileCall struct {
 	id     int64
 	fields domain.UserProfileFields
+}
+
+// deleteUserCall captures a single UserRepository.Delete invocation.
+type deleteUserCall struct {
+	id, reassignTo int64
 }
 
 func newFakeUserRepo() *fakeUserRepo { return &fakeUserRepo{byID: map[int64]domain.User{}} }
@@ -524,4 +532,13 @@ func TestUpdateProfileDescriptionUnfilteredHTMLSurvivesVerbatim(t *testing.T) {
 	if got := mr.m[uid]["description"]; got != descIn {
 		t.Errorf("unfiltered_html description = %q, want verbatim %q (tier C)", got, descIn)
 	}
+}
+
+func (f *fakeUserRepo) Delete(_ context.Context, id int64, reassignTo int64) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deleteCalls = append(f.deleteCalls, deleteUserCall{id: id, reassignTo: reassignTo})
+	delete(f.byID, id)
+	return nil
 }

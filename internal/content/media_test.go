@@ -58,6 +58,8 @@ type fakeMediaWriter struct {
 	createErr error
 	parentErr error
 	updateErr error
+	deleted   int64
+	deleteErr error
 }
 
 func (f *fakeMediaWriter) Create(_ context.Context, m domain.Media) (int64, error) {
@@ -206,4 +208,9 @@ func TestMediaServiceStoreDoesNotInsertOnFileWriteFailure(t *testing.T) {
 	if len(writer.created) != 0 {
 		t.Fatalf("db insert should not run on file write failure: %+v", writer.created)
 	}
+}
+
+func (f *fakeMediaWriter) Delete(_ context.Context, id int64) error {
+	f.deleted = id
+	return f.deleteErr
 }

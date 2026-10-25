@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/storage/rebind"
 	"github.com/uptrace/bun"
 )
 
@@ -248,4 +249,29 @@ func upsertPostMeta(ctx context.Context, tx bun.Tx, prefix string, postID int64,
 	ins := "INSERT INTO " + prefix + "postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)"
 	_, err := tx.ExecContext(ctx, ins, postID, key, value)
 	return err
+}
+
+// Delete hard-deletes an attachment's {prefix}term_relationships rows, its
+// {prefix}postmeta rows, and finally its {prefix}posts row, in one transaction,
+// deepest-dependency-first so no orphan survives a partial failure (Req 4.1).
+// It returns domain.ErrNotFound when the posts delete affected no row (Req 4.4),
+// matching PostWriter.Delete. It does NOT touch the on-disk file.
+func (r *MediaRepo) Delete(ctx context.Context, id int64) error {
+	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM "+r.prefix+"term_relationships WHERE object_id = ?", id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM "+r.prefix+"postmeta WHERE post_id = ?", id); err != nil {
+			return err
+		}
+		pID := rebind.Ident(vendorOf(r.db), "ID")
+		res, err := tx.ExecContext(ctx,
+			"DELETE FROM "+r.prefix+"posts WHERE "+pID+" = ?", id)
+		if err != nil {
+			return err
+		}
+		return errNotFoundIfZero(res)
+	})
 }

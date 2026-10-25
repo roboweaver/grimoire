@@ -47,7 +47,7 @@ func (s *Server) registerRESTUsers(r chi.Router) {
 		for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch} {
 			r.Method(m, "/users/{id}", s.handleRESTUserUpdate())
 		}
-		r.Method(http.MethodDelete, "/users/{id}", restNotImplemented("rest_cannot_edit", "Updating or deleting a user"))
+		r.Method(http.MethodDelete, "/users/{id}", s.handleRESTUserDelete())
 	} else {
 		for _, m := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
 			r.Method(m, "/users/{id}", restNotImplemented("rest_cannot_edit", "Updating or deleting a user"))
@@ -507,5 +507,92 @@ func (s *Server) handleRESTUserUpdate() http.HandlerFunc {
 			return
 		}
 		_ = writeRESTResponse(w, r, http.StatusOK, enveloped)
+	}
+}
+
+// handleRESTUserDelete serves DELETE .../users/{id} (Req 5-9). Auth matches
+// handleRESTUserUpdate: an Application Password skips CSRF; a session enforces
+// the M4 X-CSRF-Token contract. {id} must parse to a positive int (else 404
+// rest_user_invalid_id). force=true is mandatory (else 400
+// rest_trash_not_supported). A self-delete (id == caller) is 403
+// rest_user_cannot_delete regardless of capability. reassign is required and
+// validated: "false" -> delete content, a positive id that resolves to an
+// existing user -> reassign, anything else -> 400 rest_user_invalid_reassign.
+// The "previous" envelope is the edit-context mapRESTUser(cur) computed before
+// the delete; on success it responds 200 {"deleted": true, "previous": ...}.
+func (s *Server) handleRESTUserDelete() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !isAppPasswordAuth(r.Context()) {
+			if _, hasSession := sessionFrom(r.Context()); hasSession {
+				if !s.requireSessionCSRFREST(w, r) {
+					return
+				}
+			}
+		}
+		principal, _ := PrincipalFrom(r.Context())
+
+		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeRESTError(w, http.StatusNotFound, "rest_user_invalid_id", "Invalid user ID.")
+			return
+		}
+		if !restForceDelete(r) {
+			writeRESTError(w, http.StatusBadRequest, "rest_trash_not_supported",
+				"Supply force=true to delete this user.")
+			return
+		}
+		// Self-delete is forbidden regardless of capability, decided against {id}
+		// and the resolved principal.
+		if id == principal.UserID {
+			writeRESTError(w, http.StatusForbidden, "rest_user_cannot_delete",
+				"Sorry, you are not allowed to delete yourself.")
+			return
+		}
+		reassignTo, ok := parseRESTReassign(r)
+		if !ok {
+			writeRESTError(w, http.StatusBadRequest, "rest_user_invalid_reassign",
+				"Invalid reassign parameter.")
+			return
+		}
+		if reassignTo > 0 {
+			if _, err := s.restUsers.ByID(r.Context(), reassignTo); err != nil {
+				if errors.Is(err, domain.ErrNotFound) {
+					writeRESTError(w, http.StatusBadRequest, "rest_user_invalid_reassign",
+						"The reassign user does not exist.")
+					return
+				}
+				writeRESTError(w, http.StatusInternalServerError, "rest_user_delete_failed", "Could not look up reassign user.")
+				return
+			}
+		}
+
+		cur, err := s.restUsers.ByID(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				writeRESTError(w, http.StatusNotFound, "rest_user_invalid_id", "Invalid user ID.")
+				return
+			}
+			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not look up user.")
+			return
+		}
+		previous, err := s.mapRESTUser(r, cur, content.RESTContextEdit)
+		if err != nil {
+			writeRESTError(w, http.StatusInternalServerError, "rest_user_delete_failed", "Could not map user.")
+			return
+		}
+
+		if _, err := s.userWrite.Delete(r.Context(), principal, id, reassignTo); err != nil {
+			switch {
+			case errors.Is(err, content.ErrForbidden):
+				writeRESTError(w, http.StatusForbidden, "rest_user_cannot_delete",
+					"Sorry, you are not allowed to delete this user.")
+			case errors.Is(err, domain.ErrNotFound):
+				writeRESTError(w, http.StatusNotFound, "rest_user_invalid_id", "Invalid user ID.")
+			default:
+				writeRESTError(w, http.StatusInternalServerError, "rest_user_delete_failed", "Could not delete user.")
+			}
+			return
+		}
+		_ = writeRESTResponse(w, r, http.StatusOK, restDeleteEnvelope(previous))
 	}
 }

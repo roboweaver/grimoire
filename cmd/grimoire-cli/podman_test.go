@@ -23,6 +23,28 @@ func TestRunPodmanNoSubcommand(t *testing.T) {
 	}
 }
 
+// TestAutostartHelpPaths proves Fix 2: `autostart -h`, `--help`, `help`, and a
+// bare `autostart` print the subcommand usage and exit 0 (no error), while a
+// genuinely unknown action still errors. None of these paths reach a live
+// podman, so the test needs no runner.
+func TestAutostartHelpPaths(t *testing.T) {
+	for _, args := range [][]string{
+		{"autostart", "-h"},
+		{"autostart", "--help"},
+		{"autostart", "help"},
+		{"autostart"},
+	} {
+		if err := runPodman(args); err != nil {
+			t.Errorf("runPodman(%v) must print usage and return nil; got %v", args, err)
+		}
+	}
+
+	err := runPodman([]string{"autostart", "frobnicate"})
+	if err == nil || !strings.Contains(err.Error(), "unknown action") {
+		t.Fatalf("expected unknown-action error for a bogus action; got %v", err)
+	}
+}
+
 // TestFlagPrecedenceDefaultEnvFlag proves the resolution order flag > env >
 // default on the table prefix and grimoire port.
 func TestFlagPrecedenceDefaultEnvFlag(t *testing.T) {

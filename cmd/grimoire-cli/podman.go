@@ -208,11 +208,11 @@ func runPodmanBuild(ctx context.Context, r Runner, w io.Writer, args []string) e
 }
 
 func runPodmanAutostart(ctx context.Context, r Runner, w io.Writer, args []string) error {
-	if len(args) < 1 {
-		return errors.New("usage: grimoire-cli podman autostart <install|uninstall> [flags]")
-	}
-	action, rest := args[0], args[1:]
-	fs, cfg := newPodmanFlagSet("autostart "+action,
+	// Build the flag set FIRST so its rich Usage text is available before we
+	// read the positional action. This lets `-h`/`--help`/`help` and a bare
+	// `autostart` print usage and exit 0, consistent with up/down/status/build,
+	// instead of mistaking `-h` for an unknown action.
+	fs, cfg := newPodmanFlagSet("autostart",
 		"usage: grimoire-cli podman autostart <install|uninstall> [flags]\n\n"+
 			"Configure macOS auto-start after a reboot or a podman restart, in two layers:\n"+
 			"  Layer A — set --restart always on the three stack containers and enable the\n"+
@@ -220,6 +220,19 @@ func runPodmanAutostart(ctx context.Context, r Runner, w io.Writer, args []strin
 			"  Layer B — write a LaunchAgent that runs `podman machine start` at login.\n\n"+
 			"CAVEAT: a LaunchAgent fires at USER LOGIN, not the pre-login boot screen, so the\n"+
 			"stack comes back after you log in, not before. `uninstall` reverses both layers.")
+
+	// A bare `autostart`, or an explicit help request, prints usage and exits 0.
+	if len(args) < 1 {
+		fs.Usage()
+		return nil
+	}
+	switch args[0] {
+	case "-h", "--help", "help":
+		fs.Usage()
+		return nil
+	}
+
+	action, rest := args[0], args[1:]
 	if done, err := parseFlags(fs, rest); done {
 		return err
 	}

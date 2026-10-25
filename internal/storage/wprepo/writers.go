@@ -130,7 +130,10 @@ func (r *TermRepo) Create(ctx context.Context, t domain.Term) (int64, error) {
 		termID = id
 		q := "INSERT INTO " + r.prefix + "term_taxonomy " +
 			"(term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?)"
-		_, err = tx.ExecContext(ctx, q, termID, t.Taxonomy, "", 0, 0)
+		// parent is now t.ParentID (Req 1.2), replacing the hardcoded 0. The
+		// service has already validated it (exists, same taxonomy, no cycle),
+		// so a bad value never reaches here. 0 still means top-level (Req 1.3).
+		_, err = tx.ExecContext(ctx, q, termID, t.Taxonomy, "", t.ParentID, 0)
 		return err
 	})
 	if err != nil {
@@ -139,30 +142,51 @@ func (r *TermRepo) Create(ctx context.Context, t domain.Term) (int64, error) {
 	return termID, nil
 }
 
-// Update renames an existing term's name/slug by term_id, or ErrNotFound.
+// Update renames an existing term's name/slug on {prefix}terms and sets its
+// {prefix}term_taxonomy.parent, in one transaction so a rename+re-parent cannot
+// half-apply (Req 2.1). Returns ErrNotFound for a term_id that names no term.
 // Taxonomy is immutable via Update (Req 1.1/1.2 only describe rename); a
 // caller wanting to move a term to a different taxonomy would Delete and
 // re-Create.
 func (r *TermRepo) Update(ctx context.Context, t domain.Term) error {
-	res, err := r.db.NewUpdate().
-		TableExpr("?", bun.Ident(r.prefix+"terms")).
-		Set("name = ?", t.Name).
-		Set("slug = ?", t.Slug).
-		Where("term_id = ?", t.ID).
-		Exec(ctx)
-	if err != nil {
-		return err
-	}
-	// errNotFoundIfMissing (not errNotFoundIfZero) because MySQL's default
-	// driver reports RowsAffected=0 for a matched-but-unchanged UPDATE (a
-	// no-op rename submitting the term's current name/slug), while
-	// SQLite/PostgreSQL report 1 — using the naive zero-rows check here
-	// would 404 a legitimate no-op rename on MySQL specifically.
-	return errNotFoundIfMissing(ctx, res, func(ctx context.Context) (bool, error) {
-		return r.db.NewSelect().
+	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		res, err := tx.NewUpdate().
 			TableExpr("?", bun.Ident(r.prefix+"terms")).
+			Set("name = ?", t.Name).
+			Set("slug = ?", t.Slug).
 			Where("term_id = ?", t.ID).
-			Exists(ctx)
+			Exec(ctx)
+		if err != nil {
+			return err
+		}
+		// errNotFoundIfMissing (not errNotFoundIfZero) because MySQL's default
+		// driver reports RowsAffected=0 for a matched-but-unchanged UPDATE (a
+		// no-op rename submitting the term's current name/slug), while
+		// SQLite/PostgreSQL report 1 — using the naive zero-rows check here
+		// would 404 a legitimate no-op rename on MySQL specifically. The
+		// existence decision stays on the {prefix}terms row, inside the
+		// transaction so the Exists check sees the same snapshot; a missing
+		// term rolls back before term_taxonomy is touched (Req 2.5).
+		if err := errNotFoundIfMissing(ctx, res, func(ctx context.Context) (bool, error) {
+			return tx.NewSelect().
+				TableExpr("?", bun.Ident(r.prefix+"terms")).
+				Where("term_id = ?", t.ID).
+				Exists(ctx)
+		}); err != nil {
+			return err
+		}
+		// Re-parent on the taxonomy row. Keyed on term_id (every term has
+		// exactly one category/tag taxonomy row); 0 means top-level (Req 2.3).
+		// A 0-rows result here is not re-treated as ErrNotFound -- the
+		// {prefix}terms row is the source of truth.
+		if _, err := tx.NewUpdate().
+			TableExpr("?", bun.Ident(r.prefix+"term_taxonomy")).
+			Set("parent = ?", t.ParentID).
+			Where("term_id = ?", t.ID).
+			Exec(ctx); err != nil {
+			return err
+		}
+		return nil
 	})
 }
 

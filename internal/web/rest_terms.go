@@ -35,8 +35,9 @@ type restTerm struct {
 // value is auto-derived from Name (Req 6.2) -- and on update either field
 // may be omitted to leave it unchanged (Req 6.3's "name and/or slug").
 type restTermWriteRequest struct {
-	Name *string `json:"name"`
-	Slug *string `json:"slug"`
+	Name   *string `json:"name"`
+	Slug   *string `json:"slug"`
+	Parent *int64  `json:"parent"`
 }
 
 // registerRESTTerms registers the GET/POST .../categories, .../tags
@@ -256,20 +257,26 @@ func (s *Server) handleRESTTermCreate(taxonomy string) http.HandlerFunc {
 		if slug == "" {
 			slug = termSlugify(*body.Name)
 		}
-		id, err := s.termWrite.Create(r.Context(), principal, domain.Term{Name: *body.Name, Slug: slug, Taxonomy: taxonomy})
+		var parentID int64 // 0 == top-level when parent omitted or 0 (Req 1.3)
+		if body.Parent != nil {
+			parentID = *body.Parent
+		}
+		id, err := s.termWrite.Create(r.Context(), principal, domain.Term{Name: *body.Name, Slug: slug, Taxonomy: taxonomy, ParentID: parentID})
 		if err != nil {
-			if errors.Is(err, content.ErrForbidden) {
+			switch {
+			case errors.Is(err, content.ErrForbidden):
 				writeRESTError(w, http.StatusForbidden, "rest_cannot_create", "Sorry, you are not allowed to create terms as this user.")
-				return
+			case errors.Is(err, content.ErrTermParentCycle), errors.Is(err, content.ErrTermParentInvalid):
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid parent term.")
+			default:
+				writeRESTError(w, http.StatusInternalServerError, "rest_create_failed", "Could not create term.")
 			}
-			writeRESTError(w, http.StatusInternalServerError, "rest_create_failed", "Could not create term.")
 			return
 		}
-		created := domain.Term{ID: id, Name: *body.Name, Slug: slug, Taxonomy: taxonomy}
+		created := domain.Term{ID: id, Name: *body.Name, Slug: slug, Taxonomy: taxonomy, ParentID: parentID}
 		// Read after the write, so the new term is in the graph its own link
-		// is built from. A create accepts no parent, so the graph confirms
-		// what it already knows -- but it confirms it from the same source
-		// the archive route walks rather than from an assumption here.
+		// is built from, and the response reflects the written parent from the
+		// same source the archive route walks rather than an assumption here.
 		_ = writeRESTResponse(w, r, http.StatusCreated, s.termToREST(r, created, s.restTermCategoryGraph(r, taxonomy)))
 	}
 }
@@ -293,18 +300,26 @@ func (s *Server) handleRESTTermUpdate(taxonomy string) http.HandlerFunc {
 			writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid request body.")
 			return
 		}
-		updated := current
+		updated := current // carries current.Taxonomy and current.ParentID
 		if body.Name != nil {
 			updated.Name = *body.Name
 		}
 		if body.Slug != nil {
 			updated.Slug = *body.Slug
 		}
+		// Omitted parent -> leave updated.ParentID at current.ParentID
+		// (unchanged, Req 2.2). Explicit parent (incl. 0) -> set it (Req
+		// 2.1/2.3). The service then validates it against updated.Taxonomy.
+		if body.Parent != nil {
+			updated.ParentID = *body.Parent
+		}
 		principal, _ := PrincipalFrom(r.Context())
 		if err := s.termWrite.Update(r.Context(), principal, updated); err != nil {
 			switch {
 			case errors.Is(err, content.ErrForbidden):
 				writeRESTError(w, http.StatusForbidden, "rest_cannot_edit", "Sorry, you are not allowed to update this term.")
+			case errors.Is(err, content.ErrTermParentCycle), errors.Is(err, content.ErrTermParentInvalid):
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid parent term.")
 			case errors.Is(err, domain.ErrNotFound):
 				writeRESTError(w, http.StatusNotFound, "rest_term_invalid_id", "Invalid term ID.")
 			default:

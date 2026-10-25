@@ -109,7 +109,12 @@ func TestAdminTermCreateRequiresFields(t *testing.T) {
 }
 
 func TestAdminTermUpdateHappyPath(t *testing.T) {
-	tw := &fakeTermWrite{}
+	// M13: adminTermUpdate now load-and-merges from a TermsByIDs pre-read, so the
+	// current term must exist. Seed it; the name/slug supplied in the body merge
+	// over the stored values.
+	tw := &fakeTermWrite{byIDs: map[int64]domain.Term{
+		4: {ID: 4, Name: "Old", Slug: "old", Taxonomy: "category"},
+	}}
 	s := testTermServer(tw)
 	req := httptest.NewRequest(http.MethodPut, "/admin/api/terms/4", strings.NewReader(`{"name":"Renamed","slug":"renamed"}`)).
 		WithContext(principalCtx("manage_categories"))
@@ -126,7 +131,10 @@ func TestAdminTermUpdateHappyPath(t *testing.T) {
 }
 
 func TestAdminTermUpdateNotFound(t *testing.T) {
-	tw := &fakeTermWrite{update: func(domain.Term) error { return domain.ErrNotFound }}
+	// M13: an unknown id fails the load-and-merge pre-read (TermsByIDs returns
+	// nothing for id 999, byIDs unseeded) and the handler returns
+	// domain.ErrNotFound -> admin-JSON 404 before the writer is reached.
+	tw := &fakeTermWrite{}
 	s := testTermServer(tw)
 	req := httptest.NewRequest(http.MethodPut, "/admin/api/terms/999", strings.NewReader(`{"name":"x","slug":"x"}`)).
 		WithContext(principalCtx("manage_categories"))
@@ -139,16 +147,25 @@ func TestAdminTermUpdateNotFound(t *testing.T) {
 	assertJSONError(t, rec, "not_found")
 }
 
+// TestAdminTermUpdateRequiresFields asserts the M13 load-and-merge contract: the
+// old unconditional "name and slug are required" rule is removed (a parent-only
+// update is now valid), but a body supplying NONE of name/slug/parent changes
+// nothing and is still a 400. The term must exist first so the pre-read succeeds
+// and the "nothing supplied" check (not the 404 path) fires.
 func TestAdminTermUpdateRequiresFields(t *testing.T) {
-	s := testTermServer(&fakeTermWrite{})
+	tw := &fakeTermWrite{byIDs: map[int64]domain.Term{
+		4: {ID: 4, Name: "Old", Slug: "old", Taxonomy: "category"},
+	}}
+	s := testTermServer(tw)
 	req := httptest.NewRequest(http.MethodPut, "/admin/api/terms/4", strings.NewReader(`{"name":""}`)).
 		WithContext(principalCtx("manage_categories"))
 	req = withURLParam(req, "id", "4")
 	rec := httptest.NewRecorder()
 	s.jsonHandler(s.adminTermUpdate).ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
+		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
 	}
+	assertJSONError(t, rec, "bad_request")
 }
 
 func TestAdminTermDeleteHappyPath(t *testing.T) {

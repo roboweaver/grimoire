@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/sanitize"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/storage/migrate"
 	"github.com/roboweaver/grimoire/internal/storage/rebind"
@@ -394,6 +395,7 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 	runPostMetaContract(t, newRepos)
 	runPostTermsWriterContract(t, newRepos)
 	runTermReaderContract(t, newRepos)
+	runPostContentBackfillContract(t, newRepos)
 }
 
 // runUserContract covers UserRepository + UserMetaRepository, including the
@@ -1494,6 +1496,392 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 		}
 		if err := repos.OptionWriter.Delete(ctx, "no_such_option"); !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("Delete missing err = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// runPostContentBackfillContract covers the two additive M14 ports the
+// sanitization backfill is built on: PostContentBackfill.BackfillPage (the
+// paginated, all-status, type-targeted walk) and
+// PostContentUpdater.UpdateContentFields (the narrow content-only write that
+// does NOT bump post_modified/post_modified_gmt).
+//
+// Both ports are additive to the existing *PostRepo and are exposed as the two
+// new Set fields repos.PostContentBackfill / repos.PostContentUpdater (D6,
+// Req 8.4). Until task 1.2 lands those fields and methods plus the
+// domain.PostContentRow projection, this file does not compile — which is the
+// expected TDD-red for task 1.1: the failure names exactly the missing ports
+// and type, never a wrong-behavior assertion.
+//
+// The rows these cases need are seeded through the write ports rather than a
+// new SQL fixture set, so the contract stays inside contract.go and vendor-
+// agnostic: PostWriter.Create persists post_content/post_excerpt/post_status/
+// post_type verbatim (runWriterContract above pins that), and SeedFixtures
+// already carries the excluded attachment (201, 202) and nav_menu_item (301-304)
+// rows, so "returns NO attachment/nav_menu_item row" is asserted against rows
+// that already exist rather than invented ones.
+func runPostContentBackfillContract(t *testing.T, newRepos NewReposFunc) {
+	t.Helper()
+	ctx := context.Background()
+
+	// A disallowed <script> in a post body is the canonical pre-M10a hazard the
+	// backfill drains. The expected clean value is computed via the same policy
+	// the backfill uses (tier B over PostContent/PostExcerpt), never hardcoded,
+	// so the assertion tracks the policy rather than a frozen literal.
+	policy := sanitize.New()
+	const dirtyContent = `<p>hi</p><script>alert('xss')</script>`
+	const dirtyExcerpt = `teaser<script>steal()</script>`
+	cleanContent, err := policy.SanitizeAt(sanitize.PostContent, sanitize.TierB, dirtyContent)
+	if err != nil {
+		t.Fatalf("precondition: SanitizeAt(PostContent) on fixture: %v", err)
+	}
+	cleanExcerpt, err := policy.SanitizeAt(sanitize.PostExcerpt, sanitize.TierB, dirtyExcerpt)
+	if err != nil {
+		t.Fatalf("precondition: SanitizeAt(PostExcerpt) on fixture: %v", err)
+	}
+	if cleanContent == dirtyContent {
+		t.Fatalf("precondition: tier B left %q unchanged; the fixture no longer "+
+			"exercises the strip path", dirtyContent)
+	}
+
+	// seedTargets inserts one {post, page, revision} row for every post_status
+	// the walk must cover (publish/draft/pending/private/future/inherit/trash)
+	// plus one script-bearing attachment and one script-bearing nav_menu_item
+	// that the walk must EXCLUDE. It returns the set of IDs the walk is expected
+	// to return (the {post,page,revision} ids) and the excluded ids separately,
+	// so a case can assert both membership and non-membership without re-deriving
+	// the fixture.
+	seedTargets := func(t *testing.T, repos *storage.Repositories) (want map[int64]string, excluded map[int64]bool) {
+		t.Helper()
+		want = map[int64]string{}
+		excluded = map[int64]bool{}
+		mk := func(slug, ptype, status string) int64 {
+			id, err := repos.PostWriter.Create(ctx, domain.Post{
+				Author:        1,
+				Date:          time.Date(2024, 9, 1, 0, 0, 0, 0, time.UTC),
+				Content:       dirtyContent,
+				Title:         slug,
+				Excerpt:       dirtyExcerpt,
+				Status:        status,
+				Slug:          slug,
+				Type:          ptype,
+				CommentStatus: "open",
+			})
+			if err != nil {
+				t.Fatalf("seed %s/%s: %v", ptype, status, err)
+			}
+			return id
+		}
+		// Every status, across the three targeted types.
+		want[mk("bf-post-publish", "post", "publish")] = "post"
+		want[mk("bf-post-draft", "post", "draft")] = "post"
+		want[mk("bf-post-pending", "post", "pending")] = "post"
+		want[mk("bf-post-private", "post", "private")] = "post"
+		want[mk("bf-post-future", "post", "future")] = "post"
+		want[mk("bf-post-trash", "post", "trash")] = "post"
+		want[mk("bf-page-draft", "page", "draft")] = "page"
+		want[mk("bf-rev-inherit", "revision", "inherit")] = "revision"
+		// Excluded types, also script-bearing, so exclusion is proven to be by
+		// type rather than by content being clean.
+		excluded[mk("bf-att", "attachment", "inherit")] = true
+		excluded[mk("bf-nav", "nav_menu_item", "publish")] = true
+		return want, excluded
+	}
+
+	backfillTypes := []string{"post", "page", "revision"}
+
+	// drain walks BackfillPage under the given limit from afterID 0 to an empty
+	// page, returning every row in visit order. It is the keyset client the real
+	// orchestrator (task 2.2) will be: advance the cursor to the last row's ID
+	// each page, stop on a short/empty page.
+	drain := func(t *testing.T, repos *storage.Repositories, limit int) []domain.PostContentRow {
+		t.Helper()
+		var all []domain.PostContentRow
+		var afterID int64
+		for {
+			page, err := repos.PostContentBackfill.BackfillPage(ctx, afterID, limit, backfillTypes)
+			if err != nil {
+				t.Fatalf("BackfillPage(after=%d, limit=%d): %v", afterID, limit, err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			for _, row := range page {
+				if row.ID <= afterID {
+					t.Fatalf("BackfillPage returned id %d <= cursor %d: the walk is "+
+						"not strictly ascending by ID", row.ID, afterID)
+				}
+				afterID = row.ID
+			}
+			all = append(all, page...)
+			if len(page) < limit {
+				break
+			}
+		}
+		return all
+	}
+
+	t.Run("BackfillPage returns every targeted row across all statuses and no excluded type", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, excluded := seedTargets(t, repos)
+
+		rows := drain(t, repos, 1000)
+
+		got := map[int64]string{}
+		for _, row := range rows {
+			if excluded[row.ID] {
+				t.Errorf("BackfillPage returned excluded row %d (type %q); attachment "+
+					"and nav_menu_item must never be walked (Req 3.1)", row.ID, row.Type)
+			}
+			got[row.ID] = row.Type
+		}
+		for id, wantType := range want {
+			gotType, ok := got[id]
+			if !ok {
+				t.Errorf("BackfillPage missing targeted row %d (want type %q); every "+
+					"post/page/revision row is in scope regardless of status (Req 3.2)",
+					id, wantType)
+				continue
+			}
+			if gotType != wantType {
+				t.Errorf("BackfillPage row %d type = %q, want %q", id, gotType, wantType)
+			}
+		}
+	})
+
+	t.Run("BackfillPage projects only ID/post_type/post_content/post_excerpt", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seedTargets(t, repos)
+
+		rows := drain(t, repos, 1000)
+		seen := false
+		for _, row := range rows {
+			if want[row.ID] != "post" {
+				continue
+			}
+			seen = true
+			// The projection carries exactly the four backfill fields. The
+			// script-bearing seed makes Content/Excerpt non-empty, and the type
+			// is one of the targeted set; a row that loaded a full post would
+			// not change these four, but the projection's contract is that it is
+			// NOT a domain.Post — asserted structurally by the field set below
+			// (Req 3.5).
+			if row.ID == 0 {
+				t.Errorf("projected row has zero ID: %+v", row)
+			}
+			if row.Type == "" {
+				t.Errorf("projected row %d has empty post_type", row.ID)
+			}
+			if row.Content != dirtyContent {
+				t.Errorf("projected row %d Content = %q, want the seeded body %q",
+					row.ID, row.Content, dirtyContent)
+			}
+			if row.Excerpt != dirtyExcerpt {
+				t.Errorf("projected row %d Excerpt = %q, want the seeded excerpt %q",
+					row.ID, row.Excerpt, dirtyExcerpt)
+			}
+		}
+		if !seen {
+			t.Fatal("no targeted post row returned; projection case vacuous")
+		}
+	})
+
+	t.Run("BackfillPage paginates by ascending-ID keyset with none skipped or duplicated", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seedTargets(t, repos)
+
+		// A small limit forces multiple pages; drain already asserts strict
+		// ascending order and advances the cursor by last-seen ID.
+		rows := drain(t, repos, 2)
+
+		counts := map[int64]int{}
+		for _, row := range rows {
+			counts[row.ID]++
+		}
+		for id := range want {
+			switch counts[id] {
+			case 0:
+				t.Errorf("keyset walk skipped targeted row %d", id)
+			case 1:
+				// exactly once: correct
+			default:
+				t.Errorf("keyset walk returned row %d %d times, want exactly once", id, counts[id])
+			}
+		}
+	})
+
+	t.Run("BackfillPage returns a row mutated in place between pages exactly once", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seedTargets(t, repos)
+
+		// Walk one row at a time; after the first page, mutate a row that has
+		// NOT yet been visited (a higher ID) through the content-only updater.
+		// Because the keyset cursor is the immutable primary key and the update
+		// never touches ID, that row must still appear exactly once further
+		// along the walk — neither skipped nor doubled (Req 3.4).
+		var afterID int64
+		counts := map[int64]int{}
+		mutated := false
+		for {
+			page, err := repos.PostContentBackfill.BackfillPage(ctx, afterID, 1, backfillTypes)
+			if err != nil {
+				t.Fatalf("BackfillPage(after=%d): %v", afterID, err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			row := page[0]
+			counts[row.ID]++
+			afterID = row.ID
+
+			if !mutated {
+				// Pick any not-yet-visited targeted id strictly greater than the
+				// current cursor and rewrite its content in place.
+				var target int64
+				for id := range want {
+					if id > afterID && (target == 0 || id < target) {
+						target = id
+					}
+				}
+				if target != 0 {
+					if err := repos.PostContentUpdater.UpdateContentFields(ctx, target, cleanContent, cleanExcerpt); err != nil {
+						t.Fatalf("mid-walk UpdateContentFields(%d): %v", target, err)
+					}
+					mutated = true
+				}
+			}
+		}
+		if !mutated {
+			t.Fatal("no mid-walk mutation performed; the in-place-mutation case is vacuous")
+		}
+		for id := range want {
+			if counts[id] != 1 {
+				t.Errorf("row %d visited %d times across the mid-walk mutation, want exactly once", id, counts[id])
+			}
+		}
+	})
+
+	t.Run("UpdateContentFields rewrites content/excerpt and leaves post_modified and other columns untouched", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seedTargets(t, repos)
+
+		// Any seeded post row carries the script-bearing body.
+		var targetID int64
+		for id, ty := range want {
+			if ty == "post" {
+				if targetID == 0 || id < targetID {
+					targetID = id
+				}
+			}
+		}
+		if targetID == 0 {
+			t.Fatal("no seeded post row to update")
+		}
+
+		before, err := repos.PostWriter.ByID(ctx, targetID)
+		if err != nil {
+			t.Fatalf("ByID before update: %v", err)
+		}
+
+		if err := repos.PostContentUpdater.UpdateContentFields(ctx, targetID, cleanContent, cleanExcerpt); err != nil {
+			t.Fatalf("UpdateContentFields: %v", err)
+		}
+
+		after, err := repos.PostWriter.ByID(ctx, targetID)
+		if err != nil {
+			t.Fatalf("ByID after update: %v", err)
+		}
+
+		if after.Content != cleanContent {
+			t.Errorf("post_content after update = %q, want tier-B value %q", after.Content, cleanContent)
+		}
+		if after.Excerpt != cleanExcerpt {
+			t.Errorf("post_excerpt after update = %q, want tier-B value %q", after.Excerpt, cleanExcerpt)
+		}
+		// Req 4.4: post_modified/post_modified_gmt are byte-identical to their
+		// pre-update values — the narrow update must NOT bump them the way
+		// PostWriter.Update does.
+		if !after.Modified.Equal(before.Modified) {
+			t.Errorf("post_modified changed: before %v, after %v (the narrow update must not bump it)",
+				before.Modified, after.Modified)
+		}
+		if !after.ModifiedGMT.Equal(before.ModifiedGMT) {
+			t.Errorf("post_modified_gmt changed: before %v, after %v", before.ModifiedGMT, after.ModifiedGMT)
+		}
+		// Req 4.4: no OTHER column is touched either.
+		if after.Author != before.Author ||
+			after.Status != before.Status ||
+			after.Slug != before.Slug ||
+			after.Type != before.Type ||
+			after.CommentStatus != before.CommentStatus ||
+			after.ParentID != before.ParentID ||
+			!after.Date.Equal(before.Date) ||
+			!after.DateGMT.Equal(before.DateGMT) ||
+			after.Title != before.Title {
+			t.Errorf("UpdateContentFields mutated a column other than post_content/"+
+				"post_excerpt:\n before %+v\n after  %+v", before, after)
+		}
+	})
+
+	t.Run("UpdateContentFields returns ErrNotFound for an unknown ID", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		err := repos.PostContentUpdater.UpdateContentFields(ctx, 9_999_999, cleanContent, cleanExcerpt)
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("UpdateContentFields unknown id err = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("BackfillPage-only pass leaves every row byte-identical; a clean row given its own values is a content no-op", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seedTargets(t, repos)
+
+		// A read-only pass (no UpdateContentFields call) must leave every
+		// targeted row's stored content byte-identical to what was seeded
+		// (Req 10.3 / Req 6.1, at the storage level).
+		rows := drain(t, repos, 1000)
+		for _, row := range rows {
+			if want[row.ID] == "" {
+				continue
+			}
+			if row.Content != dirtyContent || row.Excerpt != dirtyExcerpt {
+				t.Errorf("read-only BackfillPage pass changed row %d content: content=%q excerpt=%q",
+					row.ID, row.Content, row.Excerpt)
+			}
+		}
+
+		// An already-clean row, written its own tier-B values, is a no-op in
+		// content: the stored bytes equal what was passed (idempotent fixed
+		// point, Req 10.3).
+		var targetID int64
+		for id, ty := range want {
+			if ty == "post" {
+				targetID = id
+				break
+			}
+		}
+		if targetID == 0 {
+			t.Fatal("no seeded post row for the no-op case")
+		}
+		if err := repos.PostContentUpdater.UpdateContentFields(ctx, targetID, cleanContent, cleanExcerpt); err != nil {
+			t.Fatalf("first clean write: %v", err)
+		}
+		if err := repos.PostContentUpdater.UpdateContentFields(ctx, targetID, cleanContent, cleanExcerpt); err != nil {
+			t.Fatalf("idempotent re-write: %v", err)
+		}
+		after, err := repos.PostWriter.ByID(ctx, targetID)
+		if err != nil {
+			t.Fatalf("ByID after idempotent writes: %v", err)
+		}
+		if after.Content != cleanContent || after.Excerpt != cleanExcerpt {
+			t.Errorf("idempotent clean write drifted: content=%q excerpt=%q, want %q / %q",
+				after.Content, after.Excerpt, cleanContent, cleanExcerpt)
 		}
 	})
 }

@@ -43,6 +43,8 @@ func main() {
 		err = runCreateAdmin(args)
 	case "sessions":
 		err = runSessions(args)
+	case "backfill-content":
+		err = runBackfillContent(args)
 	default:
 		usage()
 		os.Exit(2)
@@ -54,11 +56,12 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: grimoire-cli <migrate|seed|createadmin|sessions gc> [-config path]")
+	fmt.Fprintln(os.Stderr, "usage: grimoire-cli <migrate|seed|createadmin|sessions gc|backfill-content> [-config path]")
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "  migrate            provision a greenfield grimoire schema")
 	fmt.Fprintln(os.Stderr, "  migrate -overlay   adopt an existing WordPress database (additive, no ALTER TABLE)")
 	fmt.Fprintln(os.Stderr, "  migrate -check     report schema and permalink compatibility without writing anything")
+	fmt.Fprintln(os.Stderr, "  backfill-content   sanitize stored post content (dry run unless -apply; back up the DB first)")
 }
 
 // runMigrate applies schema changes in one of three modes:

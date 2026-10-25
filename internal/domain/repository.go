@@ -457,6 +457,48 @@ type PostWriter interface {
 	Delete(ctx context.Context, id int64) error
 }
 
+// PostContentRow is the minimal projection the M14 backfill reads per row: just
+// the primary key, the type (for the report and the targeting sanity of the
+// walk), and the two content fields the sweep sanitizes. It is NOT domain.Post
+// -- the backfill never needs post_author/date/status/etc. (Req 3.5).
+type PostContentRow struct {
+	ID      int64
+	Type    string // post_type: one of post, page, revision
+	Content string // post_content
+	Excerpt string // post_excerpt
+}
+
+// PostContentBackfill streams the rows the M14 sanitization backfill targets:
+// {prefix}posts rows whose post_type is one of the supplied types, across ALL
+// post_status values, ordered by ID ascending so pagination is stable. It is a
+// read-only port added for the backfill; it alters no existing PostRepo read
+// (Req 8.4).
+type PostContentBackfill interface {
+	// BackfillPage returns up to limit targeted rows with ID strictly greater
+	// than afterID, ordered by ID ascending. afterID == 0 starts the walk. The
+	// returned rows carry only the fields the backfill needs (ID, post_type,
+	// post_content, post_excerpt), never a full post row (Req 3.5). A page
+	// shorter than limit (or empty) signals the walk is complete. The same row
+	// is never returned twice and no targeted row is skipped, because the keyset
+	// cursor is the monotonically increasing primary key (Req 3.4).
+	BackfillPage(ctx context.Context, afterID int64, limit int, types []string) ([]PostContentRow, error)
+}
+
+// PostContentUpdater performs the M14 narrow write: it sets ONLY post_content
+// and post_excerpt on one {prefix}posts row by ID. It MUST NOT be confused with
+// PostWriter.Update, which replaces the whole row and unconditionally bumps
+// post_modified/post_modified_gmt (internal/storage/wprepo/writers.go:63-104);
+// this port exists so the backfill does neither (Req 4.2-4.4).
+type PostContentUpdater interface {
+	// UpdateContentFields sets post_content and post_excerpt on the row with the
+	// given ID and changes NO other column -- notably not post_modified or
+	// post_modified_gmt (Req 4.4). Both clean values are written even when only
+	// one field changed, since each is a tier-B fixed point so rewriting the
+	// unchanged one is a no-op in value (Req 4.5). Returns domain.ErrNotFound
+	// when no row has the given ID, matching the PostWriter.Delete contract.
+	UpdateContentFields(ctx context.Context, id int64, content, excerpt string) error
+}
+
 // RevisionWriter is the storage port used by content.RevisionWriteService and
 // content.AutosaveService. Revisions and autosave rows are ordinary rows in
 // the same {prefix}posts table PostWriter already owns (post_type

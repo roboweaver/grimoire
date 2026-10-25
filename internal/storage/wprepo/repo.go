@@ -74,6 +74,32 @@ func toDomainPosts(rows []postRow) []domain.Post {
 	return posts
 }
 
+// postContentRow is the scan target for the M14 backfill projection: only the
+// four fields the sweep reads, mirroring how postRow maps to domain.Post.
+type postContentRow struct {
+	ID      int64  `bun:"ID"`
+	Type    string `bun:"post_type"`
+	Content string `bun:"post_content"`
+	Excerpt string `bun:"post_excerpt"`
+}
+
+func (r postContentRow) toDomain() domain.PostContentRow {
+	return domain.PostContentRow{
+		ID:      r.ID,
+		Type:    r.Type,
+		Content: r.Content,
+		Excerpt: r.Excerpt,
+	}
+}
+
+func toDomainContentRows(rows []postContentRow) []domain.PostContentRow {
+	out := make([]domain.PostContentRow, len(rows))
+	for i, r := range rows {
+		out[i] = r.toDomain()
+	}
+	return out
+}
+
 // PostRepo reads posts and pages.
 type PostRepo struct {
 	db     *bun.DB
@@ -271,6 +297,40 @@ func (r *PostRepo) CountPublishedArchive(ctx context.Context, f domain.ArchiveFi
 	}
 	q := r.db.NewSelect().TableExpr("? AS p", bun.Ident(r.prefix+"posts"))
 	return r.archiveWhere(q, f).Count(ctx)
+}
+
+// BackfillPage streams targeted rows for the M14 backfill (Req 3). All statuses,
+// post_type in types, ordered by the primary key for a stable keyset cursor.
+func (r *PostRepo) BackfillPage(ctx context.Context, afterID int64, limit int, types []string) ([]domain.PostContentRow, error) {
+	var rows []postContentRow
+	err := r.db.NewSelect().
+		TableExpr("?", bun.Ident(r.prefix+"posts")).
+		Column("ID", "post_type", "post_content", "post_excerpt"). // projection only (Req 3.5)
+		Where("? > ?", bun.Ident("ID"), afterID).                  // keyset cursor (Req 3.4)
+		Where("post_type IN (?)", bun.In(types)).                  // {post,page,revision} (Req 3.1)
+		// NO post_status filter: every status is in scope (Req 3.2).
+		OrderExpr("? ASC", bun.Ident("ID")).
+		Limit(limit).
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	return toDomainContentRows(rows), nil
+}
+
+// UpdateContentFields writes ONLY post_content/post_excerpt by ID; it does NOT
+// bump post_modified/post_modified_gmt or touch any other column (Req 4.2-4.4).
+func (r *PostRepo) UpdateContentFields(ctx context.Context, id int64, content, excerpt string) error {
+	res, err := r.db.NewUpdate().
+		TableExpr("?", bun.Ident(r.prefix+"posts")).
+		Set("post_content = ?", content).
+		Set("post_excerpt = ?", excerpt).
+		Where("? = ?", bun.Ident("ID"), id).
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	return errNotFoundIfZero(res)
 }
 
 // TermRepo resolves taxonomy terms.

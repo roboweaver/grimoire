@@ -252,8 +252,10 @@ func (r *OptionRepo) Delete(ctx context.Context, name string) error {
 
 // compile-time interface checks.
 var (
-	_ domain.PostWriter   = (*PostRepo)(nil)
-	_ domain.TermWriter   = (*TermRepo)(nil)
-	_ domain.TermReader   = (*TermRepo)(nil)
-	_ domain.OptionWriter = (*OptionRepo)(nil)
+	_ domain.PostWriter          = (*PostRepo)(nil)
+	_ domain.PostContentBackfill = (*PostRepo)(nil)
+	_ domain.PostContentUpdater  = (*PostRepo)(nil)
+	_ domain.TermWriter          = (*TermRepo)(nil)
+	_ domain.TermReader          = (*TermRepo)(nil)
+	_ domain.OptionWriter        = (*OptionRepo)(nil)
 )

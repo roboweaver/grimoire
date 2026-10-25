@@ -1,5 +1,11 @@
 # README & Public-Release Metadata Refresh: Requirements
 
+> **Status: ✅ Implemented.** The root `README.md`, the top-level `LICENSE`
+> (Apache-2.0), and `plans/README.md` were refreshed as specified. The README
+> and plans index have since been carried forward to the current M1–M10 state by
+> later status-doc updates; this spec is retained as the historical record of the
+> public-release refresh it originally scoped (then an "M1–M7" world).
+
 ## Introduction
 
 This documentation-only spec prepares grimoire's repository metadata for a

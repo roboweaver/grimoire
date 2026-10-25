@@ -1348,6 +1348,110 @@ func runWriterContract(t *testing.T, newRepos NewReposFunc) {
 			t.Errorf("no-op Update (unchanged name/slug) err = %v, want nil", err)
 		}
 
+		// M13 Req 1.2/1.3/2.1/2.3: Create and Update write term_taxonomy.parent,
+		// read back through the ParentID-populating term read path (BySlug /
+		// TermsByIDs). SeedFixtures seeds category "news" (term_id 10, parent 0),
+		// "zeta" (11) and "alpha" (12), all top-level -- they are the parent
+		// targets here, so no nested-chain fixture is required. These assertions
+		// FAIL until TermRepo.Create stops hardcoding parent 0 and TermRepo.Update
+		// starts writing term_taxonomy.parent.
+		//
+		// Resolve the seeded parent ids through the read path rather than hardcoding
+		// fixture literals, so the assertions survive fixture renumbering.
+		news, err := repos.Terms.BySlug(ctx, "category", "news")
+		if err != nil {
+			t.Fatalf("BySlug(category, news): %v", err)
+		}
+		zeta, err := repos.Terms.BySlug(ctx, "category", "zeta")
+		if err != nil {
+			t.Fatalf("BySlug(category, zeta): %v", err)
+		}
+		alpha, err := repos.Terms.BySlug(ctx, "category", "alpha")
+		if err != nil {
+			t.Fatalf("BySlug(category, alpha): %v", err)
+		}
+
+		// Req 1.2: Create of a category with a non-zero ParentID writes that
+		// parent, observable on read-back.
+		childID, err := repos.TermWriter.Create(ctx, domain.Term{
+			Name: "Child", Slug: "child", Taxonomy: "category", ParentID: news.ID,
+		})
+		if err != nil {
+			t.Fatalf("Create (with parent): %v", err)
+		}
+		child, err := repos.Terms.BySlug(ctx, "category", "child")
+		if err != nil {
+			t.Fatalf("BySlug after create (with parent): %v", err)
+		}
+		if child.ParentID != news.ID {
+			t.Errorf("Create: ParentID = %d, want %d (parent must be written, not hardcoded 0)",
+				child.ParentID, news.ID)
+		}
+
+		// Req 1.3: Create with ParentID 0 (unset) writes parent 0 (top-level),
+		// preserving the pre-M13 default.
+		topID, err := repos.TermWriter.Create(ctx, domain.Term{
+			Name: "Topper", Slug: "topper", Taxonomy: "category",
+		})
+		if err != nil {
+			t.Fatalf("Create (top-level): %v", err)
+		}
+		top, err := repos.Terms.BySlug(ctx, "category", "topper")
+		if err != nil {
+			t.Fatalf("BySlug after create (top-level): %v", err)
+		}
+		if top.ParentID != 0 {
+			t.Errorf("Create: top-level ParentID = %d, want 0", top.ParentID)
+		}
+		_ = topID
+
+		// Req 2.1: Update re-parents the child from "news" to "zeta" AND renames
+		// it, observable on read-back; both changes land together.
+		if err := repos.TermWriter.Update(ctx, domain.Term{
+			ID: childID, Name: "Child Renamed", Slug: "child-renamed", Taxonomy: "category", ParentID: zeta.ID,
+		}); err != nil {
+			t.Fatalf("Update (re-parent + rename): %v", err)
+		}
+		reparented, err := repos.Terms.BySlug(ctx, "category", "child-renamed")
+		if err != nil {
+			t.Fatalf("BySlug after re-parent + rename: %v", err)
+		}
+		if reparented.ParentID != zeta.ID {
+			t.Errorf("Update: ParentID = %d, want %d (re-parent must be written)",
+				reparented.ParentID, zeta.ID)
+		}
+		if reparented.Name != "Child Renamed" || reparented.ID != childID {
+			t.Errorf("Update: name/slug not applied alongside re-parent: %+v", reparented)
+		}
+
+		// Req 2.3: Update with ParentID 0 promotes the term to top-level.
+		if err := repos.TermWriter.Update(ctx, domain.Term{
+			ID: childID, Name: "Child Renamed", Slug: "child-renamed", Taxonomy: "category", ParentID: 0,
+		}); err != nil {
+			t.Fatalf("Update (promote to top-level): %v", err)
+		}
+		promoted, err := repos.Terms.BySlug(ctx, "category", "child-renamed")
+		if err != nil {
+			t.Fatalf("BySlug after promote: %v", err)
+		}
+		if promoted.ParentID != 0 {
+			t.Errorf("Update: ParentID after promote = %d, want 0", promoted.ParentID)
+		}
+
+		// An unrelated fixture term's parent is untouched by the updates above.
+		alphaAfter, err := repos.Terms.BySlug(ctx, "category", "alpha")
+		if err != nil {
+			t.Fatalf("BySlug(category, alpha) after updates: %v", err)
+		}
+		if alphaAfter.ParentID != alpha.ParentID {
+			t.Errorf("Update disturbed an unrelated term's parent: alpha ParentID = %d, want %d",
+				alphaAfter.ParentID, alpha.ParentID)
+		}
+
+		if err := repos.TermWriter.Delete(ctx, childID); err != nil {
+			t.Fatalf("Delete child: %v", err)
+		}
+
 		if err := repos.TermWriter.Delete(ctx, id); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}

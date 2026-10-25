@@ -15,6 +15,18 @@ import (
 // generic so callers do not leak which capability was missing.
 var ErrForbidden = errors.New("content: operation not permitted")
 
+// ErrTermParentCycle is returned by TermWriteService.Create/Update when the
+// requested parent would make the term a descendant of itself -- the parent is
+// the term's own id (Req 3.1) or a member of the term's descendant set
+// (Req 3.2). Nothing is written. Handlers map it to 400.
+var ErrTermParentCycle = errors.New("content: term parent would create a cycle")
+
+// ErrTermParentInvalid is returned when the requested non-zero parent does not
+// resolve to an existing term in the term's own taxonomy (Req 4.1, 4.2) or when
+// a non-zero parent targets a flat (non-hierarchical) taxonomy such as post_tag
+// (Req 4.3). Nothing is written. Handlers map it to 400.
+var ErrTermParentInvalid = errors.New("content: term parent is invalid")
+
 // ErrTitleEmpty is returned by PostWriteService.Create/Update when the caller's
 // post_title sanitizes to an empty string (e.g. a markup-only "<em></em>" that
 // the title plain-text path reduces to nothing). Both transports require a
@@ -316,10 +328,70 @@ func NewTermWriteService(w interface {
 	return &TermWriteService{w: w}
 }
 
+// validateParent enforces the hierarchy rules for a term write before any row
+// is written. t carries the term's taxonomy (and, on Update, its id); parent is
+// the already-resolved authoritative parent value the handler computed from the
+// *int64 request field (0 == top-level). It returns:
+//
+//   - nil when parent == 0 (top-level is valid for every taxonomy, Req 4.4), or
+//     when a positive parent passes every check below.
+//   - ErrTermParentInvalid when t.Taxonomy is flat (post_tag) and parent != 0
+//     (Req 4.3), or when parent names no term in t.Taxonomy (Req 4.1/4.2).
+//   - ErrTermParentCycle when parent == t.ID (Req 3.1) or parent is in the
+//     term's descendant set (Req 3.2). On Create, t.ID is 0 and the term has no
+//     descendants, so only the self check can fire and only for a parent of 0,
+//     which is already short-circuited -- Create trivially passes (Req 3.4).
+//
+// The hierarchy is loaded once here, for t.Taxonomy only, via the combined
+// reader. Because the graph is taxonomy-scoped, membership in byID is exactly
+// "exists in this taxonomy", so the nonexistent and cross-taxonomy cases collapse
+// into one check (Finding 2). The check NEVER consults a taxonomy value taken
+// from the request for the parent (Req 4.5): it reads t.Taxonomy (the term being
+// written's own taxonomy) and the stored graph.
+func (s *TermWriteService) validateParent(ctx context.Context, t domain.Term, parent int64) error {
+	if parent == 0 {
+		return nil // top-level, valid for any taxonomy (Req 4.4)
+	}
+	// Flat taxonomies have no meaningful parent (Req 4.3). Only "category" is
+	// hierarchical in M13 (post_tag is flat); a non-zero parent on anything that
+	// is not the hierarchical category taxonomy is rejected.
+	if t.Taxonomy != TaxonomyCategory {
+		return ErrTermParentInvalid
+	}
+	if parent == t.ID {
+		return ErrTermParentCycle // self-parent (Req 3.1)
+	}
+	h, err := LoadTermHierarchy(ctx, s.w, t.Taxonomy)
+	if err != nil {
+		return err
+	}
+	if _, ok := h.byID[parent]; !ok {
+		// Absent from this taxonomy's graph == nonexistent OR cross-taxonomy
+		// (Req 4.1, 4.2) -- one check, because the graph is taxonomy-scoped.
+		return ErrTermParentInvalid
+	}
+	// Transitive cycle: the proposed parent is at or beneath the term itself
+	// (Req 3.2). DescendantIDs is self-inclusive, so it already contains t.ID;
+	// the explicit self check above is kept for clarity and because on Create
+	// (t.ID == 0, not in the graph) DescendantIDs returns nil.
+	for _, d := range h.DescendantIDs(t.ID) {
+		if d == parent {
+			return ErrTermParentCycle
+		}
+	}
+	return nil
+}
+
 // Create authorizes (manage_categories) and inserts a term.
 func (s *TermWriteService) Create(ctx context.Context, actor auth.Principal, t domain.Term) (int64, error) {
 	if !auth.CanManageTerms(actor) {
-		return 0, ErrForbidden
+		return 0, ErrForbidden // Req 5.3, fail closed before any read
+	}
+	// t.ParentID is the authoritative value the handler resolved (0 == top-level
+	// on create, Req 1.3). A new term has no descendants, so only a flat-taxonomy
+	// or nonexistent/cross-taxonomy parent can fail here (Req 3.4, 4).
+	if err := s.validateParent(ctx, t, t.ParentID); err != nil {
+		return 0, err // ErrTermParentCycle / ErrTermParentInvalid, nothing written
 	}
 	return s.w.Create(ctx, t)
 }
@@ -327,7 +399,15 @@ func (s *TermWriteService) Create(ctx context.Context, actor auth.Principal, t d
 // Update authorizes (manage_categories) and renames a term.
 func (s *TermWriteService) Update(ctx context.Context, actor auth.Principal, t domain.Term) error {
 	if !auth.CanManageTerms(actor) {
-		return ErrForbidden
+		return ErrForbidden // Req 5.3
+	}
+	// t carries the authoritative ParentID the handler resolved from the pre-read
+	// (omitted -> current value, Req 2.2; explicit 0 -> top-level, Req 2.3;
+	// positive -> re-parent, Req 2.1) and the term's real taxonomy from the same
+	// pre-read. validateParent runs the self/descendant cycle check (Req 3) and
+	// the membership/flat check (Req 4) against the stored graph.
+	if err := s.validateParent(ctx, t, t.ParentID); err != nil {
+		return err // nothing written (Req 3.1-3.2, 4)
 	}
 	return s.w.Update(ctx, t)
 }

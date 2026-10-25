@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/roboweaver/grimoire/internal/auth"
@@ -199,4 +201,38 @@ func baseMimeForMedia(s string) string {
 		s = s[:i]
 	}
 	return strings.TrimSpace(s)
+}
+
+// Delete hard-deletes an attachment. It loads the stored row (bubbling
+// domain.ErrNotFound), authorizes the delete against the stored post_author via
+// CanDeletePost (delete_posts for own, delete_others_posts for others';
+// ErrForbidden on failure, nothing deleted), removes the database rows through
+// MediaWriter.Delete, then best-effort unlinks the on-disk file. It returns the
+// attachment as it existed immediately before deletion so the caller can
+// envelope it as "previous". The order is DB-delete-first then file unlink: a
+// missing or unremovable file is non-fatal once the rows are gone, whereas
+// unlinking first could strand a live row pointing at absent bytes if the DB
+// delete then failed. The relative file path is read from the loaded row
+// (cur.Filename, the _wp_attached_file value) BEFORE the delete removes that
+// postmeta.
+func (s *MediaWriteService) Delete(ctx context.Context, actor auth.Principal, id int64) (domain.Media, error) {
+	cur, err := s.reader.ByID(ctx, id)
+	if err != nil {
+		return domain.Media{}, err
+	}
+	if !auth.CanDeletePost(actor, "post", "inherit", cur.AuthorID) {
+		return domain.Media{}, ErrForbidden
+	}
+	if err := s.writer.Delete(ctx, id); err != nil {
+		return domain.Media{}, err
+	}
+	if rel := cur.Filename; rel != "" {
+		full := filepath.Join(s.media.Config().UploadsDir, filepath.FromSlash(rel))
+		if rmErr := os.Remove(full); rmErr != nil && !os.IsNotExist(rmErr) {
+			// The DB delete has committed; a leftover/locked file is a cleanup
+			// nuisance, not a correctness break (missing file is non-fatal).
+			_ = rmErr
+		}
+	}
+	return cur, nil
 }

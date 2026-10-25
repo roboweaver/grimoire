@@ -793,3 +793,5 @@ func TestPostServiceDateArchiveEmptyRangeIsEmptyArchiveNotNotFound(t *testing.T)
 			posts.archiveFilter)
 	}
 }
+
+func (r *recordingUserRepo) Delete(context.Context, int64, int64) error { return nil }

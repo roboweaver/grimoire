@@ -237,6 +237,15 @@ type MediaWriter interface {
 	// it continues to flow through SetParent rather than being folded into this
 	// method (Req 3.5, D2).
 	UpdateMeta(ctx context.Context, id int64, m MediaMeta) error
+	// Delete hard-deletes an attachment: its {prefix}term_relationships rows,
+	// its {prefix}postmeta rows, and finally its {prefix}posts row, in one
+	// transaction (deepest-dependency-first so no orphan survives a partial
+	// failure). It returns ErrNotFound when no attachment has the given ID,
+	// matching the UpdateMeta/SetParent contract and the existing
+	// PostWriter.Delete. It does NOT touch the on-disk file -- that is the
+	// content.MediaWriteService's job, because the storage layer has no
+	// knowledge of UploadsDir.
+	Delete(ctx context.Context, id int64) error
 }
 
 // NavMenuRepository reads menus and their items.
@@ -354,6 +363,15 @@ type UserRepository interface {
 	// Count returns the total number of users, ignoring limit/offset (used
 	// for pagination totals).
 	Count(ctx context.Context) (int64, error)
+	// Delete removes a user and reassigns-or-deletes their authored content in
+	// one transaction. reassignTo == 0 deletes the user's authored
+	// {prefix}posts rows (and those posts' postmeta and term_relationships, so
+	// no orphan survives); a positive reassignTo sets post_author = reassignTo
+	// on them instead. In both cases the authored-content step runs BEFORE the
+	// user's {prefix}usermeta and {prefix}users rows are removed. It returns
+	// ErrNotFound when no user has the given ID, matching the
+	// UpdatePass/UpdateProfile contract.
+	Delete(ctx context.Context, id int64, reassignTo int64) error
 }
 
 // NicenameConflict is one duplicated user_nicename: the value, how many rows

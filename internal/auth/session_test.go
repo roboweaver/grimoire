@@ -579,3 +579,11 @@ func TestSessionManager_GC(t *testing.T) {
 		t.Errorf("live session should survive GC")
 	}
 }
+
+func (f *fakeUsers) Delete(_ context.Context, id int64, reassignTo int64) error {
+	if _, ok := f.byID[id]; !ok {
+		return domain.ErrNotFound
+	}
+	delete(f.byID, id)
+	return nil
+}

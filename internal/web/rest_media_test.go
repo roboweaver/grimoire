@@ -876,39 +876,44 @@ func TestRESTMediaDeleteCollectionStays501(t *testing.T) {
 	}
 }
 
-// TestRESTMediaDeleteItemStays501WithWiredService — Req 9.2/9.3: DELETE on the
-// single-item route /media/{id} is ALWAYS a 501 stub, even with a fully-wired
-// MediaWriteService authenticated as an upload_files holder. The attachment
-// must be unchanged (still present) afterward — the DELETE must not invoke the
-// service nor remove the row.
-func TestRESTMediaDeleteItemStays501WithWiredService(t *testing.T) {
+// TestRESTMediaDeleteItemLiveWithWiredService — M11 (REST delete parity)
+// supersedes the former "DELETE /media/{id} stays 501 when wired" contract:
+// with a wired MediaWriteService, DELETE /media/{id}?force=true by a caller
+// authorized against the stored post_author hard-deletes the attachment (200,
+// the delete envelope), and the row is gone afterward. The force-less form is
+// still rejected (400 rest_trash_not_supported). Seeded attachment 201 is
+// authored by user 1, and uploaderFake() authenticates as user 1 (RoleAuthor,
+// holds delete_posts for own content).
+func TestRESTMediaDeleteItemLiveWithWiredService(t *testing.T) {
 	h, repos, _ := newRESTMediaWriteRouter(t, uploaderFake())
 
-	// Seeded attachment 201 exists before the DELETE attempt.
-	before, err := repos.Media.ByID(context.Background(), 201)
-	if err != nil {
-		t.Fatalf("repos.Media.ByID(201) before: %v", err)
+	// Without force=true, delete is refused and the attachment survives.
+	noForce := httptest.NewRequest(http.MethodDelete, "/wp-json/wp/v2/media/201", nil)
+	noForce.AddCookie(&http.Cookie{Name: "grimoire_session", Value: "anything"})
+	noForce.Header.Set("X-CSRF-Token", "uploader-token")
+	recNF := httptest.NewRecorder()
+	h.ServeHTTP(recNF, noForce)
+	if recNF.Code != http.StatusBadRequest {
+		t.Fatalf("DELETE /media/201 (no force) status = %d, want 400 (body=%s)", recNF.Code, recNF.Body.String())
+	}
+	if code := decodeRESTErrCode(t, recNF); code != "rest_trash_not_supported" {
+		t.Errorf("no-force error code = %q, want rest_trash_not_supported", code)
+	}
+	if _, err := repos.Media.ByID(context.Background(), 201); err != nil {
+		t.Fatalf("attachment 201 must survive a force-less delete: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/wp-json/wp/v2/media/201", nil)
+	// With force=true, the attachment is hard-deleted.
+	req := httptest.NewRequest(http.MethodDelete, "/wp-json/wp/v2/media/201?force=true", nil)
 	req.AddCookie(&http.Cookie{Name: "grimoire_session", Value: "anything"})
 	req.Header.Set("X-CSRF-Token", "uploader-token")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotImplemented {
-		t.Fatalf("DELETE /media/201 status = %d, want 501 (body=%s)", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DELETE /media/201?force=true status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
 	}
-	if code := decodeRESTErrCode(t, rec); code != "rest_cannot_edit" {
-		t.Errorf("error code = %q, want rest_cannot_edit", code)
-	}
-
-	// No service effect: the attachment still exists, unchanged.
-	after, err := repos.Media.ByID(context.Background(), 201)
-	if err != nil {
-		t.Fatalf("repos.Media.ByID(201) after: %v (a 501 DELETE must not remove the attachment)", err)
-	}
-	if after.ID != before.ID || after.Title != before.Title {
-		t.Errorf("a 501 DELETE mutated the attachment: before=%+v after=%+v", before, after)
+	if _, err := repos.Media.ByID(context.Background(), 201); err != domain.ErrNotFound {
+		t.Errorf("attachment 201 still present after force delete: %v", err)
 	}
 }
 

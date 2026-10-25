@@ -43,8 +43,11 @@ web (net/http + chi) → content services → domain (entities + repository port
 - `internal/storage/<vendor>` provides adapters; vendor SQL never leaks upward.
 - `internal/render` turns domain data into HTML via themes (folders of templates).
 
-See [`plans/`](./plans) for the full, Kiro-format specifications. For a
-deeper look at WordPress interoperability, see
+See [`plans/`](./plans) for the full, Kiro-format specifications. For
+end-to-end usage, see [`docs/user-guide.md`](./docs/user-guide.md) (what
+grimoire is, architecture, running it, the admin, REST, permalinks, themes and
+known gaps) and [`docs/cli.md`](./docs/cli.md) (the complete `grimoire` /
+`grimoire-cli` reference). For a deeper look at WordPress interoperability, see
 [`docs/compatibility.md`](./docs/compatibility.md) (the compatibility guide)
 and [`docs/wordpress-compatibility-tour.md`](./docs/wordpress-compatibility-tour.md)
 (a visual, side-by-side tour).
@@ -68,11 +71,14 @@ and [`docs/wordpress-compatibility-tour.md`](./docs/wordpress-compatibility-tour
 ## Running
 
 grimoire ships two binaries: `grimoire` (the HTTP server) and `grimoire-cli`
-(`migrate`, `seed`, `createadmin`, `sessions gc`). Configuration is a YAML file
-(see [`configs/`](./configs)); every field can be overridden by an environment
-variable (`GRIMOIRE_SERVER_ADDR`, `GRIMOIRE_THEME`,
+(`migrate`, `seed`, `createadmin`, `sessions gc`, `podman`). Configuration is a
+YAML file (see [`configs/`](./configs)); every field can be overridden by an
+environment variable (`GRIMOIRE_SERVER_ADDR`, `GRIMOIRE_THEME`,
 `GRIMOIRE_DATABASE_VENDOR`, `GRIMOIRE_DATABASE_DSN`,
-`GRIMOIRE_DATABASE_TABLE_PREFIX`).
+`GRIMOIRE_DATABASE_TABLE_PREFIX`). [`docs/cli.md`](./docs/cli.md) is the full
+flag and environment reference for both binaries, and
+[`docs/user-guide.md`](./docs/user-guide.md) walks through running on SQLite and
+against an existing WordPress database.
 
 ### SQLite (zero external services)
 
@@ -129,6 +135,55 @@ directory.
 Edit `configs/grimoire.postgres.yaml` (DSN form
 `postgres://user:pass@127.0.0.1:5432/wordpress?sslmode=disable`), then run the
 same `migrate` / `seed` / `createadmin` / `sessions gc` / server commands with that config.
+
+### Local Podman dev stack (`grimoire-cli podman`)
+
+For running grimoire next to a stock WordPress container against **one shared
+MySQL database**, `grimoire-cli podman` deploys and manages the whole stack. It
+shells out to the `podman` binary (no SDK dependency) and keeps every
+site-specific value configurable, so it is reusable beyond one site. See
+[`docs/podman-dev-stack.md`](./docs/podman-dev-stack.md) for the full guide.
+
+```bash
+go run ./cmd/grimoire-cli podman build        # build localhost/grimoire:dev from the Containerfile
+go run ./cmd/grimoire-cli podman up           # create/start the full stack in dependency order
+go run ./cmd/grimoire-cli podman status       # pod/container state + endpoint probes
+go run ./cmd/grimoire-cli podman down         # stop/remove pods, keep all data
+go run ./cmd/grimoire-cli podman autostart install    # macOS auto-start (reboot/podman restart)
+```
+
+> **Shared-fate warning.** WordPress and grimoire share the same database tables
+> and the same `wp-content` volume with **no isolation** — a write in one is
+> immediately visible in the other, and the only way back from a bad write is a
+> restore from backups. Treat the pair as one dev environment.
+
+`up` encodes the invariants that otherwise bite, and prints them as it runs:
+
+- **Table prefix is concatenated with no separator.** The default `accuweaver`
+  means tables like `accuweaverposts` — **no trailing underscore**. Set it wrong
+  and both apps quietly offer a fresh-install wizard over a full database.
+- **DB credentials come from podman secrets** mounted at `/run/secrets/*`, never
+  plaintext env vars and never visible in `podman inspect`.
+- **Schema setup is the additive overlay migration** (`migrate -overlay`):
+  grimoire-owned tables only, guarded by `IF NOT EXISTS`, no `ALTER TABLE`. The
+  greenfield `migrate` is never run against the populated WordPress database.
+- **Startup is gated on DB health**: MySQL must report healthy before WordPress
+  or grimoire start.
+- **Cross-pod DNS**: separate pods are separate network namespaces, so WordPress
+  reaches the DB by pod name (`wp-db-pod:3306`), not localhost.
+
+Every site-specific value is a flag (`-table-prefix`, `-grimoire-port`,
+`-wordpress-port`, `-network`, `-image`, `-uploads-mount`, `-machine`, …) with a
+documented default, and the most machine-varying ones also read
+`GRIMOIRE_PODMAN_*` env vars (precedence: flag > env > default). Run any
+subcommand with `-h` for its full guidance text. On macOS, `autostart` installs
+a LaunchAgent that fires at **user login** (not the pre-login boot screen).
+
+> **Why Podman and not Docker locally?** Licensing. Docker Desktop needs a paid
+> subscription for commercial use in larger organizations, while Podman is
+> Apache-2.0 and free for any use, with a daemonless/rootless model. These
+> commands target `podman`; the Docker equivalents are a portability concern
+> only. (Content was rephrased for compliance with licensing restrictions.)
 
 ### Testing
 

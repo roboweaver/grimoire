@@ -456,13 +456,13 @@ implementation, matching how M5–M9a were run.
       precondition when the target has no category with `parent <> 0`, rather
       than pass. A check that reports success for a claim it never exercised is
       worse than no check. _(Req 12.7)_
-- [x] 10.5 Run both env-gated checks against the live WordPress database — the
-      `accuweaverllc/scripts` podman stack, from a container on the stack's own
+- [x] 10.5 Run both env-gated checks against the live WordPress database — a
+      local Podman dev stack, from a container on the stack's own
       network since MySQL is not published to the host — and record the observed
       numbers here (category count, nested count, paths validated), as M9a's
       task 7.2 does. _(Req 12.6)_
   - _Both env-gated checks have now passed against the live WordPress database._
-    Target: the podman stack in `accuweaverllc/scripts` — MySQL 8.0, database
+    Target: a local Podman dev stack — MySQL 8.0, database
     `wordpress`, prefix `accuweaver`, `permalink_structure`
     `/%year%/%monthnum%/%day%/%postname%/` (so `trailing_slash=true` and an
     **empty front** — the structure leads with a token, not a literal) and

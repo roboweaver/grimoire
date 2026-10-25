@@ -10,7 +10,7 @@ carries only `ID`, `Name`, `Slug` and `Taxonomy`, and no query in
 `internal/storage/wprepo` reads `term_taxonomy.parent`.
 
 That last gap is the sharpest one. The WordPress database this project is
-developed against — the `accuweaverllc/scripts` podman stack M9a validated
+developed against — the local Podman dev stack M9a validated
 against — has **33 categories, 28 of which have `parent <> 0`**. Flat-only
 category archives therefore misrepresent the great majority of that site's
 taxonomy: every nested category is served as if it were top-level, its URL

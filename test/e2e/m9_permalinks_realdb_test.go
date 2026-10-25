@@ -29,8 +29,8 @@ const (
 	realWPEnvDSN    = "GRIMOIRE_TEST_WP_DSN"
 	realWPEnvPrefix = "GRIMOIRE_TEST_WP_PREFIX"
 
-	// realWPDefaultPrefix matches the podman stack in accuweaverllc/scripts
-	// (podman-wordpress-pods.sh sets TABLE_PREFIX=accuweaver), which is the
+	// realWPDefaultPrefix matches the local Podman dev stack
+	// (its WordPress container sets TABLE_PREFIX=accuweaver), which is the
 	// fixture Req 7.4 names.
 	realWPDefaultPrefix = "accuweaver"
 	// realWPWordPressDefaultPrefix is the prefix Req 7.4 requires this fixture
@@ -56,7 +56,7 @@ const (
 // ../../internal/storage/storagetest's TestRealWordPressDB, so the default
 // hermetic `go test ./...` skips it and CI needs no database.
 //
-// Run it against the podman stack in accuweaverllc/scripts with:
+// Run it against a local Podman dev stack with:
 //
 //	GRIMOIRE_TEST_WP_DSN='wordpress:PASS@tcp(127.0.0.1:3306)/wordpress?parseTime=true' \
 //	GRIMOIRE_TEST_WP_PREFIX=accuweaver \
@@ -102,7 +102,7 @@ func TestM9PermalinksRealDBE2E(t *testing.T) {
 	// under false colours.
 	if prefix == realWPWordPressDefaultPrefix {
 		t.Skipf("%s=%q is the WordPress default; this fixture must exercise a "+
-			"non-default table prefix (the podman stack in accuweaverllc/scripts uses %q)",
+			"non-default table prefix (the local Podman dev stack uses %q)",
 			realWPEnvPrefix, prefix, realWPDefaultPrefix)
 	}
 
@@ -132,7 +132,7 @@ func TestM9PermalinksRealDBE2E(t *testing.T) {
 	}
 	if !realWPIsDated(raw) {
 		t.Skipf("site structure %q carries no date tokens; this fixture must exercise a "+
-			"dated structure (the podman stack in accuweaverllc/scripts uses "+
+			"dated structure (the local Podman dev stack uses "+
 			"/%%year%%/%%monthnum%%/%%day%%/%%postname%%/)", raw)
 	}
 	t.Logf("target site: prefix=%q permalink_structure=%q trailing_slash=%v",

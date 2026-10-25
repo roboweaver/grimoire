@@ -202,8 +202,8 @@ implementation, matching how M5–M7 were run.
 - [x] 7.2 Add an env-var-gated test against a real WordPress database, skipped
       unless the DSN variable is set, mirroring
       `../02.1-wp-hash-real-db`'s gating so CI stays hermetic. It must exercise a
-      dated permalink structure **and** a non-default table prefix — the podman
-      stack in `accuweaverllc/scripts` provides both
+      dated permalink structure **and** a non-default table prefix — a local
+      Podman dev stack provides both
       (`accuweaver` prefix, `/%year%/%monthnum%/%day%/%postname%/`).
       _(Req 7.4)_
   - Landed as `test/e2e/m9_permalinks_realdb_test.go`
@@ -235,7 +235,7 @@ implementation, matching how M5–M7 were run.
     dropping `Canonical`'s trailing slash (3 subtests) and dropping the query
     string from the redirect (3 subtests). The temporary harness was deleted.
   - _Both env-gated checks have now passed against a live WordPress database._
-    Target: the podman stack in `accuweaverllc/scripts` — MySQL 8.0, database
+    Target: a local Podman dev stack — MySQL 8.0, database
     `wordpress`, prefix `accuweaver` (non-default, no trailing underscore),
     `permalink_structure` `/%year%/%monthnum%/%day%/%postname%/`
     (`trailing_slash=true`), 145 published posts. MySQL is not published to the

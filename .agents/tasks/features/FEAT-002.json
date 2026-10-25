@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "FIX 2: `grimoire-cli podman autostart -h` errors with `unknown action \"-h\"` because runPodmanAutostart reads the positional action before parsing flags. Make -h/--help/help and a bare `autostart` (no action) print the subcommand usage and exit 0, consistent with up/down/status/build. Localized to runPodmanAutostart in podman.go. Depends on FEAT-001 only because both edit podman.go (run after FEAT-001 to avoid conflicts).",
+  "status": "completed",
+  "steps": [
+    "In cmd/grimoire-cli/podman.go runPodmanAutostart, build the autostart flag set via newPodmanFlagSet FIRST (so fs.Usage carries the rich autostart help text already present). Before reading args[0] as the action: if len(args)==0, print fs.Usage() (or call the usage function) and return nil (exit 0, not the current usage-error). If args[0] is `-h`, `--help`, or `help`, print the usage and return nil.",
+    "For a real action (install|uninstall), keep today's behavior: parse the remaining flags via parseFlags (which maps flag.ErrHelp to done,nil), then dispatch install/uninstall. A genuinely unknown action (e.g. `autostart frobnicate`) must still return the `unknown action %q (want install|uninstall)` error.",
+    "Ensure that `autostart install -h` / `autostart uninstall -h` also print help and exit 0 via the existing parseFlags ErrHelp path (they already can once the flag set parses the action's rest-args).",
+    "Audit note (no code change required): up/down/status/build already build the flag set before any positional read, and runPodman's group dispatcher already handles -h/--help/help, so autostart was the only offender in the podman group. Do not change the top-level `sessions gc` handler in main.go (out of scope for this task).",
+    "Run gofmt and the build/tests."
+  ],
+  "acceptance_criteria": [
+    "`go build ./...` passes.",
+    "`go test ./cmd/grimoire-cli/` passes.",
+    "runPodman([]string{\"autostart\",\"-h\"}) returns nil (no error) and prints usage; the old `unknown action \"-h\"` error is gone.",
+    "runPodman([]string{\"autostart\"}) returns nil and prints usage (bare autostart no longer errors).",
+    "runPodman([]string{\"autostart\",\"frobnicate\"}) still returns a non-nil error mentioning `unknown action`."
+  ],
+  "verification": [
+    "cd /Users/robweaver/AccuWeaver/grimoire/.worktrees/podman-docs && go build ./...",
+    "go test ./cmd/grimoire-cli/",
+    "go test ./cmd/grimoire-cli/ -run 'Autostart|Podman' -v",
+    "gofmt -l cmd/grimoire-cli"
+  ],
+  "blocked_reason": null,
+  "findings": "Fixed in cmd/grimoire-cli/podman.go runPodmanAutostart: the flag set (newPodmanFlagSet with the full autostart usage text) is now built BEFORE reading the positional action. A bare `autostart` (len(args)<1) now calls fs.Usage() and returns nil (exit 0) instead of the old usage-error; `-h`, `--help`, and `help` as args[0] likewise print usage and return nil. For a real action the args[0] is read as the action and the remaining args are parsed via parseFlags (preserving the ErrHelp->done,nil path so `autostart install -h` / `autostart uninstall -h` still exit 0), then dispatched to install/uninstall. A genuinely unknown action still returns the `unknown action %q (want install|uninstall)` error. Added TestAutostartHelpPaths in cmd/grimoire-cli/podman_test.go asserting runPodman for {autostart -h}, {autostart --help}, {autostart help}, and bare {autostart} return nil, and that {autostart frobnicate} still errors with `unknown action`; the test needs no live podman. Verification GREEN from the worktree: `go build ./...` passes, `go test ./cmd/grimoire-cli/` passes, `go test ./cmd/grimoire-cli/ -run 'Autostart|Podman' -v` passes (TestAutostartHelpPaths included), and `gofmt -l cmd/grimoire-cli` prints nothing."
+}

@@ -3,6 +3,7 @@ package content
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -119,7 +120,7 @@ func TestAutosaveNewerReturnsFalseWhenNoAutosaveExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Newer() error = %v, want nil", err)
 	}
-	if ok || got != (domain.Post{}) {
+	if ok || got.ID != 0 {
 		t.Fatalf("Newer() = (%+v, %v), want (Post{}, false)", got, ok)
 	}
 }
@@ -140,7 +141,7 @@ func TestAutosaveNewerReturnsFalseWhenAutosaveNotNewerThanParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Newer() error = %v, want nil", err)
 	}
-	if ok || got != (domain.Post{}) {
+	if ok || got.ID != 0 {
 		t.Fatalf("Newer() = (%+v, %v), want (Post{}, false) when autosave is not strictly newer", got, ok)
 	}
 }
@@ -159,7 +160,7 @@ func TestAutosaveNewerReturnsTrueWhenAutosaveNewerThanParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Newer() error = %v, want nil", err)
 	}
-	if !ok || got != autosave {
+	if !ok || !reflect.DeepEqual(got, autosave) {
 		t.Fatalf("Newer() = (%+v, %v), want (%+v, true)", got, ok, autosave)
 	}
 }

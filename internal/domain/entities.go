@@ -33,6 +33,16 @@ type Post struct {
 	// post_type='revision' rows this is the owning post's ID; it is also
 	// used generically for WordPress-style hierarchical parenting.
 	ParentID int64
+
+	// PageAncestry is a transient, non-persisted routing/transport field. It is
+	// never written to storage and is not part of the domain post reader/writer
+	// method set (Req 8.4). When set, it is the root-first slug ancestry of a
+	// resolved page, ending in the page's own slug (self-inclusive leaf), that
+	// Canonical's page guard reads via pageAncestryFor(p). It exists only so the
+	// pure Structure.Canonical can build a page's nested canonical from an
+	// already-walked ancestry without widening its signature or walking
+	// post_parent itself (M15; D4).
+	PageAncestry []string
 }
 
 // RevisionMeta is the summary shape returned by revision listing (no

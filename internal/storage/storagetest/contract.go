@@ -396,6 +396,7 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 	runPostTermsWriterContract(t, newRepos)
 	runTermReaderContract(t, newRepos)
 	runPostContentBackfillContract(t, newRepos)
+	runPageReaderContract(t, newRepos)
 }
 
 // runUserContract covers UserRepository + UserMetaRepository, including the
@@ -1882,6 +1883,343 @@ func runPostContentBackfillContract(t *testing.T, newRepos NewReposFunc) {
 		if after.Content != cleanContent || after.Excerpt != cleanExcerpt {
 			t.Errorf("idempotent clean write drifted: content=%q excerpt=%q, want %q / %q",
 				after.Content, after.Excerpt, cleanContent, cleanExcerpt)
+		}
+	})
+}
+
+// runPageReaderContract covers the additive M15 page-graph read port the
+// hierarchical-page-URL walk is built on: PageReader.ListPages (the paginated,
+// all-status, page-type-targeted keyset walk).
+//
+// ListPages is additive to the existing *PostRepo and is exposed as the new Set
+// field repos.PageReader (D6, Req 7.4, 8.4). Until task 2.2 lands that field
+// and method plus the domain.PageReader port and the domain.PageNode projection
+// type, this file does not compile — which is the expected TDD-red for task 2.1:
+// the failure names exactly the missing port (domain.PageReader /
+// repos.PageReader), the missing method (PostRepo.ListPages), and the missing
+// type (domain.PageNode), never a wrong-behavior assertion.
+//
+// The rows these cases need are seeded through PostWriter.Create rather than a
+// new SQL fixture set, so the contract stays inside contract.go and
+// vendor-agnostic: PostWriter.Create persists post_type/post_status/post_name/
+// post_parent verbatim (runWriterContract above pins that, including that
+// Create writes p.ParentID -> post_parent), and SeedFixtures already carries the
+// excluded `post` rows (hello-1..3, 1-3), `attachment` rows (201, 202) and
+// `nav_menu_item` rows (301-304), so "returns NO post/attachment/nav_menu_item
+// row" is asserted against rows that already exist rather than invented ones.
+//
+// The graph must INCLUDE unpublished pages (draft/pending/private): an ancestry
+// may have to climb THROUGH a non-published ancestor to reach a published leaf,
+// so ListPages applies no post_status filter — the leaf's published status is
+// enforced later by BySlug/PublishedByID (Req 3.4, design Finding 7 / D6).
+func runPageReaderContract(t *testing.T, newRepos NewReposFunc) {
+	t.Helper()
+	ctx := context.Background()
+
+	// seedPages inserts the M15 page graph on top of SeedFixtures: pages across
+	// every status (publish/draft/pending/private) and a nested
+	// grandparent->parent->child chain, so a status-filtered read is caught
+	// dropping the unpublished ancestors and a one-hop walk is caught stopping
+	// short. It returns the set of page IDs the walk is expected to return (every
+	// seeded page plus the SeedFixtures "about" page), keyed to the status seeded,
+	// so a case can assert membership without re-deriving the fixture. The
+	// excluded `post`/`attachment`/`nav_menu_item` rows already exist in
+	// SeedFixtures, so their ids are returned separately for the non-membership
+	// assertions.
+	//
+	// post_parent is threaded through ParentID: PostWriter.Create writes
+	// p.ParentID -> post_parent (runWriterContract pins this), so a nested page
+	// is seeded by pointing its ParentID at the parent page's returned id.
+	seedPages := func(t *testing.T, repos *storage.Repositories) (want map[int64]string, excluded map[int64]bool) {
+		t.Helper()
+		want = map[int64]string{}
+		excluded = map[int64]bool{}
+
+		mk := func(slug, status string, parentID int64) int64 {
+			id, err := repos.PostWriter.Create(ctx, domain.Post{
+				Author:        1,
+				Date:          time.Date(2024, 10, 1, 0, 0, 0, 0, time.UTC),
+				Content:       "<p>page body</p>",
+				Title:         slug,
+				Excerpt:       "ex",
+				Status:        status,
+				Slug:          slug,
+				Type:          "page",
+				CommentStatus: "closed",
+				ParentID:      parentID,
+			})
+			if err != nil {
+				t.Fatalf("seed page %s/%s: %v", slug, status, err)
+			}
+			return id
+		}
+
+		// A nested chain spanning statuses: the grandparent is DRAFT and the
+		// parent is PRIVATE, both unpublished, so a read that publish-filtered
+		// the graph would drop them and the child could never climb to a
+		// resolvable ancestry. Three levels is the shallowest chain that catches
+		// a walk which handles one hop and stops.
+		grandparent := mk("pg-grandparent", "draft", 0)
+		parent := mk("pg-parent", "private", grandparent)
+		child := mk("pg-child", "publish", parent)
+		want[grandparent] = "draft"
+		want[parent] = "private"
+		want[child] = "publish"
+
+		// Flat pages across the remaining statuses, each top-level, so every
+		// status the port must surface is present at least once.
+		want[mk("pg-flat-pending", "pending", 0)] = "pending"
+		want[mk("pg-flat-publish", "publish", 0)] = "publish"
+
+		// The SeedFixtures "about" page (id 5) is a page too and must appear.
+		about, err := repos.Posts.BySlug(ctx, "about")
+		if err != nil {
+			t.Fatalf("BySlug about: %v", err)
+		}
+		want[about.ID] = "publish"
+
+		// Excluded rows already in SeedFixtures: three posts, two attachments,
+		// four nav_menu_items. None is a `page`, so none may appear in a
+		// ListPages result (Req 7.1, 7.2). Resolve their ids through the read
+		// path rather than hardcoding fixture literals.
+		for _, slug := range []string{"hello-1", "hello-2", "hello-3"} {
+			p, err := repos.Posts.BySlug(ctx, slug)
+			if err != nil {
+				t.Fatalf("BySlug %s: %v", slug, err)
+			}
+			excluded[p.ID] = true
+		}
+		// The attachment (201, 202) and nav_menu_item (301-304) rows are not
+		// readable through the published BySlug path, so name them by the fixture
+		// ids SeedFixtures pins.
+		for _, id := range []int64{201, 202, 301, 302, 303, 304} {
+			excluded[id] = true
+		}
+
+		return want, excluded
+	}
+
+	// drain walks ListPages under the given limit from afterID 0 to an empty
+	// page, returning every row in visit order. It is the keyset client the real
+	// hierarchy loader (task 3.2) will be: advance the cursor to the last row's
+	// ID each page, stop on a short/empty page, and fail loudly if the walk is
+	// not strictly ascending by ID.
+	drain := func(t *testing.T, repos *storage.Repositories, limit int) []domain.PageNode {
+		t.Helper()
+		var all []domain.PageNode
+		var afterID int64
+		for {
+			page, err := repos.PageReader.ListPages(ctx, afterID, limit)
+			if err != nil {
+				t.Fatalf("ListPages(after=%d, limit=%d): %v", afterID, limit, err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			for _, row := range page {
+				if row.ID <= afterID {
+					t.Fatalf("ListPages returned id %d <= cursor %d: the walk is "+
+						"not strictly ascending by ID", row.ID, afterID)
+				}
+				afterID = row.ID
+			}
+			all = append(all, page...)
+			if len(page) < limit {
+				break
+			}
+		}
+		return all
+	}
+
+	t.Run("ListPages returns page rows only across all statuses and no excluded type", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, excluded := seedPages(t, repos)
+
+		rows := drain(t, repos, 1000)
+
+		got := map[int64]string{}
+		for _, row := range rows {
+			if excluded[row.ID] {
+				t.Errorf("ListPages returned excluded row %d (status %q); a post, "+
+					"attachment, or nav_menu_item must never be walked — the port "+
+					"selects post_type='page' only (Req 7.1, 7.2)", row.ID, row.Status)
+			}
+			got[row.ID] = row.Status
+		}
+		for id, wantStatus := range want {
+			gotStatus, ok := got[id]
+			if !ok {
+				t.Errorf("ListPages missing page row %d (want status %q); every "+
+					"page row is in scope regardless of status so an ancestry can "+
+					"climb through a non-published ancestor (Req 7.1, 3.4, Finding 7)",
+					id, wantStatus)
+				continue
+			}
+			if gotStatus != wantStatus {
+				t.Errorf("ListPages row %d status = %q, want %q", id, gotStatus, wantStatus)
+			}
+		}
+	})
+
+	t.Run("ListPages includes unpublished pages (draft/pending/private)", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seedPages(t, repos)
+
+		rows := drain(t, repos, 1000)
+		got := map[int64]string{}
+		for _, row := range rows {
+			got[row.ID] = row.Status
+		}
+		// Every unpublished status seeded must be present: the graph is NOT
+		// publish-filtered, because the walk has to pass through a draft/private
+		// ancestor to reach a published leaf (Req 3.4 posture, design Finding 7).
+		for id, status := range want {
+			switch status {
+			case "draft", "pending", "private":
+				if _, ok := got[id]; !ok {
+					t.Errorf("ListPages dropped unpublished page %d (status %q); "+
+						"the graph must include unpublished ancestors (Req 3.4, "+
+						"Finding 7 / D6)", id, status)
+				}
+			}
+		}
+	})
+
+	t.Run("ListPages carries ID, slug (post_name), post_parent, and post_status", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		seedPages(t, repos)
+
+		rows := drain(t, repos, 1000)
+
+		// The nested chain pg-grandparent -> pg-parent -> pg-child pins every
+		// PageNode field at once: the slug (segment the walk matches on), the
+		// ParentID (link the walk climbs), and the Status (leaf check consults),
+		// alongside a non-zero ID (keyset cursor).
+		bySlug := map[string]domain.PageNode{}
+		for _, row := range rows {
+			if row.ID == 0 {
+				t.Errorf("page row has zero ID: %+v", row)
+			}
+			bySlug[row.Slug] = row
+		}
+
+		gp, ok := bySlug["pg-grandparent"]
+		if !ok {
+			t.Fatal("pg-grandparent not returned; field case vacuous")
+		}
+		parent, ok := bySlug["pg-parent"]
+		if !ok {
+			t.Fatal("pg-parent not returned; field case vacuous")
+		}
+		child, ok := bySlug["pg-child"]
+		if !ok {
+			t.Fatal("pg-child not returned; field case vacuous")
+		}
+
+		if gp.ParentID != 0 {
+			t.Errorf("pg-grandparent ParentID = %d, want 0 (top-level)", gp.ParentID)
+		}
+		if gp.Status != "draft" {
+			t.Errorf("pg-grandparent Status = %q, want draft", gp.Status)
+		}
+		if parent.ParentID != gp.ID {
+			t.Errorf("pg-parent ParentID = %d, want %d (post_parent links to the grandparent)",
+				parent.ParentID, gp.ID)
+		}
+		if parent.Status != "private" {
+			t.Errorf("pg-parent Status = %q, want private", parent.Status)
+		}
+		if child.ParentID != parent.ID {
+			t.Errorf("pg-child ParentID = %d, want %d (post_parent links to the parent)",
+				child.ParentID, parent.ID)
+		}
+		if child.Status != "publish" {
+			t.Errorf("pg-child Status = %q, want publish", child.Status)
+		}
+	})
+
+	t.Run("ListPages paginates by ascending-ID keyset with none skipped or duplicated", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seedPages(t, repos)
+
+		// A small limit forces multiple pages; drain already asserts strict
+		// ascending order and advances the cursor by last-seen ID.
+		rows := drain(t, repos, 2)
+
+		counts := map[int64]int{}
+		for _, row := range rows {
+			counts[row.ID]++
+		}
+		for id := range want {
+			switch counts[id] {
+			case 0:
+				t.Errorf("keyset walk skipped page row %d", id)
+			case 1:
+				// exactly once: correct
+			default:
+				t.Errorf("keyset walk returned page row %d %d times, want exactly once", id, counts[id])
+			}
+		}
+	})
+
+	t.Run("ListPages returns a page mutated in place between pages exactly once", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seedPages(t, repos)
+
+		// Walk one row at a time; after the first page, mutate a page that has
+		// NOT yet been visited (a higher ID) in place through the general writer.
+		// Because the keyset cursor is the immutable primary key and the update
+		// never touches ID, that page must still appear exactly once further
+		// along the walk — neither skipped nor doubled (Req 7.3).
+		var afterID int64
+		counts := map[int64]int{}
+		mutated := false
+		for {
+			page, err := repos.PageReader.ListPages(ctx, afterID, 1)
+			if err != nil {
+				t.Fatalf("ListPages(after=%d): %v", afterID, err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			row := page[0]
+			counts[row.ID]++
+			afterID = row.ID
+
+			if !mutated {
+				// Pick any not-yet-visited seeded page id strictly greater than
+				// the current cursor and rewrite it in place.
+				var target int64
+				for id := range want {
+					if id > afterID && (target == 0 || id < target) {
+						target = id
+					}
+				}
+				if target != 0 {
+					p, err := repos.PostWriter.ByID(ctx, target)
+					if err != nil {
+						t.Fatalf("mid-walk ByID(%d): %v", target, err)
+					}
+					p.Title = "mutated mid-walk"
+					if err := repos.PostWriter.Update(ctx, p); err != nil {
+						t.Fatalf("mid-walk Update(%d): %v", target, err)
+					}
+					mutated = true
+				}
+			}
+		}
+		if !mutated {
+			t.Fatal("no mid-walk mutation performed; the in-place-mutation case is vacuous")
+		}
+		for id := range want {
+			if counts[id] != 1 {
+				t.Errorf("page %d visited %d times across the mid-walk mutation, want exactly once", id, counts[id])
+			}
 		}
 	})
 }

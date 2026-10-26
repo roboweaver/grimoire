@@ -20,6 +20,13 @@ const (
 	KindTag
 	KindAuthor
 	KindDate
+	// KindPage is a multi-segment path the handler walks through the page graph
+	// (M15). It is appended after KindDate so the existing constants keep their
+	// values and no table or switch keyed on the old order shifts. The
+	// classifier makes NO claim the segments name a real page; it carries them
+	// as Target.Segments and the handler's walk produces the 301 or the 404
+	// (Req 6.2, 6.3).
+	KindPage
 )
 
 // Target is the classified meaning of one request path.
@@ -140,6 +147,20 @@ func (s Structure) Classify(path string) Target {
 			t.Post = ref
 			return t
 		}
+	}
+
+	// Row 7.5 (M15) -- a nested page path. Two-or-more segments not claimed by
+	// any archive base above (those rows win, Req 6.4 / D5 collision (a)) and not
+	// matching the structure's own post shape (row 7 won, Req 6.5). The
+	// classifier makes NO claim these segments name a real page (Req 6.2); it
+	// carries them as Target.Segments and the handler's walk produces the 301 or
+	// the 404 (Req 3, D5 collision (b)). A ONE-segment path is deliberately not
+	// claimed here -- it falls to row 8 so a top-level page keeps resolving at
+	// /{slug} exactly as today (Req 1.2, 6.1, 9.5).
+	if len(segs) >= 2 {
+		t.Kind = KindPage
+		t.Segments = slices.Clone(segs)
+		return t
 	}
 
 	// Row 8 -- the flat /{slug} fallback, which is what makes M9a's

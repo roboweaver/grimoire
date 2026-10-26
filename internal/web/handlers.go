@@ -74,6 +74,18 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request) error {
 		return s.authorArchive(w, r, t)
 	case routing.KindDate:
 		return s.dateArchive(w, r, t)
+	case routing.KindPage:
+		// A multi-segment path the classifier handed to the page walk (M15).
+		// The page wildcard route is registered only when a PageService is
+		// wired (WithPages), so s.pages is non-nil whenever this arm is reached
+		// through that route. The nil guard is defensive: a Server without
+		// WithPages does not register the wildcard, so a 2+-segment page path
+		// 404s at the router before reaching here -- but if one ever does, a
+		// 404 is the correct answer, not a nil dereference.
+		if s.pages == nil {
+			return domain.ErrNotFound
+		}
+		return s.page(w, r, t)
 	default:
 		// KindNone: the path carries neither a post nor an archive
 		// interpretation. Classify is total, so this is an answer rather than a
@@ -106,6 +118,36 @@ func (s *Server) single(w http.ResponseWriter, r *http.Request, t routing.Target
 	post, err := s.resolveSingle(ctx, t.Post)
 	if err != nil {
 		return err
+	}
+
+	// M15: a page's canonical is its nested post_parent ancestry, not the
+	// structure's post-shape Canonical. Both a top-level page (/about) and a
+	// nested page's flat leaf (/onboarding, which is actually
+	// /handbook/onboarding/) arrive here as KindPost, because the flat /{slug}
+	// fallback (classify row 8) claims a single segment. Ask the one page-
+	// ancestry computation (PageService.AncestryFor) for the canonical, so
+	// single() and page() never disagree -- both end at PagePath(ancestry) for
+	// the same page (Req 5.1, 5.4). A top-level page's ancestry is [slug], so
+	// its canonical is /about (plus the structure's trailing slash) -- a fixed
+	// point, no redirect, no top-level page URL changes (Req 1.2, 4.5). A nested
+	// leaf's canonical is the nested path, so single() 301s to it, query raw
+	// (Req 5.1, 5.3). The old dated post-shape form (e.g. /2024/05/17/onboarding/)
+	// arrives here as KindPost via the structure's own shape and 301s to the
+	// nested canonical too, so a page never takes a dated canonical (Req 5.2).
+	//
+	// Guarded on s.pages != nil: a Server built without WithPages keeps today's
+	// behavior exactly -- it falls through to the post-shape Canonical path
+	// below, as it did before M15 -- rather than dereferencing a nil service.
+	if s.pages != nil && post.Type == "page" {
+		ancestry, err := s.pages.AncestryFor(ctx, post.ID)
+		if err != nil {
+			return err
+		}
+		canonical := s.permalinks.PagePath(ancestry)
+		if r.URL.Path != canonical {
+			return s.redirectCanonical(w, r, canonical)
+		}
+		return s.renderSingle(w, r, post)
 	}
 
 	// Canonical is the single construction site for a permalink, so the redirect
@@ -310,6 +352,48 @@ func (s *Server) categoryArchive(w http.ResponseWriter, r *http.Request, t routi
 	// from the requested segments, so it is a fixed point: a request already at
 	// it renders rather than redirecting to itself (Req 2.4).
 	return s.renderArchive(w, r, "category", s.permalinks.CategoryPath(archive.Ancestry), archive)
+}
+
+// page serves a nested page path (M15), the page analogue of categoryArchive.
+//
+// The segments come from the classifier rather than from a chi parameter,
+// because a nested page path has a segment count no chi pattern can express
+// (Req 9.4) -- the route is a wildcard rooted at a one-segment parameter node.
+//
+// content.PageMovedError is the Req 5.1/5.2 recovery arriving here: the segment
+// walk failed but the path's final segment named a page somewhere in the graph,
+// so the published URL 301s to that page's canonical ancestry instead of 404ing.
+// It covers the flat /{slug} leaf and the wrong-ancestor forms. errors.As rather
+// than errors.Is because the ancestry travels with the error and is what the
+// redirect target is built from; PageMovedError deliberately does not wrap
+// domain.ErrNotFound, so forgetting this arm is a loud 500 rather than a silent
+// 404 of every legacy page URL.
+//
+// Any other error (including domain.ErrNotFound for a final segment naming no
+// page) is returned so the error middleware maps it -- a 404 for not-found,
+// exactly as categoryArchive does, the KindNone-equivalent outcome reached by
+// the walk rather than the classifier (Req 6.3).
+func (s *Server) page(w http.ResponseWriter, r *http.Request, t routing.Target) error {
+	leaf, ancestry, err := s.pages.Resolve(r.Context(), t.Segments)
+	var moved *content.PageMovedError
+	if errors.As(err, &moved) {
+		return s.redirectCanonical(w, r, s.permalinks.PagePath(moved.Ancestry))
+	}
+	if err != nil {
+		return err
+	}
+	// The canonical is built from the RESOLVED leaf's own ancestry, not from the
+	// requested segments, so it is a fixed point: a request already at it renders
+	// rather than redirecting to itself (Req 3.5, 5.4). The flat /{slug} leaf and
+	// the old dated form both differ from it and 301 here; the query string rides
+	// across raw via redirectCanonical (Req 5.3).
+	canonical := s.permalinks.PagePath(ancestry)
+	if r.URL.Path != canonical {
+		return s.redirectCanonical(w, r, canonical)
+	}
+	// renderSingle sets kind "page" by post.Type, so a resolved page renders with
+	// the page template (Req 3.2).
+	return s.renderSingle(w, r, leaf)
 }
 
 // tagArchive serves a tag archive (Req 5.1). post_tag is flat, so there is one

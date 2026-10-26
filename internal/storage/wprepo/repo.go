@@ -100,6 +100,34 @@ func toDomainContentRows(rows []postContentRow) []domain.PostContentRow {
 	return out
 }
 
+// pageNodeRow is the scan target for the M15 page-graph projection: only the
+// four fields the ancestry walk reads, mirroring how postContentRow maps to
+// domain.PostContentRow. post_name and post_parent come straight from the
+// existing postColumns, so no new column is added (Req 7.5, 8.1).
+type pageNodeRow struct {
+	ID       int64  `bun:"ID"`
+	Slug     string `bun:"post_name"`
+	ParentID int64  `bun:"post_parent"`
+	Status   string `bun:"post_status"`
+}
+
+func (r pageNodeRow) toDomain() domain.PageNode {
+	return domain.PageNode{
+		ID:       r.ID,
+		Slug:     r.Slug,
+		ParentID: r.ParentID,
+		Status:   r.Status,
+	}
+}
+
+func toDomainPageNodes(rows []pageNodeRow) []domain.PageNode {
+	out := make([]domain.PageNode, len(rows))
+	for i, r := range rows {
+		out[i] = r.toDomain()
+	}
+	return out
+}
+
 // PostRepo reads posts and pages.
 type PostRepo struct {
 	db     *bun.DB
@@ -316,6 +344,26 @@ func (r *PostRepo) BackfillPage(ctx context.Context, afterID int64, limit int, t
 		return nil, err
 	}
 	return toDomainContentRows(rows), nil
+}
+
+// ListPages streams the M15 page graph: post_type='page' rows across ALL
+// statuses, ordered by the primary key for a stable keyset cursor (Req 7).
+func (r *PostRepo) ListPages(ctx context.Context, afterID int64, limit int) ([]domain.PageNode, error) {
+	var rows []pageNodeRow
+	err := r.db.NewSelect().
+		TableExpr("?", bun.Ident(r.prefix+"posts")).
+		Column("ID", "post_name", "post_parent", "post_status"). // projection only (Req 7.2)
+		Where("post_type = ?", "page").                          // page rows only (Req 7.1)
+		Where("? > ?", bun.Ident("ID"), afterID).                // keyset cursor (Req 7.3)
+		// NO post_status filter: unpublished ancestors stay in scope so the walk
+		// can climb through them to a published leaf (Req 3.4, Finding 7 / D6).
+		OrderExpr("? ASC", bun.Ident("ID")).
+		Limit(limit).
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	return toDomainPageNodes(rows), nil
 }
 
 // UpdateContentFields writes ONLY post_content/post_excerpt by ID; it does NOT

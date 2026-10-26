@@ -190,6 +190,14 @@ type RESTMapper struct {
 	// "/wp-content/uploads" so a mapper that never saw WithUploadsBaseURL still
 	// produces a usable, site-root-relative anchor rather than an empty one.
 	uploadsBaseURL string
+
+	// pages is the page-hierarchy reader postLink walks to populate a page row's
+	// transient PageAncestry before Canonical builds the nested link (M15,
+	// Req 4.4). It is the single home of the page-ancestry walk (Req 4.3), shared
+	// with the handler entry points. nil is the deliberate default: a mapper that
+	// never saw WithPages leaves PageAncestry unset, so Canonical's page guard
+	// degrades a page to /{slug} exactly as before M15 (Req 4.5).
+	pages *PageService
 }
 
 // NewRESTMapper constructs a RESTMapper. prefix is the usermeta key prefix
@@ -224,14 +232,48 @@ func (m *RESTMapper) WithUploadsBaseURL(base string) *RESTMapper {
 	return m
 }
 
+// WithPages configures the page-hierarchy reader postLink uses to populate a
+// page row's transient PageAncestry before Canonical builds the link (M15,
+// Req 4.4). It returns the same RESTMapper for chaining, mirroring
+// WithPermalinks/WithUploadsBaseURL, so the startup path can hand it the shared
+// *PageService alongside the permalink structure without either growing a
+// positional parameter. A mapper that never saw WithPages keeps pre-M15
+// behavior: a page's link degrades to /{slug} via Canonical's page guard.
+func (m *RESTMapper) WithPages(p *PageService) *RESTMapper {
+	m.pages = p
+	return m
+}
+
 // postLink is the REST "link" field for a post/page, both post types sharing
 // one route. It delegates to routing.Structure.Canonical — the single
 // construction site for a permalink — so the advertised link and the path the
-// web layer serves at 200 cannot diverge (Req 6.1). A flat structure yields
+// web layer serves at 200 cannot diverge (Req 6.1, 8.5). A flat structure yields
 // "/{slug}" exactly as before M9a (Req 6.2). It is a relative path; the web
 // layer resolves it to an absolute URL from the request's scheme/Host at
 // response time (Req 6.6).
-func (m *RESTMapper) postLink(p domain.Post) string { return m.permalinks.Canonical(p) }
+//
+// For a page with a wired page service (M15), it first walks the page graph to
+// populate p's transient PageAncestry, so Canonical's page guard builds the
+// nested canonical (/handbook/onboarding/) rather than the /{slug} degrade
+// (Req 4.4). p is a value parameter, so this mutates only the local copy — the
+// transient field exists solely to feed the pure Canonical and is never
+// persisted (D4). A post's link, and a page's link when no page service is
+// wired, are unchanged: in both those cases Canonical is called exactly as
+// before (Req 4.2, 4.5). No second page-URL builder is introduced — Canonical
+// remains the single construction site (Req 4.3, 8.5).
+//
+// If the ancestry walk errors, postLink falls back gracefully: it leaves
+// PageAncestry unset so Canonical degrades to /{slug} rather than failing the
+// whole REST mapping. A link field should not 500 the response over a
+// best-effort nested-canonical enrichment.
+func (m *RESTMapper) postLink(ctx context.Context, p domain.Post) string {
+	if p.Type == "page" && m.pages != nil {
+		if ancestry, err := m.pages.AncestryFor(ctx, p.ID); err == nil {
+			p.PageAncestry = ancestry
+		}
+	}
+	return m.permalinks.Canonical(p)
+}
 
 // commentLink is the REST "link" field for a comment. grimoire has no
 // pretty-permalink single-post route parameterized by ID, so this mirrors
@@ -277,7 +319,7 @@ func (m *RESTMapper) restCommon(ctx context.Context, p domain.Post, featuredMedi
 		Slug:          p.Slug,
 		Status:        p.Status,
 		Type:          p.Type,
-		Link:          m.postLink(p),
+		Link:          m.postLink(ctx, p),
 		GUID:          RESTRendered{Rendered: p.GUID},
 		Title:         RESTRendered{Rendered: p.Title},
 		Content:       RESTContentRendered{Rendered: m.renderContent(ctx, p.Content), Protected: p.Password != ""},

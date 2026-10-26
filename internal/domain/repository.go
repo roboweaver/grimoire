@@ -499,6 +499,35 @@ type PostContentUpdater interface {
 	UpdateContentFields(ctx context.Context, id int64, content, excerpt string) error
 }
 
+// PageNode is the lean M15 projection the page-ancestry walk is built on: the
+// four {prefix}posts fields the walk needs and nothing more. It is NOT
+// domain.Post -- the walk never reads the body columns, so a large pages table
+// indexes cheaply (Req 7.1, 7.2).
+type PageNode struct {
+	ID       int64  // ID
+	Slug     string // post_name
+	ParentID int64  // post_parent (0 == top-level)
+	Status   string // post_status
+}
+
+// PageReader streams the page graph the M15 hierarchical-page-URL walk is built
+// on: {prefix}posts rows with post_type = 'page', across ALL post_status
+// values, ordered by ID ascending so a keyset-paginated read returns every page
+// exactly once. It is additive to the existing PostRepo reads and alters none
+// of them (Req 7.4, 8.4).
+type PageReader interface {
+	// ListPages returns up to limit page rows with ID strictly greater than
+	// afterID, ordered by ID ascending. afterID == 0 starts the walk. Every
+	// page row is in scope regardless of status (NO post_status filter), because
+	// an ancestry may have to climb through a non-published ancestor to reach a
+	// published leaf (Req 7.1, 3.4). The returned rows carry only the projection
+	// in PageNode, never a full post row (Req 7.2). A page shorter than limit
+	// (or empty) signals the walk is complete. The same row is never returned
+	// twice and no page is skipped, because the keyset cursor is the
+	// monotonically increasing primary key (Req 7.3).
+	ListPages(ctx context.Context, afterID int64, limit int) ([]PageNode, error)
+}
+
 // RevisionWriter is the storage port used by content.RevisionWriteService and
 // content.AutosaveService. Revisions and autosave rows are ordinary rows in
 // the same {prefix}posts table PostWriter already owns (post_type

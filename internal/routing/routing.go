@@ -406,6 +406,14 @@ func (s Structure) Match(params map[string]string) (Ref, bool) {
 // would move a post published just after local midnight to the previous day and
 // permanently redirect it away from its real URL.
 func (s Structure) Canonical(p domain.Post) string {
+	// M15: a page is exempt from permalink_structure; its canonical is its
+	// nested post_name ancestry (D1, D4, Req 4.1). Canonical is pure and cannot
+	// walk post_parent, so the ancestry is supplied on the resolved post via the
+	// transient PageAncestry field and read by pageAncestryFor(p). The post
+	// branch below is byte-for-byte unchanged (Req 4.2).
+	if p.Type == "page" {
+		return s.PagePath(pageAncestryFor(p))
+	}
 	if s.Flat || len(s.segments) == 0 {
 		return "/" + p.Slug
 	}
@@ -542,6 +550,45 @@ func (s Structure) CategoryPath(ancestry []string) string {
 	segs = append(segs, baseSegments(s.CategoryBase)...)
 	segs = append(segs, ancestry...)
 	return s.archivePath(segs)
+}
+
+// PagePath builds the canonical path for a page from its root-first slug
+// ancestry, which ends in the page's own slug (self-inclusive leaf). A page is
+// EXEMPT from permalink_structure (Req 1.1, 1.4), so -- unlike CategoryPath --
+// PagePath adds NO front and NO archive base: the path is exactly the ancestry
+// slugs, with the structure's trailing slash. A top-level page is the
+// one-element case and yields "/{slug}" (plus trailing slash per the structure),
+// matching Req 1.2 / 4.5 and today's flat behavior byte for byte.
+//
+// An empty ancestry yields "" rather than "/", mirroring CategoryPath's
+// empty-ancestry guard: the handler treats "" as "no servable canonical" and
+// 404s, so a page the walk could not place does not redirect to the site root.
+func (s Structure) PagePath(ancestry []string) string {
+	if len(ancestry) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, slug := range ancestry {
+		b.WriteByte('/')
+		b.WriteString(slug)
+	}
+	if s.TrailingSlash {
+		b.WriteByte('/')
+	}
+	return b.String()
+}
+
+// pageAncestryFor returns the root-first slug ancestry Canonical's page guard
+// builds a page's nested path from. It returns p.PageAncestry when that
+// transient field is non-empty; otherwise, for a page, it degrades to the
+// one-element []string{p.Slug} -- a top-level page -- so Canonical of a bare
+// page is /{slug} and never "" (Req 1.2, 4.5). For a non-page it is never
+// consulted, because Canonical's page guard fires only for p.Type == "page".
+func pageAncestryFor(p domain.Post) []string {
+	if len(p.PageAncestry) > 0 {
+		return p.PageAncestry
+	}
+	return []string{p.Slug}
 }
 
 // TagPath builds the canonical path for a tag archive. post_tag is

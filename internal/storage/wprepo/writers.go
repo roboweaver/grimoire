@@ -255,6 +255,7 @@ var (
 	_ domain.PostWriter          = (*PostRepo)(nil)
 	_ domain.PostContentBackfill = (*PostRepo)(nil)
 	_ domain.PostContentUpdater  = (*PostRepo)(nil)
+	_ domain.PageReader          = (*PostRepo)(nil)
 	_ domain.TermWriter          = (*TermRepo)(nil)
 	_ domain.TermReader          = (*TermRepo)(nil)
 	_ domain.OptionWriter        = (*OptionRepo)(nil)

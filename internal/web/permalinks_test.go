@@ -21,9 +21,13 @@ const (
 //	id 5  about    page  publish  2024-01-05
 //
 // so under structDayAndName hello-1's canonical path is /2024/01/01/hello-1/.
+//
+// M15: a page is EXEMPT from permalink_structure (Req 4.1, D1), so "about" --
+// a top-level page -- has the nested-ancestry canonical /about/ (trailing slash
+// per structDayAndName) rather than the dated post shape /2024/01/05/about/.
 const (
 	helloCanonical = "/2024/01/01/hello-1/"
-	aboutCanonical = "/2024/01/05/about/"
+	aboutCanonical = "/about/"
 )
 
 // TestPermalinkStatusCodes covers every row of design.md's status-code table
@@ -43,6 +47,9 @@ func TestPermalinkStatusCodes(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
+			// M15: a page's canonical is its nested ancestry (here /about/ for a
+			// top-level page), not the dated post shape, so requesting it
+			// renders without a redirect (Req 4.1, 5.4, D1).
 			name:       "canonical path of a page renders",
 			path:       aboutCanonical,
 			wantStatus: http.StatusOK,
@@ -64,6 +71,9 @@ func TestPermalinkStatusCodes(t *testing.T) {
 			wantLocation: helloCanonical,
 		},
 		{
+			// M15: the flat slug of a page 301s to the page's nested-ancestry
+			// canonical (here /about/, trailing slash per the structure), not to
+			// a dated post-shape path (Req 5.1, 5.4, D1).
 			name:         "flat slug for a page redirects to the canonical path",
 			path:         "/about",
 			wantStatus:   http.StatusMovedPermanently,

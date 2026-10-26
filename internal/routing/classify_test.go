@@ -44,6 +44,7 @@ var kindNames = map[routing.Kind]string{
 	routing.KindTag:      "KindTag",
 	routing.KindAuthor:   "KindAuthor",
 	routing.KindDate:     "KindDate",
+	routing.KindPage:     "KindPage",
 }
 
 func kindName(k routing.Kind) string {
@@ -75,6 +76,15 @@ func runClassifyCases(t *testing.T, cases []classifyCase) {
 			case routing.KindCategory:
 				// The base segment is consumed, so Segments is the ancestry the
 				// handler walks through the taxonomy graph -- root first.
+				if !slices.Equal(got.Segments, tc.wantSegments) {
+					t.Errorf("Classify(%q) Segments = %q, want %q",
+						tc.path, got.Segments, tc.wantSegments)
+				}
+			case routing.KindPage:
+				// M15: a multi-segment non-archive non-post path carries its
+				// full segment list for the handler's page walk -- the
+				// classifier makes no claim the segments name a real page
+				// (Req 6.2, 6.3).
 				if !slices.Equal(got.Segments, tc.wantSegments) {
 					t.Errorf("Classify(%q) Segments = %q, want %q",
 						tc.path, got.Segments, tc.wantSegments)
@@ -268,23 +278,32 @@ func TestClassifyPrecedenceTable(t *testing.T) {
 			// Falling through to the post rows is not an option either -- a
 			// single-segment structure cannot match two segments -- so this is
 			// row 9.
-			name:      "row 6: a one digit month does not match the date widths",
-			structure: presetPostName,
-			path:      "/2024/5/",
-			want:      routing.KindNone,
+			// Req 6.2: WordPress zero-pads, so a 1-digit month is not a month,
+			// and the date row declines it. M15: the path is two segments and
+			// no archive/post row claimed it, so the KindPage row (row 7.5) now
+			// claims it and the handler's walk 404s when no page matches
+			// (Req 6.3).
+			name:         "row 6: a one digit month does not match the date widths",
+			structure:    presetPostName,
+			path:         "/2024/5/",
+			want:         routing.KindPage,
+			wantSegments: []string{"2024", "5"},
 		},
 		{
-			// Req 6.3: an impossible date 404s rather than reaching a query.
-			name:      "row 6: month 13 is not a real date",
-			structure: presetPostName,
-			path:      "/2024/13/",
-			want:      routing.KindNone,
+			// Req 6.3: an impossible date is not a date archive; M15 classifies
+			// the two-segment path as KindPage and the handler's walk 404s.
+			name:         "row 6: month 13 is not a real date",
+			structure:    presetPostName,
+			path:         "/2024/13/",
+			want:         routing.KindPage,
+			wantSegments: []string{"2024", "13"},
 		},
 		{
-			name:      "row 6: february 30 is not a real date",
-			structure: presetPostName,
-			path:      "/2024/02/30/",
-			want:      routing.KindNone,
+			name:         "row 6: february 30 is not a real date",
+			structure:    presetPostName,
+			path:         "/2024/02/30/",
+			want:         routing.KindPage,
+			wantSegments: []string{"2024", "02", "30"},
 		},
 
 		// Row 7 -- the structure's own shape, which is M9a's unchanged post
@@ -326,12 +345,16 @@ func TestClassifyPrecedenceTable(t *testing.T) {
 			wantPost:  routing.Ref{Slug: "hello-world"},
 		},
 
-		// Row 9 -- everything else.
+		// Row 7.5 (M15) -- a multi-segment path that matches no archive base and
+		// no post shape is now KindPage, carrying its full segment list for the
+		// handler's page walk (which 404s when the segments name no page,
+		// Req 6.3). Before M15 this fell through to row 9's KindNone directly.
 		{
-			name:      "row 9: an unrecognised deep path",
-			structure: presetPostName,
-			path:      "/a/b/c/d/e/",
-			want:      routing.KindNone,
+			name:         "row 7.5: an unrecognised deep path is KindPage for the walk",
+			structure:    presetPostName,
+			path:         "/a/b/c/d/e/",
+			want:         routing.KindPage,
+			wantSegments: []string{"a", "b", "c", "d", "e"},
 		},
 	})
 }
@@ -510,10 +533,13 @@ func TestClassifyExpectedPrefixPerRow(t *testing.T) {
 			wantSegments: []string{"news"},
 		},
 		{
-			name:      "unset bases: category without the front is not a category",
-			structure: presetFrontMonthAndName,
-			path:      "/category/news/",
-			want:      routing.KindNone,
+			// Without the front it is not a category; M15 classifies the
+			// two-segment path as KindPage for the handler's page walk.
+			name:         "unset bases: category without the front is not a category",
+			structure:    presetFrontMonthAndName,
+			path:         "/category/news/",
+			want:         routing.KindPage,
+			wantSegments: []string{"category", "news"},
 		},
 		{
 			name:      "unset bases: tag carries the front",
@@ -523,10 +549,11 @@ func TestClassifyExpectedPrefixPerRow(t *testing.T) {
 			wantSlug:  "go",
 		},
 		{
-			name:      "unset bases: tag without the front is not a tag",
-			structure: presetFrontMonthAndName,
-			path:      "/tag/go/",
-			want:      routing.KindNone,
+			name:         "unset bases: tag without the front is not a tag",
+			structure:    presetFrontMonthAndName,
+			path:         "/tag/go/",
+			want:         routing.KindPage,
+			wantSegments: []string{"tag", "go"},
 		},
 		{
 			name:      "unset bases: author carries the front",
@@ -540,10 +567,11 @@ func TestClassifyExpectedPrefixPerRow(t *testing.T) {
 			// concatenates $this->front with no with_front flag and no option
 			// lookup, because author_base is a WP_Rewrite property rather than a
 			// row in {prefix}options.
-			name:      "unset bases: author without the front is not an author",
-			structure: presetFrontMonthAndName,
-			path:      "/author/alice/",
-			want:      routing.KindNone,
+			name:         "unset bases: author without the front is not an author",
+			structure:    presetFrontMonthAndName,
+			path:         "/author/alice/",
+			want:         routing.KindPage,
+			wantSegments: []string{"author", "alice"},
 		},
 		{
 			name:      "unset bases: date carries the front",
@@ -573,12 +601,16 @@ func TestClassifyExpectedPrefixPerRow(t *testing.T) {
 			wantSegments: []string{"news"},
 		},
 		{
+			// With the base renamed, the front drops off the category, so
+			// /blog/sections/news is not a category; M15 classifies the
+			// three-segment path as KindPage for the handler's page walk.
 			name:         "set bases: category with the front is not a category",
 			structure:    presetFrontMonthAndName,
 			categoryBase: "sections",
 			tagBase:      "topics",
 			path:         "/blog/sections/news/",
-			want:         routing.KindNone,
+			want:         routing.KindPage,
+			wantSegments: []string{"blog", "sections", "news"},
 		},
 		{
 			name:         "set bases: nested category drops the front",
@@ -612,7 +644,8 @@ func TestClassifyExpectedPrefixPerRow(t *testing.T) {
 			categoryBase: "sections",
 			tagBase:      "topics",
 			path:         "/blog/topics/go/",
-			want:         routing.KindNone,
+			want:         routing.KindPage,
+			wantSegments: []string{"blog", "topics", "go"},
 		},
 		{
 			// Req 4.7: the author front does not depend on a taxonomy option, so
@@ -656,7 +689,8 @@ func TestClassifyExpectedPrefixPerRow(t *testing.T) {
 			categoryBase: routing.DefaultCategoryBase,
 			tagBase:      routing.DefaultTagBase,
 			path:         "/blog/category/news/",
-			want:         routing.KindNone,
+			want:         routing.KindPage,
+			wantSegments: []string{"blog", "category", "news"},
 		},
 		{
 			name:         "bases set to the defaults: tag drops the front",
@@ -673,7 +707,8 @@ func TestClassifyExpectedPrefixPerRow(t *testing.T) {
 			categoryBase: routing.DefaultCategoryBase,
 			tagBase:      routing.DefaultTagBase,
 			path:         "/blog/tag/go/",
-			want:         routing.KindNone,
+			want:         routing.KindPage,
+			wantSegments: []string{"blog", "tag", "go"},
 		},
 	})
 }
@@ -719,10 +754,14 @@ func TestClassifyDateDisambiguationPrefix(t *testing.T) {
 		{
 			// The prefix is required, not optional: an unprefixed month path
 			// matches no row at all under this structure.
-			name:      "post id structure: unprefixed year and month is nothing",
-			structure: presetPostIDOnly,
-			path:      "/2024/05/",
-			want:      routing.KindNone,
+			// The date prefix is required, so an unprefixed month path is no
+			// date archive under this structure. M15: the two-segment path is
+			// KindPage for the handler's page walk.
+			name:         "post id structure: unprefixed year and month is nothing",
+			structure:    presetPostIDOnly,
+			path:         "/2024/05/",
+			want:         routing.KindPage,
+			wantSegments: []string{"2024", "05"},
 		},
 		{
 			// The segment lands after the front, so the two prefixes compose
@@ -751,10 +790,14 @@ func TestClassifyDateDisambiguationPrefix(t *testing.T) {
 			wantDate:  routing.DateRef{Year: 2024},
 		},
 		{
-			name:      "day and post id: the date prefixed path is not an archive",
-			structure: presetDayPostID,
-			path:      "/date/2024/",
-			want:      routing.KindNone,
+			// This structure gets no date prefix (%post_id% at token 4), so a
+			// "date/"-prefixed path is not an archive. M15: the two-segment path
+			// is KindPage for the handler's page walk.
+			name:         "day and post id: the date prefixed path is not an archive",
+			structure:    presetDayPostID,
+			path:         "/date/2024/",
+			want:         routing.KindPage,
+			wantSegments: []string{"date", "2024"},
 		},
 	})
 }
@@ -783,14 +826,19 @@ func TestClassifyFlatStructure(t *testing.T) {
 			wantPost: routing.Ref{Slug: "2024"},
 		},
 		{
-			name: "flat: a year and month path is nothing",
-			path: "/2024/05",
-			want: routing.KindNone,
+			// A Flat structure serves no date archives, so a multi-segment
+			// numeric path is no date. M15: it is KindPage for the handler's
+			// page walk (which 404s when no page matches).
+			name:         "flat: a year and month path is a page walk",
+			path:         "/2024/05",
+			want:         routing.KindPage,
+			wantSegments: []string{"2024", "05"},
 		},
 		{
-			name: "flat: a year month and day path is nothing",
-			path: "/2024/05/17",
-			want: routing.KindNone,
+			name:         "flat: a year month and day path is a page walk",
+			path:         "/2024/05/17",
+			want:         routing.KindPage,
+			wantSegments: []string{"2024", "05", "17"},
 		},
 		{
 			name:     "flat: a slug is a post",

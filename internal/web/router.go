@@ -107,6 +107,17 @@ type Server struct {
 	// Server that never saw WithPermalinks behaves exactly as it did before
 	// M9a rather than carrying an ambiguous zero value.
 	permalinks routing.Structure
+
+	// pages resolves nested page paths and page ancestries over post_parent
+	// (M15). nil until WithPages, in which case the page wildcard route is NOT
+	// registered and the resolve KindPage arm 404s rather than dereferencing a
+	// nil service -- so a Server built without WithPages behaves exactly as it
+	// did before M15 (a top-level page still resolves via the flat /{slug}
+	// fallback, and a multi-segment page path matches no route and 404s). The
+	// wildcard is registered ONLY when this is non-nil, which is why no startup
+	// panic is needed: a server that cannot serve nested pages simply does not
+	// advertise the route (Req 9.1, 9.5).
+	pages *content.PageService
 }
 
 // NewServer builds a Server. log may be nil, in which case slog.Default is used.
@@ -133,6 +144,26 @@ func NewServer(posts *content.PostService, terms *content.TermService, options *
 // and the startup path logs that error rather than refusing to boot.
 func (s *Server) WithPermalinks(st routing.Structure) *Server {
 	s.permalinks = st
+	return s
+}
+
+// WithPages wires the PageService that resolves nested page paths and page
+// ancestries over post_parent (M15). It returns the same Server for chaining,
+// mirroring WithPermalinks/WithContentPolicy.
+//
+// It is load-bearing for routing, not merely for a feature flag: the page
+// wildcard route (/{slug}/*, dispatched to s.resolve) is registered ONLY when
+// this has been called, and resolve's KindPage arm 404s when it has not. So a
+// Server built without WithPages keeps its pre-M15 behavior exactly -- a
+// top-level page still resolves through the flat /{slug} fallback, and a
+// multi-segment page path matches no route and 404s -- rather than registering
+// a wildcard whose handler would dereference a nil service. This is the same
+// register-only-when-wired posture used for the admin, REST, and media-write
+// surfaces, chosen over requireArchiveDeps's hard panic because the nested-page
+// route is new in M15 and every pre-existing embedder (and the whole web test
+// suite) builds a Server without it.
+func (s *Server) WithPages(p *content.PageService) *Server {
+	s.pages = p
 	return s
 }
 
@@ -275,6 +306,32 @@ func (s *Server) Routes() http.Handler {
 	s.requireArchiveDeps(s.permalinks)
 	for _, pattern := range contentPatterns(s.permalinks) {
 		r.Method(http.MethodGet, pattern, s.handler(s.resolve))
+	}
+	// The nested-page wildcard (M15). A nested page path has an arbitrary
+	// segment count no chi pattern can express (Req 9.1, 9.4), exactly like the
+	// nested-category archive, so it is a wildcard rooted at a one-segment
+	// parameter node and pointed at the single s.resolve dispatcher (Req 9.2).
+	//
+	// The pattern is /{slug}/* rather than a root /*: a probe confirmed /{slug}/*
+	// coexists cleanly with /{slug}, the archive wildcards (/category/*), the
+	// permalink patterns (/{year}/{month}/{day}/{postname}), and / -- a
+	// one-segment /about matches /{slug}, a 2+-segment /handbook/onboarding
+	// matches /{slug}/*, /category/news stays the category wildcard, and
+	// /2024/05/17/hello stays the permalink route. A root /* would instead
+	// collide with chi's handling of the other root routes. The {slug} chi
+	// captures is ignored: resolve re-classifies r.URL.Path, and Classify emits
+	// KindPage with the full segment list for a 2+-segment non-archive non-post
+	// path (Req 9.4).
+	//
+	// Registered ONLY when a PageService is wired (WithPages). Without it, a
+	// multi-segment page path matches no route and chi 404s before resolve is
+	// reached, and resolve's KindPage arm is defensively guarded to 404 too, so
+	// a Server built without WithPages keeps its pre-M15 behavior and never
+	// dereferences a nil service -- the register-only-when-wired posture, chosen
+	// over a hard startup panic because every pre-existing embedder and the web
+	// test suite build a Server without WithPages (Req 9.5).
+	if s.pages != nil {
+		r.Method(http.MethodGet, "/{slug}/*", s.handler(s.resolve))
 	}
 	return r
 }

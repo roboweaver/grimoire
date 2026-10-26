@@ -64,6 +64,9 @@ type Set struct {
 	// M14 additive ports backing the opt-in sanitization backfill CLI.
 	PostContentBackfill domain.PostContentBackfill // paginated read
 	PostContentUpdater  domain.PostContentUpdater  // narrow content-only write
+
+	// M15 additive read port backing the hierarchical-page-URL walk.
+	PageReader domain.PageReader // paginated page-graph read
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -197,6 +200,8 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 
 			PostContentBackfill: posts,
 			PostContentUpdater:  posts,
+
+			PageReader: posts,
 		},
 		db:    db,
 		bunDB: bunDB,

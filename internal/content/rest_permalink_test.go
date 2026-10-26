@@ -59,16 +59,19 @@ func TestRESTLinkIsCanonicalPermalink(t *testing.T) {
 			wantPage:  "/about",
 		},
 		{
+			// M15: a page is EXEMPT from permalink_structure, so even under a
+			// dated structure a top-level page's link is its nested ancestry
+			// (here /{slug}), never the dated post shape (Req 4.1, 4.5, D1).
 			name:      "day and name",
 			structure: restStructDayAndName,
 			wantPost:  "/2024/03/05/hello-world/",
-			wantPage:  "/2024/03/05/about/",
+			wantPage:  "/about/",
 		},
 		{
 			name:      "month and name",
 			structure: restStructMonthAndName,
 			wantPost:  "/2024/03/hello-world/",
-			wantPage:  "/2024/03/about/",
+			wantPage:  "/about/",
 		},
 		{
 			name:      "post name",
@@ -80,10 +83,13 @@ func TestRESTLinkIsCanonicalPermalink(t *testing.T) {
 			// No trailing slash in the structure, so none in the link
 			// (Req 3.3 feeding Req 6.1): a link carrying the non-canonical
 			// slash form would be a URL that 301s for every consumer.
+			// M15: a page ignores the numeric post structure too; its link is
+			// the slug-only nested path with no trailing slash (the structure
+			// carries none), never /archives/{id} (Req 4.1, 4.5, D1).
 			name:      "numeric without trailing slash",
 			structure: restStructNumeric,
 			wantPost:  "/archives/42",
-			wantPage:  "/archives/42",
+			wantPage:  "/about",
 		},
 	}
 

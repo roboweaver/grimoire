@@ -920,7 +920,7 @@ post body is removed rather than left inert-but-present.
 > Roadmap-depth requirements. Each is testable, but implementation does not
 > start from this document alone — see "Specification depth" above.
 
-### Requirement 30: Nested Page Routing
+### Requirement 30: Nested Page Routing  ✅ shipped (M15, PR #72)
 
 **User Story:** As a site owner with a nested page structure in WordPress (e.g.
 "About > Team"), I want grimoire to serve child pages under their parent-page
@@ -945,7 +945,7 @@ ancestry, so that a child page's URL matches WordPress's
 4. WHEN a page has no parent THE system SHALL serve it exactly as today, with no
    change to top-level page URLs.
 
-### Requirement 31: M15 Exclusions and Test Coverage
+### Requirement 31: M15 Exclusions and Test Coverage  ✅ shipped (M15, PR #72)
 
 #### Acceptance Criteria
 

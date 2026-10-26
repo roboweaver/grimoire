@@ -116,13 +116,14 @@ Type mappings from the WordPress MySQL schema are translated per vendor
 
   Divergent or still open after M9a:
 
-  - **Pages follow the post structure, where WordPress exempts them.** The
-    configured structure is applied to `page` rows as well as `post` rows,
-    so with a dated structure a page's canonical grimoire URL is
-    `/2024/05/17/about/` and `/about` `301`s to it — whereas WordPress
-    serves pages at `/about` regardless of `permalink_structure` (and
-    nests them under their parent page). This is the one place M9a's
-    canonical URL can differ from the URL the site published.
+  - **Pages follow the post structure, where WordPress exempts them.**
+    ✅ Resolved in M15. Through M9a–M9b the configured structure was applied to
+    `page` rows as well as `post` rows, so with a dated structure a page's
+    canonical was `/2024/05/17/about/`. M15 makes a `page` exempt from
+    `permalink_structure`: its canonical is now its nested `post_name` ancestry
+    over `post_parent` (`/{parent}/{child}/`), regardless of structure, and the
+    flat and old dated forms `301` to it — matching WordPress, and closing the
+    one place M9a's canonical URL could differ from the URL the site published.
   - Changing `permalink_structure` in WordPress requires restarting
     grimoire, since the options are read once at startup rather than per
     request. This mirrors WordPress's own rewrite-rule flush.
@@ -320,10 +321,10 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     is a worse trade than a scan over the `users` table of a database only
     grimoire's own tests and fresh installs create.
   - Custom taxonomies beyond `category` and `post_tag`, custom post types,
-    the `%category%`/`%author%` permalink tokens, plugin-registered rewrite
-    rules, hierarchical *page* URLs and term-hierarchy *editing* remain out
-    of scope, unchanged by this milestone. Editing a term's parent is still
-    not possible: M9b adds a read path.
+    the `%category%`/`%author%` permalink tokens, and plugin-registered rewrite
+    rules remain out of scope, unchanged by this milestone. (Term-hierarchy
+    *editing* shipped in M13 and hierarchical *page* URLs in M15; this M9b note
+    predates both.)
 
   Validated read-only against a reference WordPress database (a local
   Podman dev stack, MySQL 8.0, `permalink_structure`

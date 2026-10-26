@@ -1009,14 +1009,20 @@ parent-page ancestry. It parallels M9b's nested-category walk but over
 `post_parent`. The group below requires M15's own dedicated spec before
 implementation.
 
-- [ ] **15.A — Nested page routing.** Walk `post_parent` on `page` rows to build
-      each page's canonical nested path (`/{parent}/{child}`), serve pages there
-      as canonical, and `301` the flat/dated permalink form to it (preserving the
-      query string), reconciling the M9a "pages follow the post structure"
-      divergence recorded in `docs/compatibility.md`. Degrade safely on an
-      orphaned parent or a parent cycle (terminate the walk, serve the shorter
-      resolvable path), mirroring M9b's corrupted-hierarchy handling; top-level
-      pages are served unchanged.
+- [x] **15.A — Nested page routing.** ✅ shipped (`../15-hierarchical-page-urls`,
+      PR #72). Walks `post_parent` on `page` rows to build each page's canonical
+      nested path (`/{parent}/{child}/`), serves pages there as canonical, and
+      `301`s the flat and old dated permalink forms to it (query string preserved
+      raw), reconciling the M9a "pages follow the post structure" divergence
+      (`docs/compatibility.md`): a page is now exempt from `permalink_structure`
+      and nests under its parent. Degrades safely on an orphaned parent or a
+      parent cycle (terminates the walk, serves the shorter resolvable path),
+      mirroring M9b's corrupted-hierarchy handling; top-level pages are served
+      unchanged. New `KindPage` classifier row + pure `Structure.PagePath` + a
+      `Canonical` page guard; a content `PageHierarchy`/`PageService` mirroring the
+      term equivalents; an additive `domain.PageReader`/`PostRepo.ListPages` port;
+      a `/{slug}/*` wildcard route. No migration, no column, no new capability,
+      no second permalink construction site.
 
 ---
 

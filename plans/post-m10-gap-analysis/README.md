@@ -1,6 +1,6 @@
 # Post-M10 Gap Analysis — Candidate Milestones (M11+)
 
-> **Status: 📝 Proposal (M11, M13, M14 ✅ shipped).** This document is a gap analysis, not a
+> **Status: 📝 Proposal (M11, M13, M14, M15 ✅ shipped).** This document is a gap analysis, not a
 > committed roadmap. The WordPress-core-parity roadmap
 > ([`../wordpress-core-parity-roadmap`](../wordpress-core-parity-roadmap)) is
 > complete through its final group (M10.G). Each candidate below is a documented,
@@ -88,7 +88,7 @@ ID/type/field(s)/byte-length + totals); fail-safe per-row sanitize errors; and a
 cross-vendor storagetest contract + command-level coverage. No migration, no web
 surface, no new capability.
 
-### M15 — Hierarchical page URLs
+### M15 — Hierarchical page URLs  ✅ shipped (`../15-hierarchical-page-urls`, PR #72)
 
 **Gap.** Pages are served at the configured permalink structure (dated/flat)
 rather than under their parent-page ancestry (`/parent/child`), a documented
@@ -100,6 +100,18 @@ divergence (compatibility.md "Pages follow the post structure"; README
 serve pages there as canonical, `301` the flat/dated form to it, and reconcile
 the M9a "pages follow post structure" divergence. Medium; parallels M9b's nested
 category walk but over `post_parent` instead of `term_taxonomy.parent`.
+
+**Shipped in M15:** a page is now exempt from `permalink_structure` and served at
+its nested `post_name` ancestry over `post_parent` (`/{parent}/{child}/`); the
+flat and old dated forms `301` to it (query preserved raw). A new `KindPage`
+classifier row + pure `Structure.PagePath` + a `Canonical` page guard (reading a
+transient `domain.Post.PageAncestry` so `Canonical` stays the single pure URL
+builder); a content `PageHierarchy`/`PageService`/`PageMovedError` mirroring the
+term equivalents over `post_parent` with the same orphan/cycle degradation; an
+additive `domain.PageReader`/`PostRepo.ListPages` port; a `/{slug}/*` wildcard
+route; and the page REST `link`. Cross-vendor contract + handler + content +
+real-WordPress-DB nested-page fixture coverage. No migration, no column, no new
+capability, no second permalink construction site.
 
 ### M16 — Archive/pagination path-form parity (lower priority)
 
@@ -120,7 +132,8 @@ and documented.
 2. ~~**M13 (term re-parenting)**~~ — ✅ shipped (PR #67).
 3. ~~**M14 (sanitization backfill)**~~ — ✅ shipped (PR #70); closed the one
    standing security caveat from M10a, CLI-only.
-4. **M15 (hierarchical page URLs)** — completes WordPress routing parity. **Next.**
+4. ~~**M15 (hierarchical page URLs)**~~ — ✅ shipped (PR #72); completed
+   WordPress routing parity for pages.
 5. **M12 (custom post types/taxonomies)** — largest; the biggest real-site
-   parity win, best tackled once the smaller gaps are closed.
+   parity win, best tackled once the smaller gaps are closed. **Next.**
 6. **M16 (pagination path form)** — optional polish.

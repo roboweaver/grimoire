@@ -103,7 +103,14 @@ func main() {
 	options := content.NewOptionService(repos.Options)
 	permalinks := resolvePermalinks(context.Background(), options, log)
 
-	restMapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, cfg.Database.TablePrefix).WithPermalinks(permalinks).WithUploadsBaseURL(uploadsBaseURL)
+	// One PageService serves both the web handlers (the nested /{slug}/* route and
+	// the flat-leaf 301) and the REST mapper (a page's nested "link"), so the
+	// served URL and the advertised link come from one ancestry computation
+	// (M15 Req 3.5, 4.4). Without these WithPages calls the nested route is not
+	// registered at all and a nested page 404s in the real binary, however well
+	// the handler tests pass: they build their own Server.
+	pageSvc := content.NewPageService(repos.PageReader, repos.Posts)
+	restMapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, cfg.Database.TablePrefix).WithPermalinks(permalinks).WithUploadsBaseURL(uploadsBaseURL).WithPages(pageSvc)
 	featured := content.NewFeaturedImageService(repos.PostMeta, repos.Media)
 	appPasswords := &auth.ApplicationPasswords{
 		Users:  repos.Users,
@@ -169,7 +176,7 @@ func main() {
 		options,
 		eng,
 		log,
-	).WithPermalinks(permalinks).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithMediaWrites(mediaWrite).WithUserWrites(userWrite).WithNavMenuWrites(navMenuWrite).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
+	).WithPermalinks(permalinks).WithPages(pageSvc).WithThemeStatic(*themesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithMediaWrites(mediaWrite).WithUserWrites(userWrite).WithNavMenuWrites(navMenuWrite).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

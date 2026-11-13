@@ -346,7 +346,7 @@
 
 > Ships in PR 2.
 
-- [~] 5.1 Write the failing `Build` rejection tests first. Add
+- [x] 5.1 Write the failing `Build` rejection tests first. Add
       `internal/registry/build_test.go`, table-driven with ONE case per rule, each
       asserting the error text names the config path (e.g.
       `content.post_types[1].name`) and the offending value, and that the database is
@@ -376,7 +376,7 @@
       Verify: `go test ./internal/registry -run Build` — fails (package has no
       implementation). _(Req 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9; D2, D4)_
 
-- [~] 5.2 Implement `registry.Build` and the reserved sets. New files
+- [x] 5.2 Implement `registry.Build` and the reserved sets. New files
       `internal/registry/types.go` (`PostType`, `Taxonomy`, the `Registry` struct with
       ordered slices and name/`rest_base` indexes), `internal/registry/reserved.go`
       (`ReservedPostTypes()`, `ReservedTaxonomies()` exported so `migrate -check`
@@ -394,7 +394,7 @@
       Verify: `go test ./internal/registry -run Build` green; `go build ./...`; `go vet
       ./...`. _(Req 3.1–3.9; D2, D4)_
 
-- [~] 5.3 Write the failing registry behavior tests. Add
+- [x] 5.3 Write the failing registry behavior tests. Add
       `internal/registry/registry_test.go` asserting: every lookup is nil-receiver safe
       and reports `ok=false` / empty on a nil `*Registry` (`Empty`, `PostTypes`,
       `Taxonomies`, `PostType`, `Taxonomy`, `PostTypeByRESTBase`, `TaxonomyByRESTBase`,
@@ -414,7 +414,7 @@
       methods, `Routes`, `Notes`, `Heading`, `HasArchive` undefined). _(Req 1.5, 1.6,
       2.7, 3.9, 4.8, 9.4; D2, D3)_
 
-- [~] 5.4 Implement the registry lookups. New `internal/registry/registry.go` with
+- [x] 5.4 Implement the registry lookups. New `internal/registry/registry.go` with
       `Empty`, `PostTypes`, `Taxonomies`, `PostType`, `Taxonomy`, `PostTypeByRESTBase`,
       `TaxonomyByRESTBase`, `TaxonomyRESTBase`, `Routes`, `Notes`, and the `PostType`
       methods `HasArchive`/`Heading`, all nil-receiver safe.
@@ -466,7 +466,7 @@
 
 > Ships in PR 2.
 
-- [~] 7.1 Write the failing `TaxonomyArchive` tests (7a). Add
+- [x] 7.1 Write the failing `TaxonomyArchive` tests (7a). Add
       `internal/content/taxonomy_archive_test.go` over fakes asserting
       `TermService.TaxonomyArchive(ctx, tax registry.Taxonomy, segments, page, perPage)`:
       hierarchical — `LoadTermHierarchy(ctx, reader, tax.Name)` + `ResolvePath`, filter
@@ -486,7 +486,7 @@
       Verify: `go test ./internal/content -run TaxonomyArchive` — fails to compile
       (`TaxonomyArchive` undefined). _(Req 2.7, 6.1, 6.2, 6.3, 6.4, 6.6; D5)_
 
-- [~] 7.2 Implement `TermService.TaxonomyArchive`. In `internal/content/term.go`
+- [x] 7.2 Implement `TermService.TaxonomyArchive`. In `internal/content/term.go`
       (beside `CategoryArchive`, `term.go:81`) add the method per design Component 6a,
       reusing `TermHierarchy`, `ResolvePath`, `recoverPath`, `CategoryMovedError`
       (naming debt documented in a doc-comment line, Finding 7) and `clamp`/`newPage`.
@@ -496,7 +496,7 @@
       ./internal/content`; `go build ./...`; `go vet ./...`. _(Req 2.7, 6.1, 6.2, 6.3,
       6.4, 6.6; D5)_
 
-- [~] 7.3 Write the failing `CustomPostService` tests (7b). Add
+- [x] 7.3 Write the failing `CustomPostService` tests (7b). Add
       `internal/content/custompost_test.go` over fakes asserting: non-hierarchical
       `Resolve` — `len(segments) != 1` → `ErrNotFound`; `BySlug` scoped to the type (a
       `post` of the same slug does not resolve for `book`, and the reverse); ancestry
@@ -520,7 +520,7 @@
       (`CustomPostService` undefined). _(Req 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6,
       8.1; D5, D7)_
 
-- [~] 7.4 Implement `CustomPostService`. New `internal/content/custompost.go` per
+- [x] 7.4 Implement `CustomPostService`. New `internal/content/custompost.go` per
       design Component 6b: `CustomPostService{nodes domain.PostNodeReader, posts
       domain.PostRepository}`, `NewCustomPostService` (panics on nil), `Resolve`,
       `AncestryFor`, `Hierarchy`, `Archive`, and the unexported `nodeReaderFor` adapter

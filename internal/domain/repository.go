@@ -528,6 +528,23 @@ type PageReader interface {
 	ListPages(ctx context.Context, afterID int64, limit int) ([]PageNode, error)
 }
 
+// PostNode is the lean M12 projection of a post row of any type. It is the
+// same shape as PageNode (ID, post_name, post_parent, post_status), so the M15
+// ancestry walk can consume it unchanged (Req 2.5).
+type PostNode = PageNode
+
+// PostNodeReader is the post-type-parameterized sibling of PageReader: the
+// keyset-paginated node read behind hierarchical custom-post-type URLs
+// (M12 Req 2.5). It is additive and alters no existing read.
+type PostNodeReader interface {
+	// ListPostNodes returns up to limit rows of post_type == postType with ID
+	// strictly greater than afterID, ordered by ID ascending. afterID == 0
+	// starts the walk. Every post_status is in scope (NO status filter) so an
+	// ancestry can climb through a non-published ancestor. A page shorter than
+	// limit (or empty) signals the walk is complete (Req 2.5).
+	ListPostNodes(ctx context.Context, postType string, afterID int64, limit int) ([]PostNode, error)
+}
+
 // RevisionWriter is the storage port used by content.RevisionWriteService and
 // content.AutosaveService. Revisions and autosave rows are ordinary rows in
 // the same {prefix}posts table PostWriter already owns (post_type

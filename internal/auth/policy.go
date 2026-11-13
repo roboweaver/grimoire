@@ -10,9 +10,19 @@ package auth
 // "*_pages" family, everything else the "*_posts" family.
 func capSuffix(postType string) string {
 	if postType == "page" {
-		return "pages"
+		return CapabilitySuffix("page")
 	}
-	return "posts"
+	return CapabilitySuffix("post")
+}
+
+// CapabilitySuffix returns WordPress's string-form capability suffix for a
+// capability type: the type plus "s" (no irregular plurals), and "posts" for
+// the empty type.
+func CapabilitySuffix(capabilityType string) string {
+	if capabilityType == "" {
+		return "posts"
+	}
+	return capabilityType + "s"
 }
 
 // CanCreatePost reports whether actor may create a post of the given type and

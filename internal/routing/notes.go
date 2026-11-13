@@ -3,6 +3,7 @@ package routing
 import (
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // Option keys as an operator sees them in {prefix}options. Notes quote these
@@ -135,4 +136,62 @@ func (s Structure) frontCollisionNotes() []string {
 			b.option, b.base, s.Raw))
 	}
 	return notes
+}
+
+// CustomNotes carries non-fatal diagnostics about the custom post types and
+// taxonomies attached by WithCustomTypes: an archive that shadows the structure's
+// own post shape, and a base whose first segment is a four-digit year. Empty when
+// nothing is wrong, and for a Structure that never saw WithCustomTypes.
+//
+// Separate from Notes() on purpose: Notes() describes the permalink
+// configuration and stays byte-identical with or without custom entries. The
+// result is a copy, for the same reason Notes() returns one.
+func (s Structure) CustomNotes() []string { return slices.Clone(s.customNotes) }
+
+// shadowNotes computes the CustomNotes diagnostics from the registered custom
+// types.
+//
+// The post-shape check does not compare strings by hand. It builds the archive's
+// path with CustomBase and runs it through ParamsFromPath and Match, the same two
+// calls Classify's row 7 makes, so the note fires exactly when the post row would
+// have claimed the archive path and cannot drift from the classifier.
+//
+// The year rule reads the first segment of the base: a four-digit year there is
+// claimed by the date row ahead of the custom rows. A year behind the front is
+// not the first segment, so a base that carries the front draws no note.
+func (s Structure) shadowNotes() []string {
+	var notes []string
+	for _, tr := range s.customTypes {
+		if tr.HasArchive() {
+			base := s.CustomBase(tr.ArchiveSlug, tr.WithFront)
+			if params, ok := s.ParamsFromPath("/" + strings.Join(base, "/")); ok {
+				if _, ok := s.Match(params); ok {
+					notes = append(notes, fmt.Sprintf(
+						"custom post type %q: its archive base %q equals the "+
+							"permalink structure %q post shape, so the archive wins "+
+							"and a post with that slug is unreachable",
+						tr.Name, "/"+strings.Join(base, "/"), s.Raw))
+				}
+			}
+			notes = append(notes, s.yearFirstNote(tr.Name, "archive", base)...)
+		}
+		notes = append(notes, s.yearFirstNote(tr.Name, "single",
+			s.CustomBase(tr.Slug, tr.WithFront))...)
+	}
+	return notes
+}
+
+// yearFirstNote reports a base whose first segment is a four-digit year, which
+// the date archive row claims before any custom row can.
+func (s Structure) yearFirstNote(name, what string, base []string) []string {
+	if !s.servesDateArchives() || len(base) == 0 {
+		return nil
+	}
+	if _, ok := fixedWidthInt(base[0], 4); !ok {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"custom post type %q: its %s base %q starts with the year %s, which the "+
+			"date archive row claims first, so that base is not served as a custom route",
+		name, what, "/"+strings.Join(base, "/"), base[0])}
 }

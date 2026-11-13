@@ -67,6 +67,8 @@ type Set struct {
 
 	// M15 additive read port backing the hierarchical-page-URL walk.
 	PageReader domain.PageReader // paginated page-graph read
+	// M12 additive post-type-parameterized node read port.
+	PostNodeReader domain.PostNodeReader
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -201,7 +203,8 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			PostContentBackfill: posts,
 			PostContentUpdater:  posts,
 
-			PageReader: posts,
+			PageReader:     posts,
+			PostNodeReader: posts,
 		},
 		db:    db,
 		bunDB: bunDB,

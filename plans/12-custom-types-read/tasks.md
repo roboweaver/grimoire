@@ -142,7 +142,7 @@
 
 > Ships in PR 2.
 
-- [ ] 2.1 Write the failing config tests first. Add `internal/config/content_test.go`
+- [x] 2.1 Write the failing config tests first. Add `internal/config/content_test.go`
       asserting: every Req 1.2 post type default (`public=true`, `rest_base=name`,
       `has_archive=false`, `slug=name`, `with_front=true`, `hierarchical=false`,
       `capability_type=post`) and every Req 1.3 taxonomy default; an explicit
@@ -159,7 +159,7 @@
       Verify: `go test ./internal/config -run Content` — fails (`ContentConfig`,
       `HasArchive` undefined). _(Req 1.1, 1.2, 1.3, 1.4, 1.5; D3, D4)_
 
-- [ ] 2.2 Implement the `content:` section. New `internal/config/content.go` with
+- [x] 2.2 Implement the `content:` section. New `internal/config/content.go` with
       `ContentConfig{PostTypes, Taxonomies}`, `PostTypeConfig`, `TaxonomyConfig`
       (`*bool` for `Public`/`WithFront`, plain `bool` for `Hierarchical`), and
       `HasArchive{Enabled bool; Slug string}` exactly per design Component 1.
@@ -180,7 +180,7 @@
 
 > Ships in PR 2.
 
-- [ ] 3.1 Write the failing auth tests first. In `internal/auth` add a test (a new
+- [x] 3.1 Write the failing auth tests first. In `internal/auth` add a test (a new
       `policy_capsuffix_test.go`) asserting `CapabilitySuffix("")` → `"posts"`,
       `CapabilitySuffix("post")` → `"posts"`, `CapabilitySuffix("page")` → `"pages"`,
       `CapabilitySuffix("event")` → `"events"`, `CapabilitySuffix("story")` → `"storys"`
@@ -192,7 +192,7 @@
       Verify: `go test ./internal/auth -run CapabilitySuffix` — fails
       (`CapabilitySuffix` undefined). _(Req 8.2, 8.3; D7)_
 
-- [ ] 3.2 Add `auth.CapabilitySuffix(capabilityType string) string` (returns
+- [x] 3.2 Add `auth.CapabilitySuffix(capabilityType string) string` (returns
       `capabilityType + "s"`, `"posts"` for empty) in `internal/auth/policy.go` and
       rewrite `capSuffix(postType)` (`policy.go:11`) to call it with `"page"` for
       `page` and `"post"` otherwise. No new capability name, no new write-policy
@@ -206,7 +206,7 @@
 
 > Ships in PR 2.
 
-- [ ] 4.1 Write the failing tests for the route value types and helpers (4a). Add
+- [x] 4.1 Write the failing tests for the route value types and helpers (4a). Add
       `internal/routing/custom_types_test.go` (`package routing`) asserting:
       `Structure.WithCustomTypes(types, taxes)` returns a copy and leaves the receiver
       unmodified; `WithCustomTypes(nil, nil)` is observably identical (same
@@ -223,7 +223,7 @@
       (`TypeRoute`, `TaxRoute`, `WithCustomTypes`, `Front`, `ReservedBases`,
       `CustomBase` undefined). _(Req 4.4, 7.2, 7.3; D5, D6)_
 
-- [ ] 4.2 Implement the route value types and helpers. In
+- [x] 4.2 Implement the route value types and helpers. In
       `internal/routing/routing.go` add `TypeRoute{Name, Slug, ArchiveSlug, WithFront,
       Hierarchical}` (+ `HasArchive()`), `TaxRoute{Name, Slug, WithFront,
       Hierarchical}`, the unexported `customTypes`/`customTaxes` fields beside `notes`,
@@ -238,7 +238,7 @@
       ./internal/routing` green (existing archive vectors unchanged); `go build ./...`;
       `go vet ./...`. _(Req 4.4, 7.2, 7.3; D5, D6)_
 
-- [ ] 4.3 Write the failing tests for the path constructors and patterns (4b). Add
+- [x] 4.3 Write the failing tests for the path constructors and patterns (4b). Add
       `internal/routing/custom_path_test.go` asserting: `CustomPostPath(typeName,
       ancestry)` builds `/{slug}/{postname}` under a slash-less structure and
       `/{slug}/{postname}/` under a trailing-slash one, prepends the front when
@@ -260,7 +260,7 @@
       (`CustomPostPath`, `CustomArchivePath`, `CustomTermPath`, `CustomPatterns`
       undefined). _(Req 4.4, 4.5, 4.6, 5.1, 6.2, 6.5, 7.5; D5)_
 
-- [ ] 4.4 Implement the constructors and `CustomPatterns`. In
+- [x] 4.4 Implement the constructors and `CustomPatterns`. In
       `internal/routing/routing.go` add `CustomPostPath`, `CustomArchivePath`,
       `CustomTermPath` (the only places a custom URL is built, beside
       `CategoryPath`/`TagPath`/`AuthorPath`, reusing `archivePath` for the
@@ -272,7 +272,7 @@
       ./internal/routing`; `go build ./...`; `go vet ./...`.
       _(Req 4.4, 4.5, 4.6, 5.1, 6.2, 6.5, 7.5; D5)_
 
-- [ ] 4.5 Write the failing classifier tests (4c). Add
+- [x] 4.5 Write the failing classifier tests (4c). Add
       `internal/routing/classify_custom_test.go` asserting, for the new Kinds
       `KindCustomPost`, `KindCustomArchive`, `KindCustomTerm` and `Target.TypeName`
       (the registry key, distinct from `Slug`): single `/{slug}/{postname}/` →
@@ -303,7 +303,7 @@
       (`KindCustomPost`, `KindCustomArchive`, `KindCustomTerm`, `Target.TypeName`
       undefined). _(Req 4.1, 4.2, 5.1, 6.1, 7.1, 7.2, 7.3, 7.4, 7.7, 7.8, 7.9; D5, D6)_
 
-- [ ] 4.6 Implement the Kinds, `Target.TypeName` and the two classifier insertions.
+- [x] 4.6 Implement the Kinds, `Target.TypeName` and the two classifier insertions.
       In `internal/routing/classify.go` append `KindCustomPost`, `KindCustomArchive`,
       `KindCustomTerm` to the `Kind` block (`classify.go:11-22`, after `KindPage` so
       existing values keep their numbers), add `TypeName string` to `Target`
@@ -319,7 +319,7 @@
       build ./...`; `go vet ./...`. _(Req 4.1, 4.2, 5.1, 6.1, 7.1, 7.2, 7.3, 7.4, 7.7,
       7.8, 7.9; D5, D6)_
 
-- [ ] 4.7 Write the failing shadow-diagnostic tests (4d). Add
+- [x] 4.7 Write the failing shadow-diagnostic tests (4d). Add
       `internal/routing/custom_notes_test.go` asserting `Structure.CustomNotes()`
       reports (a) a custom archive path equal to the structure's own post shape (the
       row 6.5 override, stating the archive wins and a post slugged like it is
@@ -331,7 +331,7 @@
       Verify: `go test ./internal/routing -run CustomNotes` — fails to compile
       (`CustomNotes` undefined). _(Req 7.4, 7.8, 7.9; D6)_
 
-- [ ] 4.8 Implement `CustomNotes`. In `internal/routing/notes.go` (beside the existing
+- [x] 4.8 Implement `CustomNotes`. In `internal/routing/notes.go` (beside the existing
       note builders, `notes.go:39`, `:121`) add the unexported `shadowNotes()` and the
       exported `CustomNotes() []string`; in `routing.go` add the `customNotes` field and
       have `WithCustomTypes` set `out.customNotes = out.shadowNotes()`. `Notes()` is
@@ -346,7 +346,7 @@
 
 > Ships in PR 2.
 
-- [ ] 5.1 Write the failing `Build` rejection tests first. Add
+- [~] 5.1 Write the failing `Build` rejection tests first. Add
       `internal/registry/build_test.go`, table-driven with ONE case per rule, each
       asserting the error text names the config path (e.g.
       `content.post_types[1].name`) and the offending value, and that the database is
@@ -376,7 +376,7 @@
       Verify: `go test ./internal/registry -run Build` — fails (package has no
       implementation). _(Req 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9; D2, D4)_
 
-- [ ] 5.2 Implement `registry.Build` and the reserved sets. New files
+- [~] 5.2 Implement `registry.Build` and the reserved sets. New files
       `internal/registry/types.go` (`PostType`, `Taxonomy`, the `Registry` struct with
       ordered slices and name/`rest_base` indexes), `internal/registry/reserved.go`
       (`ReservedPostTypes()`, `ReservedTaxonomies()` exported so `migrate -check`
@@ -394,7 +394,7 @@
       Verify: `go test ./internal/registry -run Build` green; `go build ./...`; `go vet
       ./...`. _(Req 3.1–3.9; D2, D4)_
 
-- [ ] 5.3 Write the failing registry behavior tests. Add
+- [~] 5.3 Write the failing registry behavior tests. Add
       `internal/registry/registry_test.go` asserting: every lookup is nil-receiver safe
       and reports `ok=false` / empty on a nil `*Registry` (`Empty`, `PostTypes`,
       `Taxonomies`, `PostType`, `Taxonomy`, `PostTypeByRESTBase`, `TaxonomyByRESTBase`,
@@ -414,7 +414,7 @@
       methods, `Routes`, `Notes`, `Heading`, `HasArchive` undefined). _(Req 1.5, 1.6,
       2.7, 3.9, 4.8, 9.4; D2, D3)_
 
-- [ ] 5.4 Implement the registry lookups. New `internal/registry/registry.go` with
+- [~] 5.4 Implement the registry lookups. New `internal/registry/registry.go` with
       `Empty`, `PostTypes`, `Taxonomies`, `PostType`, `Taxonomy`, `PostTypeByRESTBase`,
       `TaxonomyByRESTBase`, `TaxonomyRESTBase`, `Routes`, `Notes`, and the `PostType`
       methods `HasArchive`/`Heading`, all nil-receiver safe.
@@ -427,7 +427,7 @@
 
 > Ships in PR 2.
 
-- [ ] 6.1 Write the failing cross-vendor node-reader contract first. In
+- [x] 6.1 Write the failing cross-vendor node-reader contract first. In
       `internal/storage/storagetest/contract.go` add `runPostNodeReaderContract`
       attached to `RunContract` beside `runPageReaderContract` (`contract.go:1915`);
       SQLite always, MySQL/Postgres env-gated through the existing harness (NO new env
@@ -444,7 +444,7 @@
       Verify: `go test ./internal/storage/storagetest -run SQLite` — fails to compile
       (`Set.PostNodeReader` undefined). _(Req 2.4, 2.5, 5.2, 5.6, 14.1; D9, D10)_
 
-- [ ] 6.2 Implement the node-reader port. In `internal/domain/repository.go` (beside
+- [x] 6.2 Implement the node-reader port. In `internal/domain/repository.go` (beside
       `PageNode`/`PageReader`, `:502-530`) add `type PostNode = PageNode`
       and `PostNodeReader` with doc comments naming each requirement (the
       `AuthorTypeReader` and auditor ports arrive with their implementations in 10.2). In
@@ -466,7 +466,7 @@
 
 > Ships in PR 2.
 
-- [ ] 7.1 Write the failing `TaxonomyArchive` tests (7a). Add
+- [~] 7.1 Write the failing `TaxonomyArchive` tests (7a). Add
       `internal/content/taxonomy_archive_test.go` over fakes asserting
       `TermService.TaxonomyArchive(ctx, tax registry.Taxonomy, segments, page, perPage)`:
       hierarchical — `LoadTermHierarchy(ctx, reader, tax.Name)` + `ResolvePath`, filter
@@ -486,7 +486,7 @@
       Verify: `go test ./internal/content -run TaxonomyArchive` — fails to compile
       (`TaxonomyArchive` undefined). _(Req 2.7, 6.1, 6.2, 6.3, 6.4, 6.6; D5)_
 
-- [ ] 7.2 Implement `TermService.TaxonomyArchive`. In `internal/content/term.go`
+- [~] 7.2 Implement `TermService.TaxonomyArchive`. In `internal/content/term.go`
       (beside `CategoryArchive`, `term.go:81`) add the method per design Component 6a,
       reusing `TermHierarchy`, `ResolvePath`, `recoverPath`, `CategoryMovedError`
       (naming debt documented in a doc-comment line, Finding 7) and `clamp`/`newPage`.
@@ -496,7 +496,7 @@
       ./internal/content`; `go build ./...`; `go vet ./...`. _(Req 2.7, 6.1, 6.2, 6.3,
       6.4, 6.6; D5)_
 
-- [ ] 7.3 Write the failing `CustomPostService` tests (7b). Add
+- [~] 7.3 Write the failing `CustomPostService` tests (7b). Add
       `internal/content/custompost_test.go` over fakes asserting: non-hierarchical
       `Resolve` — `len(segments) != 1` → `ErrNotFound`; `BySlug` scoped to the type (a
       `post` of the same slug does not resolve for `book`, and the reverse); ancestry
@@ -520,7 +520,7 @@
       (`CustomPostService` undefined). _(Req 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6,
       8.1; D5, D7)_
 
-- [ ] 7.4 Implement `CustomPostService`. New `internal/content/custompost.go` per
+- [~] 7.4 Implement `CustomPostService`. New `internal/content/custompost.go` per
       design Component 6b: `CustomPostService{nodes domain.PostNodeReader, posts
       domain.PostRepository}`, `NewCustomPostService` (panics on nil), `Resolve`,
       `AncestryFor`, `Hierarchy`, `Archive`, and the unexported `nodeReaderFor` adapter
@@ -538,7 +538,7 @@
 
 > Ships in PR 2.
 
-- [ ] 8.1 Write the failing server-wiring tests (8a). Add
+- [~] 8.1 Write the failing server-wiring tests (8a). Add
       `internal/web/router_custom_test.go` asserting: `Server.WithRegistry(reg,
       customPosts)` returns the Server for chaining; `contentPatterns` appends
       `st.CustomPatterns()` after `ArchivePatterns()` and before `"/{slug}"`
@@ -556,7 +556,7 @@
       Verify: `go test ./internal/web -run RouterCustom` — fails to compile
       (`WithRegistry` undefined). _(Req 7.5, 7.6, 7.7; D6)_
 
-- [ ] 8.2 Implement the server wiring. In `internal/web/router.go` add the `registry
+- [~] 8.2 Implement the server wiring. In `internal/web/router.go` add the `registry
       *registry.Registry` and `customPosts *content.CustomPostService` fields (beside
       the existing optional services, `router.go:165`), `WithRegistry`, a
       `requireCustomDeps(st)` guard invoked from `Routes()` next to `requireArchiveDeps`
@@ -568,7 +568,7 @@
       (existing suites unchanged); `go build ./...`; `go vet ./...`. _(Req 7.5, 7.6,
       7.7; D6)_
 
-- [ ] 8.3 Write the failing handler tests (8b). Add `internal/web/handlers_custom_test.go`
+- [~] 8.3 Write the failing handler tests (8b). Add `internal/web/handlers_custom_test.go`
       driving a Server wired with a registry over fakes/SQLite for `customPost`,
       `customArchive`, `customTermArchive`: 200 at the canonical; 301 from every
       non-canonical form (missing/extra trailing slash, wrong ancestry, flat leaf of a
@@ -587,7 +587,7 @@
       absent: the new Kinds hit the default `resolve` branch). _(Req 4.1, 4.2, 4.3, 4.4,
       4.7, 4.8, 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5, 14.4; D5, D6)_
 
-- [ ] 8.4 Implement the resolve arms and three handlers. In `internal/web/handlers.go`
+- [~] 8.4 Implement the resolve arms and three handlers. In `internal/web/handlers.go`
       add to `resolve` (`handlers.go:65`) the `KindCustomPost`, `KindCustomArchive`,
       `KindCustomTerm` arms, each with the defensive `s.registry.Empty()` → `ErrNotFound`
       guard, and add `customPost` (mirrors `single()`/`page()`: resolve, canonical from
@@ -608,7 +608,7 @@
 
 > Ships in PR 2.
 
-- [ ] 9.1 Extend the failing assembly test (HTML behavior only). In
+- [~] 9.1 Extend the failing assembly test (HTML behavior only). In
       `cmd/grimoire/assembly_test.go` seed a `book` post type (`slug: books`,
       `has_archive: true`, `taxonomies: [shelf]`) with row `dune`, a hierarchical
       `volume` (`slug: volumes`) with `vol-1` and child `part-one`, and a `shelf`
@@ -634,7 +634,7 @@
       (`serverDeps.Registry` undefined). _(Req 1.5, 13.3; D10)_
 
 
-- [ ] 9.2 Wire the registry inside `buildHandler`. In `cmd/grimoire/assembly.go` add
+- [~] 9.2 Wire the registry inside `buildHandler`. In `cmd/grimoire/assembly.go` add
       `Registry *registry.Registry` to `serverDeps` (nil-safe; empty when no `content:`
       section). Inside `buildHandler`, before any consumer is built: `types, taxes :=
       deps.Registry.Routes()`, `permalinks := deps.Permalinks.WithCustomTypes(types,
@@ -650,7 +650,7 @@
       `go build ./...`; `go vet ./...`. _(Req 1.5, 7.5, 7.6, 13.1, 13.3; D4, D10)_
 
 
-- [ ] 9.3 Build the registry in `main()`. In `cmd/grimoire/main.go`, immediately after
+- [~] 9.3 Build the registry in `main()`. In `cmd/grimoire/main.go`, immediately after
       `resolvePermalinks` (`main.go:104`) and before `buildHandler`, call
       `registry.Build(cfg.Content, permalinks)`; on error log `"invalid content
       configuration"` and `os.Exit(1)`; log each `reg.Notes()` at WARN; pass the result
@@ -669,7 +669,7 @@
 
 > Ships in PR 3.
 
-- [ ] 10.1 Write the failing `AuthorsOfTypes` and diagnostic-read contract assertions.
+- [~] 10.1 Write the failing `AuthorsOfTypes` and diagnostic-read contract assertions.
       In `internal/storage/storagetest/contract.go` (serialized after 6.1/6.2, PR 2) add
       assertions: `AuthorsOfTypes(ctx, {"post","page"})` equals `Authors(ctx)` on the
       same fixture; `AuthorsOfTypes(ctx, {"post","page","book"})` additionally includes
@@ -684,7 +684,7 @@
       (`AuthorsOfTypes`, `DistinctPostTypes`, `DistinctTaxonomies` not implemented).
       _(Req 2.3, 11.1, 11.2, 14.1; D9)_
 
-- [ ] 10.2 Implement `AuthorsOfTypes` and the two diagnostic reads. In `internal/domain/repository.go` (beside `PostNodeReader`) add `AuthorTypeReader`, `TypeCount`, `PostTypeAuditor` and `TaxonomyAuditor` with doc comments naming each requirement. In `internal/storage/wprepo/adminreads.go` add `(*PostRepo).AuthorsOfTypes(ctx,
+- [~] 10.2 Implement `AuthorsOfTypes` and the two diagnostic reads. In `internal/domain/repository.go` (beside `PostNodeReader`) add `AuthorTypeReader`, `TypeCount`, `PostTypeAuditor` and `TaxonomyAuditor` with doc comments naming each requirement. In `internal/storage/wprepo/adminreads.go` add `(*PostRepo).AuthorsOfTypes(ctx,
       types)` — the body of `Authors` (`adminreads.go:109`, hard-coded list at `:118`)
       with the type list as a parameter — and make `Authors(ctx)` call
       `AuthorsOfTypes(ctx, []string{"post","page"})`, producing the identical statement.
@@ -703,7 +703,7 @@
 
 > Ships in PR 3.
 
-- [ ] 11.1 Write the failing `AdminService.WithAuthorTypes` tests. Add
+- [~] 11.1 Write the failing `AdminService.WithAuthorTypes` tests. Add
       `internal/content/adminread_authortypes_test.go` asserting: when
       `WithAuthorTypes(reader, types)` is set, `Authors` calls
       `reader.AuthorsOfTypes(ctx, types)`; without it `Authors` behaves exactly as today
@@ -712,14 +712,14 @@
       Verify: `go test ./internal/content -run AuthorTypes` — fails to compile.
       _(Req 2.3; D9)_
 
-- [ ] 11.2 Implement `WithAuthorTypes`. In `internal/content/adminread.go` (near `:112`)
+- [~] 11.2 Implement `WithAuthorTypes`. In `internal/content/adminread.go` (near `:112`)
       add `AdminService.WithAuthorTypes(r domain.AuthorTypeReader, types []string)` and
       route `Authors` through it when set.
       Files: `internal/content/adminread.go`
       Verify: `go test ./internal/content -run AuthorTypes` green; `go test
       ./internal/content`; `go build ./...`; `go vet ./...`. _(Req 2.3; D9)_
 
-- [ ] 11.3 Write the failing REST mapper tests (7c). Add
+- [~] 11.3 Write the failing REST mapper tests (7c). Add
       `internal/content/rest_custom_test.go` asserting `RESTMapper.WithRegistry(reg)` and
       `RESTMapper.CustomPost(ctx, p, pt, ancestry)`: `type` equals the CPT name; `link`
       equals `Structure.CustomPostPath(pt.Name, ancestry)` (never the post-shape
@@ -736,7 +736,7 @@
       (`RESTCustomPost`, `WithRegistry`, `CustomPost` undefined). _(Req 4.6, 9.3, 9.4;
       D8)_
 
-- [ ] 11.4 Implement the REST view model. In `internal/content/rest.go` (beside
+- [~] 11.4 Implement the REST view model. In `internal/content/rest.go` (beside
       `:337`) add `RESTCustomPost{restItemCommon; Terms map[string][]int64}` with
       `MarshalJSON`, `RESTMapper.WithRegistry`, and `RESTMapper.CustomPost` per design
       Component 6c: call `restCommon`, overwrite `Link` from `CustomPostPath` with the
@@ -753,7 +753,7 @@
 
 > Ships in PR 3.
 
-- [ ] 12.1 Write the failing admin-list `type` validation tests (8d). Add
+- [~] 12.1 Write the failing admin-list `type` validation tests (8d). Add
       `internal/web/adminapi_type_test.go` asserting `GET` on the admin posts list: a
       `type` that is not `post`, not `page` and not a registered name responds 400 with
       code `invalid_type` and reads NOTHING (the fake repo records zero calls); a
@@ -767,7 +767,7 @@
       Verify: `go test ./internal/web -run AdminAPIType` — fails (unvalidated `type`
       forwarded). _(Req 2.1, 2.2, 2.8, 2.9, 2.10, 12.2, 12.3; D1, D9)_
 
-- [ ] 12.2 Implement the `type` validation. In `internal/web/adminapi.go` (`adminPosts`,
+- [~] 12.2 Implement the `type` validation. In `internal/web/adminapi.go` (`adminPosts`,
       `:213`, forwarding at `:226`) reject a `type` outside `{post, page}` plus
       `s.registry` names with 400 `invalid_type` before any read (the `invalid_status`
       precedent, `:222`). Edit any pre-existing test the tightening breaks. Write
@@ -777,7 +777,7 @@
       `go build ./...`; `go vet ./...`. _(Req 2.1, 2.2, 2.8, 2.9, 2.10, 12.2, 12.3; D1,
       D9)_
 
-- [ ] 12.3 Write the failing REST CPT read tests (8c, posts). Add
+- [~] 12.3 Write the failing REST CPT read tests (8c, posts). Add
       `internal/web/rest_custom_posts_test.go` asserting for a registered CPT at
       `/wp-json/wp/v2/{rest_base}`: GET collection in the posts/pages envelope with the
       same pagination headers and the `slug` filter; GET single; `type` equals the CPT
@@ -798,7 +798,7 @@
       unregistered: 404). _(Req 8.1, 8.2, 8.4, 8.5, 8.6, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6,
       12.1, 14.5; D1, D7, D8)_
 
-- [ ] 12.4 Implement REST CPT registration. New `internal/web/rest_custom_posts.go` with
+- [~] 12.4 Implement REST CPT registration. New `internal/web/rest_custom_posts.go` with
       `registerRESTCustomPosts` (for each `s.registry.PostTypes()`, public or not: GET
       collection → `handleRESTPostsCollection(pt.Name)`, GET single →
       `handleRESTPostSingle(pt.Name)`, every write verb → `restNotImplemented`). In
@@ -819,7 +819,7 @@
       ./internal/web`; `go build ./...`; `go vet ./...`. _(Req 8.1, 8.2, 8.4, 8.5, 8.6,
       9.1–9.6, 12.1, 14.5; D1, D7, D8)_
 
-- [ ] 12.5 Write the failing REST CT read and route-index tests (8c, terms). Add
+- [~] 12.5 Write the failing REST CT read and route-index tests (8c, terms). Add
       `internal/web/rest_custom_terms_test.go` asserting for a registered CT: GET
       collection and single in the categories/tags shape (`id`, `count`, `link`, `name`,
       `slug`, `taxonomy`, `parent`; `count` the documented literal 0; `description` stays
@@ -839,7 +839,7 @@
       Verify: `go test ./internal/web -run RESTCustomTerms` — fails. _(Req 6.6, 10.1,
       10.2, 10.3, 10.4, 10.5, 10.6, 12.1, 14.5; D1, D8)_
 
-- [ ] 12.6 Implement REST CT registration and the route index. New
+- [~] 12.6 Implement REST CT registration and the route index. New
       `internal/web/rest_custom_terms.go` with `registerRESTCustomTerms` (own
       `"/"+RESTBase` path computation; GET → `handleRESTTermsCollection(tax.Name)` /
       `handleRESTTermSingle(tax.Name)`; write verbs → `restNotImplemented`). In
@@ -856,7 +856,7 @@
       ./internal/web`; `go build ./...`; `go vet ./...`; `gofmt -l .` empty (phase
       gate). _(Req 6.6, 10.1–10.6, 12.1, 14.5; D1, D8)_
 
-- [ ] 12.7 Extend the failing assembly test with the REST rows. In
+- [~] 12.7 Extend the failing assembly test with the REST rows. In
       `cmd/grimoire/assembly_test.go`, reusing the 9.1 `book`/`shelf` fixture and
       registry, assert through the handler: `/wp-json/wp/v2/books` 200 with one item
       whose `type` is `book` and whose `link` ends `/books/dune/`, carrying the `shelf`
@@ -872,7 +872,7 @@
       _(Req 9.1, 9.3, 9.4, 10.1, 10.2, 13.3; D8, D10)_
 
 
-- [ ] 12.8 Wire the API-side registry consumers inside `buildHandler`. In
+- [~] 12.8 Wire the API-side registry consumers inside `buildHandler`. In
       `cmd/grimoire/assembly.go` add `.WithRegistry(deps.Registry)` to the REST mapper
       chain (after `.WithPages(pageSvc)`) and wire `content.NewAdminService(...).
       WithAuthorTypes(authorReader, registeredTypeNames(deps.Registry))` where
@@ -890,7 +890,7 @@
 
 > Ships in PR 3.
 
-- [ ] 13.1 Write the failing diagnostic tests first. Add
+- [~] 13.1 Write the failing diagnostic tests first. Add
       `cmd/grimoire-cli/contenttypes_test.go` over fakes, as
       `TestReportDuplicateNicenamesNamesEachConflict` does for its auditor, asserting
       `reportUndeclaredContentTypes(ctx, w, postTypes, taxonomies, declared)`: names each
@@ -907,7 +907,7 @@
       Verify: `go test ./cmd/grimoire-cli -run UndeclaredContentTypes` — fails to compile
       (`reportUndeclaredContentTypes` undefined). _(Req 11.1, 11.2, 11.3, 11.4; D2, D9)_
 
-- [ ] 13.2 Implement the report. New `cmd/grimoire-cli/contenttypes.go` with
+- [~] 13.2 Implement the report. New `cmd/grimoire-cli/contenttypes.go` with
       `reportUndeclaredContentTypes` (pure subtraction in a small function the test
       drives; read-only; uses `registry.ReservedPostTypes()`/`ReservedTaxonomies()`),
       mirroring `reportDuplicateNicenames` (`permalinks.go:167`). In
@@ -927,7 +927,7 @@
 
 > Ships in PR 3.
 
-- [ ] 14.1 Add the real-WordPress-DB custom-type fixture test. New
+- [~] 14.1 Add the real-WordPress-DB custom-type fixture test. New
       `internal/routing/realdb_custom_test.go` with `TestRealWordPressCustomTypes`,
       modeled on `realdb_pages_test.go` (reuse its DSN/prefix helpers): gated by
       `GRIMOIRE_TEST_WP_DSN` with the same prefix variable (NO new `GRIMOIRE_TEST_*`
@@ -946,7 +946,7 @@
       skips cleanly with its precondition message when the fixture is absent; `go vet
       ./...` clean. _(Req 14.6, 14.7; D10)_
 
-- [ ] 14.2 Record the compatibility-boundary expansion. Edit `docs/compatibility.md` to
+- [~] 14.2 Record the compatibility-boundary expansion. Edit `docs/compatibility.md` to
       move custom post types and taxonomies from "out of scope" to "a scoped milestone
       (read-first, M12)", stating the config-only registry (D2), the READ-only scope
       with 501 on write verbs (D1), the documented consequences (a page or post slugged
@@ -957,7 +957,7 @@
       Verify: the file renders; `gofmt -l .` empty; `go build ./...` unaffected.
       _(Roadmap Req 25.3; D1, D2, D6)_
 
-- [ ] 14.3 Final gate — verification only. Confirm: NO file added under
+- [~] 14.3 Final gate — verification only. Confirm: NO file added under
       `internal/storage/migrations` (`git status --porcelain internal/storage/migrations`
       empty); the `postColumns` var (`internal/storage/wprepo/repo.go:17-24`) unchanged;
       NO new capability NAME (only `auth.CapabilitySuffix`); `ListPages` and every

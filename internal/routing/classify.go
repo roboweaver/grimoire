@@ -27,6 +27,13 @@ const (
 	// as Target.Segments and the handler's walk produces the 301 or the 404
 	// (Req 6.2, 6.3).
 	KindPage
+	// KindCustomPost, KindCustomArchive and KindCustomTerm address a registered
+	// custom post type's single, its archive, and a custom taxonomy term (M12).
+	// They are appended after KindPage so every existing value keeps its number.
+	// Target.TypeName names the registry entry; Slug stays empty.
+	KindCustomPost
+	KindCustomArchive
+	KindCustomTerm
 )
 
 // Target is the classified meaning of one request path.
@@ -41,6 +48,10 @@ type Target struct {
 	Segments []string
 	// Slug is the tag slug or the author nicename, per Kind.
 	Slug string
+	// TypeName is the registry key of the custom post type or taxonomy. Set when
+	// Kind is KindCustomPost, KindCustomArchive or KindCustomTerm. It is distinct
+	// from Slug, which stays empty for those Kinds.
+	TypeName string
 	// Date is set when Kind is KindDate.
 	Date DateRef
 	// TrailingSlash records the form the request arrived in, not the canonical
@@ -61,6 +72,14 @@ type Target struct {
 // router.go's route-registration comment), which makes registration-order
 // precedence unreviewable. Every ambiguous pattern is registered to one handler
 // precisely so that which pattern chi picks has no observable effect.
+//
+// Custom types (M12) add three rows. Row 6.5 (custom archive) sits after the
+// date row and before row 7: the whole path must equal a registered type's
+// archive base. Row 7.2 (custom single, then custom term) sits after row 7 and
+// before the M15 page row: the path must start with the entry's base and carry
+// the right number of further segments (exactly one when non-hierarchical, one
+// or more when hierarchical). The bare base is never claimed by rows 7.2, so a
+// page or post slugged like a taxonomy base stays reachable. No row reads a DB.
 //
 // Each archive row tests its **own** expected prefix, computed by archivePrefix
 // -- the same helper the four path constructors call, so a constructor and the
@@ -135,6 +154,18 @@ func (s Structure) Classify(path string) Target {
 		}
 	}
 
+	// Row 6.5 -- a custom post type's archive: the whole path is the archive base.
+	for _, tr := range s.customTypes {
+		if !tr.HasArchive() {
+			continue
+		}
+		if slices.Equal(segs, s.CustomBase(tr.ArchiveSlug, tr.WithFront)) {
+			t.Kind = KindCustomArchive
+			t.TypeName = tr.Name
+			return t
+		}
+	}
+
 	// Row 7 -- the structure's own shape. This is M9a's post resolution
 	// unchanged, and the structure already carries its own front, so no archive
 	// prefix applies. It runs after the base rows, which is what makes Req
@@ -147,6 +178,37 @@ func (s Structure) Classify(path string) Target {
 			t.Post = ref
 			return t
 		}
+	}
+
+	// Row 7.2 -- a custom single, then a custom term. The bare base is not
+	// claimed; a non-hierarchical entry claims exactly one further segment, a
+	// hierarchical entry one or more. A deeper path on a non-hierarchical entry
+	// is KindNone, not a fall-through to the page row.
+	for _, tr := range s.customTypes {
+		rest, ok := trimSegmentPrefix(segs, s.CustomBase(tr.Slug, tr.WithFront))
+		if !ok || len(rest) == 0 {
+			continue
+		}
+		if !tr.Hierarchical && len(rest) != 1 {
+			return t
+		}
+		t.Kind = KindCustomPost
+		t.TypeName = tr.Name
+		t.Segments = slices.Clone(rest)
+		return t
+	}
+	for _, tr := range s.customTaxes {
+		rest, ok := trimSegmentPrefix(segs, s.CustomBase(tr.Slug, tr.WithFront))
+		if !ok || len(rest) == 0 {
+			continue
+		}
+		if !tr.Hierarchical && len(rest) != 1 {
+			return t
+		}
+		t.Kind = KindCustomTerm
+		t.TypeName = tr.Name
+		t.Segments = slices.Clone(rest)
+		return t
 	}
 
 	// Row 7.5 (M15) -- a nested page path. Two-or-more segments not claimed by

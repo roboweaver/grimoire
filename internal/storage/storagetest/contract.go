@@ -397,6 +397,7 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 	runTermReaderContract(t, newRepos)
 	runPostContentBackfillContract(t, newRepos)
 	runPageReaderContract(t, newRepos)
+	runPostNodeReaderContract(t, newRepos)
 }
 
 // runUserContract covers UserRepository + UserMetaRepository, including the
@@ -2219,6 +2220,293 @@ func runPageReaderContract(t *testing.T, newRepos NewReposFunc) {
 		for id := range want {
 			if counts[id] != 1 {
 				t.Errorf("page %d visited %d times across the mid-walk mutation, want exactly once", id, counts[id])
+			}
+		}
+	})
+}
+
+// runPostNodeReaderContract covers the additive M12 post-type-parameterized
+// node read port, PostNodeReader.ListPostNodes: the M15 page-graph keyset walk
+// generalized to any post_type (Req 2.4, 2.5, 5.2, 5.6). It mirrors
+// runPageReaderContract case for case.
+//
+// Until the port lands (domain.PostNodeReader / domain.PostNode, the Set field
+// repos.PostNodeReader, and PostRepo.ListPostNodes) this file does not compile;
+// the failure names exactly those symbols (TDD-red for task 6.1).
+//
+// Rows are seeded through PostWriter.Create (which persists post_type,
+// post_status, post_name and post_parent verbatim) so the contract stays
+// vendor-agnostic. A `book` custom type is the subject and a second type,
+// `film`, proves isolation; `page` rows (SeedFixtures "about" plus seeded ones)
+// prove a page never appears for a custom type.
+func runPostNodeReaderContract(t *testing.T, newRepos NewReposFunc) {
+	t.Helper()
+	ctx := context.Background()
+
+	mk := func(t *testing.T, repos *storage.Repositories, postType, slug, status string, parentID int64) int64 {
+		t.Helper()
+		id, err := repos.PostWriter.Create(ctx, domain.Post{
+			Author:        1,
+			Date:          time.Date(2024, 10, 1, 0, 0, 0, 0, time.UTC),
+			Content:       "<p>body</p>",
+			Title:         slug,
+			Excerpt:       "ex",
+			Status:        status,
+			Slug:          slug,
+			Type:          postType,
+			CommentStatus: "closed",
+			ParentID:      parentID,
+		})
+		if err != nil {
+			t.Fatalf("seed %s %s/%s: %v", postType, slug, status, err)
+		}
+		return id
+	}
+
+	// seed builds the fixture: `book` rows across every status, a nested
+	// chain, an orphan (post_parent naming an absent ID) and a two-node cycle;
+	// plus `film` rows and `page` rows that must never leak into `book`.
+	// It returns the expected book rows keyed by ID, and the ids of rows of
+	// other types.
+	seed := func(t *testing.T, repos *storage.Repositories) (want map[int64]domain.PostNode, others map[int64]bool) {
+		t.Helper()
+		want = map[int64]domain.PostNode{}
+		others = map[int64]bool{}
+
+		root := mk(t, repos, "book", "bk-root", "draft", 0)
+		mid := mk(t, repos, "book", "bk-mid", "private", root)
+		leaf := mk(t, repos, "book", "bk-leaf", "publish", mid)
+		pending := mk(t, repos, "book", "bk-pending", "pending", 0)
+		trash := mk(t, repos, "book", "bk-trash", "trash", 0)
+		orphan := mk(t, repos, "book", "bk-orphan", "publish", 999999)
+		cycA := mk(t, repos, "book", "bk-cycle-a", "publish", 0)
+		cycB := mk(t, repos, "book", "bk-cycle-b", "publish", cycA)
+
+		// Close the cycle: A -> B -> A.
+		a, err := repos.PostWriter.ByID(ctx, cycA)
+		if err != nil {
+			t.Fatalf("ByID cycle A: %v", err)
+		}
+		a.ParentID = cycB
+		if err := repos.PostWriter.Update(ctx, a); err != nil {
+			t.Fatalf("Update cycle A: %v", err)
+		}
+
+		for _, n := range []domain.PostNode{
+			{ID: root, Slug: "bk-root", ParentID: 0, Status: "draft"},
+			{ID: mid, Slug: "bk-mid", ParentID: root, Status: "private"},
+			{ID: leaf, Slug: "bk-leaf", ParentID: mid, Status: "publish"},
+			{ID: pending, Slug: "bk-pending", ParentID: 0, Status: "pending"},
+			{ID: trash, Slug: "bk-trash", ParentID: 0, Status: "trash"},
+			{ID: orphan, Slug: "bk-orphan", ParentID: 999999, Status: "publish"},
+			{ID: cycA, Slug: "bk-cycle-a", ParentID: cycB, Status: "publish"},
+			{ID: cycB, Slug: "bk-cycle-b", ParentID: cycA, Status: "publish"},
+		} {
+			want[n.ID] = n
+		}
+
+		// Isolation: another custom type and pages, interleaved by ID.
+		others[mk(t, repos, "film", "fl-one", "publish", 0)] = true
+		others[mk(t, repos, "film", "fl-draft", "draft", 0)] = true
+		others[mk(t, repos, "page", "pg-other", "publish", 0)] = true
+		about, err := repos.Posts.BySlug(ctx, "about")
+		if err != nil {
+			t.Fatalf("BySlug about: %v", err)
+		}
+		others[about.ID] = true
+		for _, slug := range []string{"hello-1", "hello-2", "hello-3"} {
+			p, err := repos.Posts.BySlug(ctx, slug)
+			if err != nil {
+				t.Fatalf("BySlug %s: %v", slug, err)
+			}
+			others[p.ID] = true
+		}
+		for _, id := range []int64{201, 202, 301, 302, 303, 304} {
+			others[id] = true
+		}
+		return want, others
+	}
+
+	drain := func(t *testing.T, repos *storage.Repositories, postType string, limit int) []domain.PostNode {
+		t.Helper()
+		var all []domain.PostNode
+		var afterID int64
+		for {
+			page, err := repos.PostNodeReader.ListPostNodes(ctx, postType, afterID, limit)
+			if err != nil {
+				t.Fatalf("ListPostNodes(%q, after=%d, limit=%d): %v", postType, afterID, limit, err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			for _, row := range page {
+				if row.ID <= afterID {
+					t.Fatalf("ListPostNodes returned id %d <= cursor %d: not strictly ascending by ID",
+						row.ID, afterID)
+				}
+				afterID = row.ID
+			}
+			all = append(all, page...)
+			if len(page) < limit {
+				break
+			}
+		}
+		return all
+	}
+
+	t.Run("ListPostNodes returns only the requested type across every status", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, others := seed(t, repos)
+
+		rows := drain(t, repos, "book", 1000)
+		got := map[int64]domain.PostNode{}
+		for _, row := range rows {
+			if others[row.ID] {
+				t.Errorf("ListPostNodes(book) returned row %d of another type (status %q); "+
+					"only post_type='book' may appear (Req 2.4, 5.2)", row.ID, row.Status)
+			}
+			got[row.ID] = row
+		}
+		for id, w := range want {
+			g, ok := got[id]
+			if !ok {
+				t.Errorf("ListPostNodes(book) missing row %d (status %q); every status is in scope (Req 2.5)",
+					id, w.Status)
+				continue
+			}
+			if g.Status != w.Status {
+				t.Errorf("row %d status = %q, want %q", id, g.Status, w.Status)
+			}
+		}
+		if len(rows) != len(want) {
+			t.Errorf("ListPostNodes(book) returned %d rows, want %d", len(rows), len(want))
+		}
+
+		// A second type is isolated the same way.
+		for _, row := range drain(t, repos, "film", 1000) {
+			if _, isBook := want[row.ID]; isBook {
+				t.Errorf("ListPostNodes(film) returned book row %d", row.ID)
+			}
+		}
+	})
+
+	t.Run("ListPostNodes carries ID, slug, post_parent and status verbatim incl. orphan and cycle", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seed(t, repos)
+
+		got := map[int64]domain.PostNode{}
+		for _, row := range drain(t, repos, "book", 1000) {
+			got[row.ID] = row
+		}
+		for id, w := range want {
+			g, ok := got[id]
+			if !ok {
+				t.Errorf("row %d (%s) not returned; projection case vacuous", id, w.Slug)
+				continue
+			}
+			if g != w {
+				t.Errorf("row %d = %+v, want %+v (orphan/cycle rows are returned verbatim, "+
+					"not repaired or dropped; Req 5.6)", id, g, w)
+			}
+		}
+	})
+
+	t.Run("ListPostNodes paginates by ascending-ID keyset with none skipped or duplicated", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seed(t, repos)
+
+		counts := map[int64]int{}
+		for _, row := range drain(t, repos, "book", 2) {
+			counts[row.ID]++
+		}
+		for id := range want {
+			if counts[id] != 1 {
+				t.Errorf("keyset walk returned book row %d %d times, want exactly once", id, counts[id])
+			}
+		}
+	})
+
+	t.Run("ListPostNodes returns a row mutated in place between pages exactly once", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		want, _ := seed(t, repos)
+
+		var afterID int64
+		counts := map[int64]int{}
+		mutated := false
+		for {
+			page, err := repos.PostNodeReader.ListPostNodes(ctx, "book", afterID, 1)
+			if err != nil {
+				t.Fatalf("ListPostNodes(after=%d): %v", afterID, err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			row := page[0]
+			counts[row.ID]++
+			afterID = row.ID
+
+			if !mutated {
+				var target int64
+				for id := range want {
+					if id > afterID && (target == 0 || id < target) {
+						target = id
+					}
+				}
+				if target != 0 {
+					p, err := repos.PostWriter.ByID(ctx, target)
+					if err != nil {
+						t.Fatalf("mid-walk ByID(%d): %v", target, err)
+					}
+					p.Title = "mutated mid-walk"
+					if err := repos.PostWriter.Update(ctx, p); err != nil {
+						t.Fatalf("mid-walk Update(%d): %v", target, err)
+					}
+					mutated = true
+				}
+			}
+		}
+		if !mutated {
+			t.Fatal("no mid-walk mutation performed; the in-place-mutation case is vacuous")
+		}
+		for id := range want {
+			if counts[id] != 1 {
+				t.Errorf("book row %d visited %d times across the mid-walk mutation, want exactly once", id, counts[id])
+			}
+		}
+	})
+
+	t.Run("ListPostNodes for page equals ListPages on the same data", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		seed(t, repos)
+
+		var wantPages []domain.PageNode
+		var afterID int64
+		for {
+			page, err := repos.PageReader.ListPages(ctx, afterID, 2)
+			if err != nil {
+				t.Fatalf("ListPages(after=%d): %v", afterID, err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			wantPages = append(wantPages, page...)
+			afterID = page[len(page)-1].ID
+		}
+		gotPages := drain(t, repos, "page", 2)
+		if len(wantPages) == 0 {
+			t.Fatal("ListPages returned no rows; equivalence case vacuous")
+		}
+		if len(gotPages) != len(wantPages) {
+			t.Fatalf("ListPostNodes(page) returned %d rows, ListPages %d", len(gotPages), len(wantPages))
+		}
+		for i := range wantPages {
+			if gotPages[i] != wantPages[i] {
+				t.Errorf("row %d: ListPostNodes(page) = %+v, ListPages = %+v", i, gotPages[i], wantPages[i])
 			}
 		}
 	})

@@ -145,6 +145,16 @@ type Structure struct {
 	// configuration, read through Notes(). Unexported and copied on the way out
 	// so a caller logging them cannot alter what the next caller reads.
 	notes []string
+
+	// customTypes and customTaxes are the registered custom post types and
+	// taxonomies, set only by WithCustomTypes. Empty on a parsed Structure.
+	customTypes []TypeRoute
+	customTaxes []TaxRoute
+
+	// customNotes are the diagnostics about the registered custom entries,
+	// computed by WithCustomTypes and read through CustomNotes(). Kept apart from
+	// notes so Notes() stays byte-identical whether or not entries are present.
+	customNotes []string
 }
 
 // Parse parses a permalink_structure together with the category_base and
@@ -488,14 +498,76 @@ func (s Structure) archivePrefix(k archiveKind) []string {
 		withFront = !s.TagBaseSet
 	}
 
-	var out []string
-	if withFront {
-		out = append(out, s.front...)
-	}
+	out := s.frontIf(withFront)
 	if k == archiveDate && s.datePrefixed() {
 		out = append(out, datePrefixSegment)
 	}
 	return out
+}
+
+// frontIf returns a fresh copy of the structure's front when withFront, and nil
+// otherwise. It is the single place the "carry the front?" decision is applied:
+// archivePrefix calls it with each archive kind's WordPress rule, and CustomBase
+// calls it with a custom type's or taxonomy's with_front. The result never
+// shares a backing array with s.front, so callers may append to it.
+func (s Structure) frontIf(withFront bool) []string {
+	if !withFront {
+		return nil
+	}
+	return append([]string(nil), s.front...)
+}
+
+// TypeRoute is the routing-relevant slice of a registered custom post type.
+// Slug is the single-item base, ArchiveSlug the archive base ("" when the type
+// has no archive). The package takes plain values rather than registry types so
+// it depends on nothing beyond internal/domain.
+type TypeRoute struct {
+	Name, Slug, ArchiveSlug string
+	WithFront, Hierarchical bool
+}
+
+// HasArchive reports whether the type serves an archive.
+func (t TypeRoute) HasArchive() bool { return t.ArchiveSlug != "" }
+
+// TaxRoute is the routing-relevant slice of a registered custom taxonomy.
+type TaxRoute struct {
+	Name, Slug              string
+	WithFront, Hierarchical bool
+}
+
+// WithCustomTypes returns a copy of s carrying the given custom post types and
+// taxonomies. The receiver is untouched and the inputs are cloned, so neither
+// the receiver nor the caller's slices are aliased. nil, nil is observably the
+// identity.
+func (s Structure) WithCustomTypes(types []TypeRoute, taxes []TaxRoute) Structure {
+	c := s
+	c.customTypes = slices.Clone(types)
+	c.customTaxes = slices.Clone(taxes)
+	c.customNotes = c.shadowNotes()
+	return c
+}
+
+// Front returns a copy of the structure's leading literal segments.
+func (s Structure) Front() []string {
+	return s.frontIf(true)
+}
+
+// ReservedBases returns the resolved category, tag and author base sequences,
+// in that order, each built by the same archivePrefix + baseSegments the path
+// constructors use. Every sequence is a fresh slice.
+func (s Structure) ReservedBases() [][]string {
+	return [][]string{
+		append(s.archivePrefix(archiveCategory), baseSegments(s.CategoryBase)...),
+		append(s.archivePrefix(archiveTag), baseSegments(s.TagBase)...),
+		append(s.archivePrefix(archiveAuthor), AuthorBase),
+	}
+}
+
+// CustomBase returns the segments of a custom type's or taxonomy's base: the
+// structure's front when withFront (a no-op on a Flat structure, which has no
+// front), then slug. The result is a fresh slice.
+func (s Structure) CustomBase(slug string, withFront bool) []string {
+	return append(s.frontIf(withFront), slug)
 }
 
 // datePrefixed reports whether date archives move under an extra "date/"
@@ -723,6 +795,97 @@ func (s Structure) ArchivePatterns() []string {
 		{year, month, day},
 	} {
 		pats = append(pats, bothSlashForms(joinPattern(date, tail...))...)
+	}
+	return pats
+}
+
+// customType and customTax look a registered entry up by name.
+func (s Structure) customType(name string) (TypeRoute, bool) {
+	for _, t := range s.customTypes {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return TypeRoute{}, false
+}
+
+func (s Structure) customTax(name string) (TaxRoute, bool) {
+	for _, t := range s.customTaxes {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return TaxRoute{}, false
+}
+
+// customItemPath builds base + ancestry with the structure's trailing-slash
+// rule. It yields "" for an empty ancestry, and for more than one segment when
+// the entry is not hierarchical.
+func (s Structure) customItemPath(slug string, withFront, hierarchical bool, ancestry []string) string {
+	if len(ancestry) == 0 || (!hierarchical && len(ancestry) > 1) {
+		return ""
+	}
+	return s.archivePath(append(s.CustomBase(slug, withFront), ancestry...))
+}
+
+// CustomPostPath builds the canonical path of a custom-type item from its
+// root-first slug ancestry: /{slug}/{postname}, with the front only when the
+// type is registered with_front and never a dated token. It yields "" for an
+// unregistered type, an empty ancestry, or a multi-segment ancestry on a
+// non-hierarchical type.
+func (s Structure) CustomPostPath(typeName string, ancestry []string) string {
+	t, ok := s.customType(typeName)
+	if !ok {
+		return ""
+	}
+	return s.customItemPath(t.Slug, t.WithFront, t.Hierarchical, ancestry)
+}
+
+// CustomArchivePath builds a custom type's archive path from its ArchiveSlug. It
+// yields "" for an unregistered type or one without an archive.
+func (s Structure) CustomArchivePath(typeName string) string {
+	t, ok := s.customType(typeName)
+	if !ok || !t.HasArchive() {
+		return ""
+	}
+	return s.archivePath(s.CustomBase(t.ArchiveSlug, t.WithFront))
+}
+
+// CustomTermPath builds a custom-taxonomy term path from its root-first slug
+// ancestry, mirroring CustomPostPath.
+func (s Structure) CustomTermPath(taxName string, ancestry []string) string {
+	t, ok := s.customTax(taxName)
+	if !ok {
+		return ""
+	}
+	return s.customItemPath(t.Slug, t.WithFront, t.Hierarchical, ancestry)
+}
+
+// CustomPatterns returns the chi patterns the custom routes need, derived from
+// the same CustomBase the path constructors use. Per type: the wildcard under
+// its base plus, when it has an archive, the bare archive base in both slash
+// forms (chi's /x/* does not match bare /x). Per taxonomy: the wildcard only. It
+// is nil when nothing is registered, and duplicate-free because chi overwrites a
+// repeated pattern silently.
+func (s Structure) CustomPatterns() []string {
+	var pats []string
+	seen := map[string]bool{}
+	add := func(ps ...string) {
+		for _, p := range ps {
+			if !seen[p] {
+				seen[p] = true
+				pats = append(pats, p)
+			}
+		}
+	}
+	for _, t := range s.customTypes {
+		add(joinPattern(s.CustomBase(t.Slug, t.WithFront), "*"))
+		if t.HasArchive() {
+			add(bothSlashForms(joinPattern(s.CustomBase(t.ArchiveSlug, t.WithFront)))...)
+		}
+	}
+	for _, t := range s.customTaxes {
+		add(joinPattern(s.CustomBase(t.Slug, t.WithFront), "*"))
 	}
 	return pats
 }

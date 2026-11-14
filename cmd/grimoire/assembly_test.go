@@ -12,6 +12,7 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/config"
+	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/routing"
 	"github.com/roboweaver/grimoire/internal/sanitize"
@@ -172,6 +173,186 @@ func TestBuildHandlerServesNestedPages(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("nested page team not in REST pages: %s", rec.Body.String())
+		}
+	})
+}
+
+// seedAssemblyCustom adds published custom-type rows and terms (plain SQL,
+// SQLite quoting): book dune (genre scifi, shelf classics under fiction), a
+// hierarchical volume vol-1 > part-one, and the term rows themselves.
+func seedAssemblyCustom(t *testing.T, repos *storage.Repositories, prefix string) {
+	t.Helper()
+	ctx := context.Background()
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := repos.DB().ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("seed sql %q: %v", q, err)
+		}
+	}
+	const ins = `INSERT INTO ` + "wp_" + `posts ` +
+		`(ID, post_author, post_date, post_content, post_title, post_excerpt, post_status, post_name, post_type, comment_status, post_parent, post_mime_type, menu_order) ` +
+		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	rows := [][]any{
+		{20, 1, "2024-02-01 00:00:00", "<p>dune body</p>", "Dune", "", "publish", "dune", "book", "closed", 0, "", 0},
+		{21, 1, "2024-02-02 00:00:00", "<p>vol one</p>", "Vol One", "", "publish", "vol-1", "volume", "closed", 0, "", 0},
+		{22, 1, "2024-02-03 00:00:00", "<p>part one</p>", "Part One", "", "publish", "part-one", "volume", "closed", 21, "", 0},
+	}
+	for _, r := range rows {
+		exec(ins, r...)
+	}
+	term := func(termID, ttID int64, name, slug, taxonomy string, parentTermID int64) {
+		exec("INSERT INTO "+prefix+"terms (term_id, name, slug) VALUES (?, ?, ?)", termID, name, slug)
+		exec("INSERT INTO "+prefix+"term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)",
+			ttID, termID, taxonomy, "", parentTermID, 0)
+	}
+	term(501, 601, "Science Fiction", "scifi", "genre", 0)
+	term(503, 603, "Fiction Shelf", "fiction", "shelf", 0)
+	term(504, 604, "Classics Shelf", "classics", "shelf", 503)
+	for _, rel := range [][2]int64{{20, 601}, {20, 604}} {
+		exec("INSERT INTO "+prefix+"term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)", rel[0], rel[1], 0)
+	}
+}
+
+// TestBuildHandlerServesCustomTypes drives buildHandler with a registry and
+// asserts HTML through httptest only (the /wp-json custom-type assertions land
+// in PR 3). The test passes the RAW parsed Structure: buildHandler itself must
+// apply Structure.WithCustomTypes, so dropping that call fails every custom row.
+//
+//	assertion                                       guards
+//	----------------------------------------------  -------------------------------------------
+//	GET /book/dune/            -> 200               deps.Registry -> Server.WithRegistry +
+//	                                                CustomPostService + WithCustomTypes (single)
+//	GET /library/              -> 200               Server.WithRegistry (archive route/resolve);
+//	                                                removing WithRegistry makes this 404
+//	GET /volume/vol-1/part-one/-> 200               WithRegistry + WithCustomTypes (hierarchical)
+//	GET /volume/part-one/      -> 301 canonical     CustomPostService ancestry (wrong-ancestry 301)
+//	GET /genre/scifi/          -> 200               WithRegistry + WithCustomTypes + TermService
+//	GET /shelf/fiction/classics/ -> 200             hierarchy (nested term walk)
+//	GET /movies/alien/         -> 404               unregistered path stays 404
+//	empty registry: /about/team/ 200, /team/ 301,   a site without content: is unchanged
+//	  /about/ 200, /book/dune/ 404, /library/ 404   (Req 1.5): nothing custom registered
+func TestBuildHandlerServesCustomTypes(t *testing.T) {
+	repos, dbCfg := newAssemblySQLite(t)
+	seedAssemblyPages(t, repos, dbCfg.TablePrefix)
+	seedAssemblyCustom(t, repos, dbCfg.TablePrefix)
+
+	cfg := config.Config{
+		Theme:    "default",
+		Database: dbCfg,
+		Session:  config.SessionConfig{CookieName: "grimoire_session", TTLHours: 24},
+		Media:    config.MediaConfig{UploadsDir: t.TempDir()},
+		REST:     config.RESTConfig{PerPageMax: 100},
+	}
+	themesDir := filepath.Join("..", "..", "themes")
+	eng, err := render.Load(themesDir, cfg.Theme)
+	if err != nil {
+		t.Fatalf("render.Load: %v", err)
+	}
+	// RAW structure: no custom routes. buildHandler must add them.
+	st, err := routing.Parse("/%postname%/", "", "")
+	if err != nil {
+		t.Fatalf("routing.Parse: %v", err)
+	}
+	yes := true
+	reg, err := registry.Build(config.ContentConfig{
+		PostTypes: []config.PostTypeConfig{
+			{Name: "book", Public: &yes, Slug: "book", WithFront: &yes,
+				HasArchive: config.HasArchive{Enabled: true, Slug: "library"},
+				Taxonomies: []string{"genre", "shelf"}},
+			{Name: "volume", Public: &yes, Slug: "volume", WithFront: &yes, Hierarchical: true},
+		},
+		Taxonomies: []config.TaxonomyConfig{
+			{Name: "genre", Public: &yes, Slug: "genre", WithFront: &yes, ObjectTypes: []string{"book"}},
+			{Name: "shelf", Public: &yes, Slug: "shelf", WithFront: &yes, Hierarchical: true, ObjectTypes: []string{"book"}},
+		},
+	}, st)
+	if err != nil {
+		t.Fatalf("registry.Build: %v", err)
+	}
+	emptyReg, err := registry.Build(config.ContentConfig{}, st)
+	if err != nil {
+		t.Fatalf("registry.Build (empty): %v", err)
+	}
+
+	build := func(r *registry.Registry) http.Handler {
+		t.Helper()
+		h, _, err := buildHandler(serverDeps{
+			Repos:      repos,
+			Config:     cfg,
+			Log:        slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+			Permalinks: st,
+			Registry:   r,
+			Sessions: &auth.SessionManager{
+				Users:    repos.Users,
+				Meta:     repos.UserMeta,
+				Sessions: repos.Sessions,
+				TTL:      cfg.Session.TTL(),
+				Prefix:   cfg.Database.TablePrefix,
+			},
+			ContentPolicy: sanitize.New(),
+			Engine:        eng,
+			ThemesDir:     themesDir,
+		})
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		return h
+	}
+	getFrom := func(h http.Handler, path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+
+	full := build(reg)
+	for _, path := range []string{
+		"/book/dune/", "/library/", "/volume/vol-1/part-one/",
+		"/genre/scifi/", "/shelf/fiction/", "/shelf/fiction/classics/",
+	} {
+		t.Run("200 "+path, func(t *testing.T) {
+			if rec := getFrom(full, path); rec.Code != http.StatusOK {
+				t.Fatalf("GET %s = %d, want 200", path, rec.Code)
+			}
+		})
+	}
+	t.Run("wrong-ancestry volume 301s to canonical", func(t *testing.T) {
+		rec := getFrom(full, "/volume/part-one/")
+		if rec.Code != http.StatusMovedPermanently {
+			t.Fatalf("GET /volume/part-one/ = %d, want 301", rec.Code)
+		}
+		if loc := rec.Header().Get("Location"); loc != "/volume/vol-1/part-one/" {
+			t.Fatalf("Location = %q, want /volume/vol-1/part-one/", loc)
+		}
+	})
+	t.Run("unregistered path 404", func(t *testing.T) {
+		if rec := getFrom(full, "/movies/alien/"); rec.Code != http.StatusNotFound {
+			t.Fatalf("GET /movies/alien/ = %d, want 404", rec.Code)
+		}
+	})
+	t.Run("page rows still served", func(t *testing.T) {
+		if rec := getFrom(full, "/about/team/"); rec.Code != http.StatusOK {
+			t.Fatalf("GET /about/team/ = %d, want 200", rec.Code)
+		}
+	})
+
+	// A site without a content: section is unchanged (Req 1.5).
+	empty := build(emptyReg)
+	for path, want := range map[string]int{
+		"/about/team/": http.StatusOK,
+		"/about/":      http.StatusOK,
+		"/book/dune/":  http.StatusNotFound,
+		"/library/":    http.StatusNotFound,
+	} {
+		t.Run("empty registry "+path, func(t *testing.T) {
+			if rec := getFrom(empty, path); rec.Code != want {
+				t.Fatalf("GET %s = %d, want %d", path, rec.Code, want)
+			}
+		})
+	}
+	t.Run("empty registry flat leaf 301", func(t *testing.T) {
+		rec := getFrom(empty, "/team/")
+		if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/about/team/" {
+			t.Fatalf("GET /team/ = %d Location %q, want 301 /about/team/", rec.Code, rec.Header().Get("Location"))
 		}
 	})
 }

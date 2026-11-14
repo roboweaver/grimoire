@@ -25,6 +25,7 @@ type Config struct {
 	Media     MediaConfig     `yaml:"media"`
 	REST      RESTConfig      `yaml:"rest"`
 	Scheduler SchedulerConfig `yaml:"scheduler"`
+	Content   ContentConfig   `yaml:"content"`
 }
 
 type MediaConfig struct {
@@ -214,6 +215,7 @@ func (c *Config) applyDefaults() {
 	if c.Scheduler.IntervalSeconds <= 0 {
 		c.Scheduler.IntervalSeconds = 60
 	}
+	c.Content.applyDefaults()
 }
 
 // Validate ensures required fields are present and the vendor is supported.

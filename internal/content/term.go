@@ -152,3 +152,76 @@ func (s *TermService) TagArchive(ctx context.Context, slug string, page, perPage
 		Page:    newPage(clampedPage, limit, total),
 	}, nil
 }
+
+// TaxonomyArchive resolves a term of any registered taxonomy and returns its
+// page of published objects of the taxonomy's attached types.
+//
+// It is the registry-driven sibling of CategoryArchive and TagArchive. It takes
+// primitives (hierarchical, objectTypes) rather than a registry type so this
+// package does not import the registry. A hierarchical taxonomy walks segments
+// through the term graph exactly as CategoryArchive does, returning
+// *CategoryMovedError for a wrong ancestry and domain.ErrNotFound for an
+// unknown path; the listing covers the term and all its descendants. A flat
+// taxonomy accepts exactly one segment, resolved by TermRepository.BySlug like
+// TagArchive, with nil Ancestry.
+//
+// objectTypes is forwarded as ArchiveFilter.Types. An empty set short-circuits
+// to an empty archive with no post query: archiveWhere treats empty Types as
+// {post}, which would leak posts into a custom-type taxonomy archive.
+func (s *TermService) TaxonomyArchive(ctx context.Context, taxonomy string, hierarchical bool, objectTypes []string, segments []string, page, perPage int) (Archive, error) {
+	var (
+		term     domain.Term
+		ancestry []string
+		termIDs  []int64
+	)
+	if hierarchical {
+		h, err := LoadTermHierarchy(ctx, s.hier, taxonomy)
+		if err != nil {
+			return Archive{}, err
+		}
+		t, ok := h.ResolvePath(segments)
+		if !ok {
+			return Archive{}, h.recoverPath(segments)
+		}
+		term, ancestry, termIDs = t, h.Ancestry(t.ID), h.DescendantIDs(t.ID)
+	} else {
+		if len(segments) != 1 {
+			return Archive{}, domain.ErrNotFound
+		}
+		t, err := s.terms.BySlug(ctx, taxonomy, segments[0])
+		if err != nil {
+			return Archive{}, err
+		}
+		term, termIDs = t, []int64{t.ID}
+	}
+
+	limit, offset, clampedPage := clamp(page, perPage)
+	if len(objectTypes) == 0 {
+		return Archive{
+			Heading:  term.Name,
+			Term:     term,
+			Ancestry: ancestry,
+			Page:     newPage(clampedPage, limit, 0),
+		}, nil
+	}
+	filter := domain.ArchiveFilter{
+		Taxonomy: taxonomy,
+		TermIDs:  termIDs,
+		Types:    objectTypes,
+	}
+	posts, err := s.posts.PublishedArchive(ctx, filter, limit, offset)
+	if err != nil {
+		return Archive{}, err
+	}
+	total, err := s.posts.CountPublishedArchive(ctx, filter)
+	if err != nil {
+		return Archive{}, err
+	}
+	return Archive{
+		Heading:  term.Name,
+		Term:     term,
+		Ancestry: ancestry,
+		Posts:    posts,
+		Page:     newPage(clampedPage, limit, total),
+	}, nil
+}

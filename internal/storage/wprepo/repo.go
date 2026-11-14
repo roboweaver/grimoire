@@ -366,6 +366,25 @@ func (r *PostRepo) ListPages(ctx context.Context, afterID int64, limit int) ([]d
 	return toDomainPageNodes(rows), nil
 }
 
+// ListPostNodes is ListPages parameterized by post type: rows of postType
+// across ALL statuses, keyset-paginated by ID ascending (M12 Req 2.5).
+func (r *PostRepo) ListPostNodes(ctx context.Context, postType string, afterID int64, limit int) ([]domain.PostNode, error) {
+	var rows []pageNodeRow
+	err := r.db.NewSelect().
+		TableExpr("?", bun.Ident(r.prefix+"posts")).
+		Column("ID", "post_name", "post_parent", "post_status").
+		Where("post_type = ?", postType).
+		Where("? > ?", bun.Ident("ID"), afterID).
+		// NO post_status filter: every status is in scope (Req 2.5).
+		OrderExpr("? ASC", bun.Ident("ID")).
+		Limit(limit).
+		Scan(ctx, &rows)
+	if err != nil {
+		return nil, err
+	}
+	return toDomainPageNodes(rows), nil
+}
+
 // UpdateContentFields writes ONLY post_content/post_excerpt by ID; it does NOT
 // bump post_modified/post_modified_gmt or touch any other column (Req 4.2-4.4).
 func (r *PostRepo) UpdateContentFields(ctx context.Context, id int64, content, excerpt string) error {

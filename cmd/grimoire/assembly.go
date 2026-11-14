@@ -10,6 +10,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/routing"
 	"github.com/roboweaver/grimoire/internal/sanitize"
@@ -29,6 +30,9 @@ type serverDeps struct {
 	ContentPolicy *sanitize.Policy
 	Engine        *render.Engine
 	ThemesDir     string
+	// Registry is the custom post type/taxonomy registry (M12). A nil Registry
+	// behaves as no content: section: no custom routes are registered.
+	Registry *registry.Registry
 }
 
 // buildHandler constructs every content service, the REST mapper and the web
@@ -38,7 +42,11 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	repos := deps.Repos
 	cfg := deps.Config
 	log := deps.Log
-	permalinks := deps.Permalinks
+	// One Structure, derived once from the raw parsed permalinks plus the
+	// registry's public routes, feeds both the web Server and the REST mapper so
+	// the served URL and any advertised link cannot drift. Routes is nil-safe.
+	customTypes, customTaxes := deps.Registry.Routes()
+	permalinks := deps.Permalinks.WithCustomTypes(customTypes, customTaxes)
 	sm := deps.Sessions
 	contentPolicy := deps.ContentPolicy
 	eng := deps.Engine
@@ -124,13 +132,14 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	// is where they get supplied.
 	posts := content.NewPostService(repos.Posts).WithCounter(repos.PostCounter).WithAuthors(repos.Users)
 	terms := content.NewTermService(repos.Terms, repos.Posts).WithHierarchy(repos.TermReader)
+	customPosts := content.NewCustomPostService(repos.PostNodeReader, repos.Posts)
 	handler := web.NewServer(
 		posts,
 		terms,
 		options,
 		eng,
 		log,
-	).WithPermalinks(permalinks).WithPages(pageSvc).WithThemeStatic(deps.ThemesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithMediaWrites(mediaWrite).WithUserWrites(userWrite).WithNavMenuWrites(navMenuWrite).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
+	).WithPermalinks(permalinks).WithPages(pageSvc).WithRegistry(deps.Registry, customPosts).WithThemeStatic(deps.ThemesDir, cfg.Theme).WithContentFeatures(comments, media, menus).WithMediaWrites(mediaWrite).WithUserWrites(userWrite).WithNavMenuWrites(navMenuWrite).WithContentPolicy(contentPolicy).WithFeaturedImages(featured).WithAuth(sm, web.AuthConfig{
 		CookieName: cfg.Session.CookieName,
 		Secure:     cfg.Session.CookieSecure,
 		MaxAge:     cfg.Session.TTLHours * 3600,

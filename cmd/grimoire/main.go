@@ -11,12 +11,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/content"
+	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/sanitize"
 	"github.com/roboweaver/grimoire/internal/scheduler"
@@ -92,7 +94,37 @@ func main() {
 	options := content.NewOptionService(repos.Options)
 	permalinks := resolvePermalinks(context.Background(), options, log)
 
+	// The registry is built here, not in config.Load: validation needs the
+	// resolved category/tag bases and front, which only the Structure carries.
+	reg, err := registry.Build(cfg.Content, permalinks)
+	if err != nil {
+		log.Error("invalid content configuration")
+		for _, line := range strings.Split(err.Error(), "\n") {
+			log.Error("invalid content configuration", "violation", line)
+		}
+		os.Exit(1)
+	}
+	for _, note := range reg.Notes() {
+		log.Warn("content registry diagnostic", "note", note)
+	}
+	// Diagnostics only: buildHandler applies the routes to the Structure it
+	// serves with, so this copy is never passed on (that would double-apply).
+	for _, note := range permalinks.WithCustomTypes(reg.Routes()).CustomNotes() {
+		log.Warn("custom route diagnostic", "note", note)
+	}
+	for _, pt := range reg.PostTypes() {
+		n, cerr := repos.PostCounter.CountByStatus(context.Background(), pt.Name, "publish")
+		if cerr != nil {
+			log.Warn("count published rows for declared post type", "type", pt.Name, "err", cerr)
+			continue
+		}
+		if n == 0 {
+			log.Info("declared post type has no published rows", "type", pt.Name)
+		}
+	}
+
 	handler, postWrite, err := buildHandler(serverDeps{
+		Registry:      reg,
 		Repos:         repos,
 		Config:        cfg,
 		Log:           log,

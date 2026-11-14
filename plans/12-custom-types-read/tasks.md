@@ -538,7 +538,7 @@
 
 > Ships in PR 2.
 
-- [~] 8.1 Write the failing server-wiring tests (8a). Add
+- [x] 8.1 Write the failing server-wiring tests (8a). Add
       `internal/web/router_custom_test.go` asserting: `Server.WithRegistry(reg,
       customPosts)` returns the Server for chaining; `contentPatterns` appends
       `st.CustomPatterns()` after `ArchivePatterns()` and before `"/{slug}"`
@@ -556,7 +556,7 @@
       Verify: `go test ./internal/web -run RouterCustom` — fails to compile
       (`WithRegistry` undefined). _(Req 7.5, 7.6, 7.7; D6)_
 
-- [~] 8.2 Implement the server wiring. In `internal/web/router.go` add the `registry
+- [x] 8.2 Implement the server wiring. In `internal/web/router.go` add the `registry
       *registry.Registry` and `customPosts *content.CustomPostService` fields (beside
       the existing optional services, `router.go:165`), `WithRegistry`, a
       `requireCustomDeps(st)` guard invoked from `Routes()` next to `requireArchiveDeps`
@@ -568,7 +568,7 @@
       (existing suites unchanged); `go build ./...`; `go vet ./...`. _(Req 7.5, 7.6,
       7.7; D6)_
 
-- [~] 8.3 Write the failing handler tests (8b). Add `internal/web/handlers_custom_test.go`
+- [x] 8.3 Write the failing handler tests (8b). Add `internal/web/handlers_custom_test.go`
       driving a Server wired with a registry over fakes/SQLite for `customPost`,
       `customArchive`, `customTermArchive`: 200 at the canonical; 301 from every
       non-canonical form (missing/extra trailing slash, wrong ancestry, flat leaf of a
@@ -587,7 +587,7 @@
       absent: the new Kinds hit the default `resolve` branch). _(Req 4.1, 4.2, 4.3, 4.4,
       4.7, 4.8, 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5, 14.4; D5, D6)_
 
-- [~] 8.4 Implement the resolve arms and three handlers. In `internal/web/handlers.go`
+- [x] 8.4 Implement the resolve arms and three handlers. In `internal/web/handlers.go`
       add to `resolve` (`handlers.go:65`) the `KindCustomPost`, `KindCustomArchive`,
       `KindCustomTerm` arms, each with the defensive `s.registry.Empty()` → `ErrNotFound`
       guard, and add `customPost` (mirrors `single()`/`page()`: resolve, canonical from
@@ -608,7 +608,7 @@
 
 > Ships in PR 2.
 
-- [~] 9.1 Extend the failing assembly test (HTML behavior only). In
+- [x] 9.1 Extend the failing assembly test (HTML behavior only). In
       `cmd/grimoire/assembly_test.go` seed a `book` post type (`slug: books`,
       `has_archive: true`, `taxonomies: [shelf]`) with row `dune`, a hierarchical
       `volume` (`slug: volumes`) with `vol-1` and child `part-one`, and a `shelf`
@@ -634,7 +634,7 @@
       (`serverDeps.Registry` undefined). _(Req 1.5, 13.3; D10)_
 
 
-- [~] 9.2 Wire the registry inside `buildHandler`. In `cmd/grimoire/assembly.go` add
+- [x] 9.2 Wire the registry inside `buildHandler`. In `cmd/grimoire/assembly.go` add
       `Registry *registry.Registry` to `serverDeps` (nil-safe; empty when no `content:`
       section). Inside `buildHandler`, before any consumer is built: `types, taxes :=
       deps.Registry.Routes()`, `permalinks := deps.Permalinks.WithCustomTypes(types,
@@ -650,7 +650,7 @@
       `go build ./...`; `go vet ./...`. _(Req 1.5, 7.5, 7.6, 13.1, 13.3; D4, D10)_
 
 
-- [~] 9.3 Build the registry in `main()`. In `cmd/grimoire/main.go`, immediately after
+- [x] 9.3 Build the registry in `main()`. In `cmd/grimoire/main.go`, immediately after
       `resolvePermalinks` (`main.go:104`) and before `buildHandler`, call
       `registry.Build(cfg.Content, permalinks)`; on error log `"invalid content
       configuration"` and `os.Exit(1)`; log each `reg.Notes()` at WARN; pass the result

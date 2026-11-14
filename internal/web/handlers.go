@@ -86,6 +86,21 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request) error {
 			return domain.ErrNotFound
 		}
 		return s.page(w, r, t)
+	case routing.KindCustomPost:
+		if s.registry == nil || s.customPosts == nil {
+			return domain.ErrNotFound
+		}
+		return s.customPost(w, r, t)
+	case routing.KindCustomArchive:
+		if s.registry == nil || s.customPosts == nil {
+			return domain.ErrNotFound
+		}
+		return s.customArchive(w, r, t)
+	case routing.KindCustomTerm:
+		if s.registry == nil || s.customPosts == nil {
+			return domain.ErrNotFound
+		}
+		return s.customTermArchive(w, r, t)
 	default:
 		// KindNone: the path carries neither a post nor an archive
 		// interpretation. Classify is total, so this is an answer rather than a
@@ -159,6 +174,77 @@ func (s *Server) single(w http.ResponseWriter, r *http.Request, t routing.Target
 	}
 
 	return s.renderSingle(w, r, post)
+}
+
+// customPost resolves and renders one custom post type item (M12). The
+// canonical path is built from the resolved ancestry; a hierarchical type's
+// wrong-ancestry request arrives as *content.PageMovedError and 301s to it.
+func (s *Server) customPost(w http.ResponseWriter, r *http.Request, t routing.Target) error {
+	pt, ok := s.registry.PostType(t.TypeName)
+	if !ok {
+		return domain.ErrNotFound
+	}
+	post, ancestry, err := s.customPosts.Resolve(r.Context(), t.TypeName, pt.Hierarchical, t.Segments)
+	var moved *content.PageMovedError
+	if errors.As(err, &moved) {
+		return s.redirectCustom(w, r, s.permalinks.CustomPostPath(t.TypeName, moved.Ancestry))
+	}
+	if err != nil {
+		return err
+	}
+	canonical := s.permalinks.CustomPostPath(t.TypeName, ancestry)
+	if canonical == "" {
+		return domain.ErrNotFound
+	}
+	if r.URL.Path != canonical {
+		return s.redirectCanonical(w, r, canonical)
+	}
+	return s.renderSingle(w, r, post)
+}
+
+// customArchive renders a custom post type's archive (M12).
+func (s *Server) customArchive(w http.ResponseWriter, r *http.Request, t routing.Target) error {
+	pt, ok := s.registry.PostType(t.TypeName)
+	if !ok {
+		return domain.ErrNotFound
+	}
+	archive, err := s.customPosts.Archive(r.Context(), t.TypeName, pageParam(r), content.DefaultPerPage)
+	if err != nil {
+		return err
+	}
+	archive.Heading = pt.Heading()
+	return s.renderArchive(w, r, "archive", s.permalinks.CustomArchivePath(t.TypeName), archive)
+}
+
+// customTermArchive renders a custom taxonomy term archive (M12), listing the
+// items of the taxonomy's object types.
+func (s *Server) customTermArchive(w http.ResponseWriter, r *http.Request, t routing.Target) error {
+	tax, ok := s.registry.Taxonomy(t.TypeName)
+	if !ok {
+		return domain.ErrNotFound
+	}
+	archive, err := s.terms.TaxonomyArchive(r.Context(), tax.Name, tax.Hierarchical, tax.ObjectTypes, t.Segments, pageParam(r), content.DefaultPerPage)
+	var moved *content.CategoryMovedError
+	if errors.As(err, &moved) {
+		return s.redirectCustom(w, r, s.permalinks.CustomTermPath(tax.Name, moved.Ancestry))
+	}
+	if err != nil {
+		return err
+	}
+	ancestry := archive.Ancestry
+	if ancestry == nil {
+		ancestry = []string{archive.Term.Slug}
+	}
+	return s.renderArchive(w, r, "archive", s.permalinks.CustomTermPath(tax.Name, ancestry), archive)
+}
+
+// redirectCustom 301s to canonical, treating an empty target as a 404 so a
+// redirect to "" is never emitted.
+func (s *Server) redirectCustom(w http.ResponseWriter, r *http.Request, canonical string) error {
+	if canonical == "" {
+		return domain.ErrNotFound
+	}
+	return s.redirectCanonical(w, r, canonical)
 }
 
 // redirectCanonical permanently redirects to canonical, carrying the request's

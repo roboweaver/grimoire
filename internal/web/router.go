@@ -10,6 +10,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/routing"
 	"github.com/roboweaver/grimoire/internal/sanitize"
@@ -118,6 +119,14 @@ type Server struct {
 	// panic is needed: a server that cannot serve nested pages simply does not
 	// advertise the route (Req 9.1, 9.5).
 	pages *content.PageService
+
+	// registry and customPosts back the M12 custom post type / taxonomy read
+	// surface. Both nil until WithRegistry. The custom routes themselves come
+	// from the permalink Structure (WithCustomTypes); requireCustomDeps panics
+	// at Routes() when the Structure carries custom patterns but these are
+	// not wired.
+	registry    *registry.Registry
+	customPosts *content.CustomPostService
 }
 
 // NewServer builds a Server. log may be nil, in which case slog.Default is used.
@@ -164,6 +173,16 @@ func (s *Server) WithPermalinks(st routing.Structure) *Server {
 // suite) builds a Server without it.
 func (s *Server) WithPages(p *content.PageService) *Server {
 	s.pages = p
+	return s
+}
+
+// WithRegistry wires the custom post type/taxonomy registry and the
+// CustomPostService that serves custom items and archives (M12). It returns the
+// same Server for chaining. Servers that never call it, on a Structure with no
+// custom entries, are unchanged (register-only-when-wired, like WithPages).
+func (s *Server) WithRegistry(reg *registry.Registry, posts *content.CustomPostService) *Server {
+	s.registry = reg
+	s.customPosts = posts
 	return s
 }
 
@@ -303,6 +322,9 @@ func (s *Server) Routes() http.Handler {
 	// records a move is POST /comment/ -- never a registered route -- which
 	// answers 405 instead of 404 under a structure whose date archives root a
 	// GET-only /{year}/ at the same node; slashFormCases spells that out.
+	// requireCustomDeps runs first so its custom-taxonomy message is reachable
+	// before requireArchiveDeps reports the same missing hierarchy generically.
+	s.requireCustomDeps(s.permalinks)
 	s.requireArchiveDeps(s.permalinks)
 	for _, pattern := range contentPatterns(s.permalinks) {
 		r.Method(http.MethodGet, pattern, s.handler(s.resolve))
@@ -381,6 +403,26 @@ func (s *Server) requireArchiveDeps(st routing.Structure) {
 	}
 }
 
+// requireCustomDeps panics when the Structure carries custom post type or
+// taxonomy patterns this Server cannot serve (M12, Req 7.6). It does nothing
+// when the Structure has no custom patterns, so Servers without a registry are
+// unaffected.
+func (s *Server) requireCustomDeps(st routing.Structure) {
+	if len(st.CustomPatterns()) == 0 {
+		return
+	}
+	if s.registry.Empty() || s.customPosts == nil {
+		panic("web: Routes registers custom post type routes but the Server has no registry or CustomPostService: " +
+			"call Server.WithRegistry(reg, content.NewCustomPostService(...)), " +
+			"or every custom request will 500")
+	}
+	if s.terms == nil || !s.terms.HasHierarchy() {
+		panic("web: Routes registers a custom taxonomy archive but the TermService has no taxonomy reader: " +
+			"call content.NewTermService(...).WithHierarchy(repos.TermReader), " +
+			"or every custom taxonomy request will 500")
+	}
+}
+
 // contentPatterns is every chi pattern the dispatcher owns, in registration
 // order: the structure's permalink patterns, its archive patterns, and the flat
 // /{slug} fallback.
@@ -402,5 +444,6 @@ func (s *Server) requireArchiveDeps(st routing.Structure) {
 func contentPatterns(st routing.Structure) []string {
 	pats := st.ChiPatterns()
 	pats = append(pats, st.ArchivePatterns()...)
+	pats = append(pats, st.CustomPatterns()...)
 	return append(pats, "/{slug}")
 }

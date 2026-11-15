@@ -12,6 +12,8 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/config"
+	"github.com/roboweaver/grimoire/internal/content"
+	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/routing"
@@ -521,4 +523,169 @@ type testWriter struct{ t *testing.T }
 func (w testWriter) Write(p []byte) (int, error) {
 	w.t.Log(strings.TrimRight(string(p), "\n"))
 	return len(p), nil
+}
+
+// assemblyHandler builds the production handler over repos with the default
+// theme and "/%postname%/" permalinks. reg may be nil (no custom types).
+func assemblyHandler(t *testing.T, repos *storage.Repositories, dbCfg config.DatabaseConfig, reg *registry.Registry) (http.Handler, *auth.SessionManager) {
+	t.Helper()
+	cfg := config.Config{
+		Theme:    "default",
+		Database: dbCfg,
+		Session:  config.SessionConfig{CookieName: "grimoire_session", TTLHours: 24},
+		Media:    config.MediaConfig{UploadsDir: t.TempDir()},
+		REST:     config.RESTConfig{PerPageMax: 100},
+	}
+	themesDir := filepath.Join("..", "..", "themes")
+	eng, err := render.Load(themesDir, cfg.Theme)
+	if err != nil {
+		t.Fatalf("render.Load: %v", err)
+	}
+	st, err := routing.Parse("/%postname%/", "", "")
+	if err != nil {
+		t.Fatalf("routing.Parse: %v", err)
+	}
+	sm := &auth.SessionManager{
+		Users:    repos.Users,
+		Meta:     repos.UserMeta,
+		Sessions: repos.Sessions,
+		TTL:      cfg.Session.TTL(),
+		Prefix:   cfg.Database.TablePrefix,
+	}
+	h, _, err := buildHandler(serverDeps{
+		Repos:         repos,
+		Config:        cfg,
+		Log:           slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		Permalinks:    st,
+		Registry:      reg,
+		Sessions:      sm,
+		ContentPolicy: sanitize.New(),
+		Engine:        eng,
+		ThemesDir:     themesDir,
+	})
+	if err != nil {
+		t.Fatalf("buildHandler: %v", err)
+	}
+	return h, sm
+}
+
+// TestBuildHandlerResolvesSameSlugPages guards PageService.Resolve (PR #79)
+// through the production assembly: same-slug pages under different parents each
+// serve their own body, a published post with the same slug is not confused
+// with either, and a draft nested page's flat URL is a bare 404 (no redirect
+// that would disclose the unpublished page's canonical path).
+func TestBuildHandlerResolvesSameSlugPages(t *testing.T) {
+	repos, dbCfg := newAssemblySQLite(t)
+	seedAssemblyPages(t, repos, dbCfg.TablePrefix)
+	const ins = `INSERT INTO wp_posts ` +
+		`(ID, post_author, post_date, post_content, post_title, post_excerpt, post_status, post_name, post_type, comment_status, post_parent, post_mime_type, menu_order) ` +
+		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	rows := [][]any{
+		{30, 1, "2024-03-01 00:00:00", "<p>parent a</p>", "A", "", "publish", "a", "page", "closed", 0, "", 0},
+		{31, 1, "2024-03-02 00:00:00", "<p>BODY-A-X</p>", "X under A", "", "publish", "x", "page", "closed", 30, "", 0},
+		{32, 1, "2024-03-03 00:00:00", "<p>parent b</p>", "B", "", "publish", "b", "page", "closed", 0, "", 0},
+		{33, 1, "2024-03-04 00:00:00", "<p>BODY-B-X</p>", "X under B", "", "publish", "x", "page", "closed", 32, "", 0},
+		{34, 1, "2024-03-05 00:00:00", "<p>BODY-POST-X</p>", "X post", "", "publish", "x", "post", "closed", 0, "", 0},
+		{35, 1, "2024-03-06 00:00:00", "<p>BODY-DRAFT</p>", "Hidden", "", "draft", "hidden", "page", "closed", 30, "", 0},
+	}
+	for _, r := range rows {
+		if _, err := repos.DB().ExecContext(context.Background(), ins, r...); err != nil {
+			t.Fatalf("seed row %v: %v", r[7], err)
+		}
+	}
+	handler, _ := assemblyHandler(t, repos, dbCfg, nil)
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+	for _, tc := range []struct{ path, want, other string }{
+		{"/a/x/", "BODY-A-X", "BODY-B-X"},
+		{"/b/x/", "BODY-B-X", "BODY-A-X"},
+	} {
+		rec := get(tc.path)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d, want 200", tc.path, rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, tc.want) || strings.Contains(body, tc.other) || strings.Contains(body, "BODY-POST-X") {
+			t.Errorf("GET %s served the wrong body", tc.path)
+		}
+	}
+	t.Run("published post with the same slug serves its own body", func(t *testing.T) {
+		rec := get("/x/")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /x/ = %d, want 200", rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "BODY-POST-X") || strings.Contains(body, "BODY-A-X") || strings.Contains(body, "BODY-B-X") {
+			t.Errorf("GET /x/ did not serve the post body")
+		}
+	})
+	t.Run("draft nested page flat URL is 404 without Location", func(t *testing.T) {
+		rec := get("/hidden/")
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("GET /hidden/ = %d, want 404", rec.Code)
+		}
+		if loc := rec.Header().Get("Location"); loc != "" {
+			t.Errorf("Location = %q, want empty", loc)
+		}
+	})
+}
+
+// TestBuildHandlerAdminPostsTypeValidation guards the M12 admin list `type`
+// validation as wired by buildHandler: an unregistered type is 400
+// invalid_type, a registered type is 200. The request is authenticated with a
+// real session for a bootstrapped administrator.
+func TestBuildHandlerAdminPostsTypeValidation(t *testing.T) {
+	repos, dbCfg := newAssemblySQLite(t)
+	ctx := context.Background()
+	const pass = "correct-horse-battery-staple"
+	users := content.NewUserService(repos.Users, repos.UserMeta, dbCfg.TablePrefix)
+	if _, err := users.Bootstrap(ctx, domain.User{
+		Login: "root", Nicename: "root", DisplayName: "Root", Email: "root@example.test",
+	}, pass, auth.RoleAdministrator); err != nil {
+		t.Fatalf("bootstrap admin: %v", err)
+	}
+	st, err := routing.Parse("/%postname%/", "", "")
+	if err != nil {
+		t.Fatalf("routing.Parse: %v", err)
+	}
+	yes := true
+	reg, err := registry.Build(config.ContentConfig{
+		PostTypes: []config.PostTypeConfig{{Name: "book", Public: &yes, Slug: "book", WithFront: &yes}},
+	}, st)
+	if err != nil {
+		t.Fatalf("registry.Build: %v", err)
+	}
+	handler, sm := assemblyHandler(t, repos, dbCfg, reg)
+	token, _, err := sm.Login(ctx, "root", pass)
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	get := func(query string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/admin/api/posts"+query, nil)
+		req.AddCookie(&http.Cookie{Name: "grimoire_session", Value: token})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := get("?type=shop_order")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("type=shop_order = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v: %s", err, rec.Body.String())
+	}
+	if body.Error.Code != "invalid_type" {
+		t.Errorf("error.code = %q, want invalid_type", body.Error.Code)
+	}
+	if rec := get("?type=book"); rec.Code != http.StatusOK {
+		t.Fatalf("type=book = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
 }

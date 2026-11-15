@@ -28,7 +28,9 @@
 > are now part of this roadmap so it is the single source of truth again.
 > **M11 (REST delete parity) is complete** — shipped via its own dedicated spec
 > [`../11-rest-delete-parity`](../11-rest-delete-parity) (PR #64), its box below
-> ticked with a shipped-via note. **M12–M16 are open roadmap-level task groups,
+> ticked with a shipped-via note. **M12's read half (12.A/12.B) is shipped** via
+> [`../12-custom-types-read`](../12-custom-types-read) (PRs #75/#76/#77); 12.C
+> (write parity) remains open. **M13–M16 are open or shipped roadmap-level task groups,
 > each requiring its own dedicated spec** (`requirements.md`/`design.md`/
 > `tasks.md`) before implementation begins — the same posture M8/M9/M10 carried
 > here before each was refined into its own spec; this file does not authorize
@@ -940,7 +942,8 @@ register custom post types and taxonomies. Each group below requires M12's own
 dedicated spec before implementation; M12 deliberately expands the
 compatibility boundary (see `requirements.md`'s Compatibility boundary note).
 
-- [ ] **12.A — Custom post type / taxonomy read + routing.** Replace the
+- [x] **12.A — Custom post type / taxonomy read + routing.** ✅ shipped
+      (`../12-custom-types-read`, PRs #75/#76/#77). Replace the
       hard-coded `post_type IN ('post','page')` admin filter
       (`internal/storage/wprepo/adminreads.go:118`) and the
       `post_type = 'post'` public filter (`internal/storage/wprepo/repo.go:93`),
@@ -951,7 +954,8 @@ compatibility boundary (see `requirements.md`'s Compatibility boundary note).
       types' archive and single routes, and taxonomies' term archives, through
       the existing M8/M9 permalink-structure, nested-hierarchy
       (`term_taxonomy.parent`/`domain.Term.ParentID`), and pagination machinery.
-- [ ] **12.B — Custom post type / taxonomy REST read.** Serve registered custom
+- [x] **12.B — Custom post type / taxonomy REST read.** ✅ shipped
+      (`../12-custom-types-read`, PRs #75/#76/#77). Serve registered custom
       post types and taxonomies under `/wp-json/wp/v2/{rest_base}` in the same
       envelope shapes used for posts, pages, media, categories, and tags, gated
       on each registry entry's capability model (defaulting to the post/page set).

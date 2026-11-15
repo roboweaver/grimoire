@@ -65,7 +65,10 @@ milestone-index row for this spec supersedes that forward reference.
   `plans/11-rest-delete-parity` spec (`requirements.md`/`design.md`/`tasks.md`,
   merged via PR #64); Requirements 20–22 below record its delivered behavior at
   roadmap depth and defer to that spec for the implementation-ready detail.
-- **M12–M16 are specified at roadmap depth**: each requirement below is still
+- **M12's read half is specified and shipped** in its own
+  `plans/12-custom-types-read` spec (PRs #75/#76/#77); Requirements 23–25 record
+  its delivered read behavior at roadmap depth. Write parity (12.C) remains open.
+- **M13–M16 are specified at roadmap depth**: each requirement below is still
   testable and EARS-worded, but neither milestone's task list is bite-sized.
   Each explicitly requires its own follow-up spec
   (new `requirements.md`/`design.md`/`tasks.md`) before implementation begins —
@@ -749,12 +752,16 @@ WordPress user-management tooling can remove users unchanged.
 > Roadmap-depth requirements. Each is testable, but implementation does not
 > start from this document alone — see "Specification depth" above.
 
-### Requirement 23: Custom Post Type Read, Routing, and REST
+### Requirement 23: Custom Post Type Read, Routing, and REST  ✅ read shipped (M12, PRs #75/#76/#77)
 
 **User Story:** As a site owner whose WordPress database contains custom post
 types (rows with a `post_type` beyond `post`/`page`), I want grimoire to serve
 them the way it serves posts and pages, so that a real-site import does not lose
 its custom content.
+
+> **✅ Read portions shipped (M12, PRs #75/#76/#77 — `plans/12-custom-types-read`).**
+> Requirements 23–25 read, routing, and REST-read behavior is delivered; the
+> write-parity half (12.C) is a separate later spec and remains open.
 
 #### Acceptance Criteria
 
@@ -774,7 +781,7 @@ its custom content.
    model derived from that type's registry entry, defaulting to the
    post/page capability set when the registry does not specify otherwise.
 
-### Requirement 24: Custom Taxonomy Read, Routing, and REST
+### Requirement 24: Custom Taxonomy Read, Routing, and REST  ✅ read shipped (M12, PRs #75/#76/#77)
 
 **User Story:** As a site owner whose WordPress database contains custom
 taxonomies (terms in a taxonomy beyond `category`/`post_tag`), I want grimoire
@@ -797,7 +804,7 @@ term archives and term-scoped navigation keep working.
    `domain.Term` parent reference exactly as M9b does for categories, so nested
    custom-taxonomy terms resolve the same way.
 
-### Requirement 25: M12 Exclusions and Test Coverage
+### Requirement 25: M12 Exclusions and Test Coverage  ✅ read portions shipped (M12, PRs #75/#76/#77)
 
 #### Acceptance Criteria
 

@@ -93,6 +93,7 @@ func (s *Server) registerREST(r chi.Router) {
 			s.registerRESTAppPasswords(nr)
 			s.registerRESTComments(nr)
 			s.registerRESTTerms(nr)
+			s.registerRESTCustomPosts(nr)
 		})
 	})
 }

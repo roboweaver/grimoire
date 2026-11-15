@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 )
@@ -73,6 +74,11 @@ func (s *Server) handleRESTPostsCollection(typ string) http.HandlerFunc {
 			OrderBy:  orderBy,
 			Order:    order,
 		}
+		hier, err := s.restHierarchy(r, typ)
+		if err != nil {
+			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not list "+typ+"s.")
+			return
+		}
 		posts, err := s.restPosts.ListForAdmin(r.Context(), f)
 		if err != nil {
 			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not list "+typ+"s.")
@@ -86,7 +92,7 @@ func (s *Server) handleRESTPostsCollection(typ string) http.HandlerFunc {
 
 		items := make([]any, 0, len(posts))
 		for _, p := range posts {
-			item, links, embedded, err := s.mapRESTPost(r, typ, p)
+			item, links, embedded, err := s.mapRESTPost(r, typ, p, hier)
 			if err != nil {
 				writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+" #"+strconv.FormatInt(p.ID, 10)+".")
 				return
@@ -110,6 +116,11 @@ func (s *Server) handleRESTPostsCollection(typ string) http.HandlerFunc {
 // port instead, returning a 0-or-1-item collection exactly like WordPress's
 // own slug-filtered collection response.
 func (s *Server) writeRESTPostsBySlug(w http.ResponseWriter, r *http.Request, typ, slug string) {
+	hier, err := s.restHierarchy(r, typ)
+	if err != nil {
+		writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not look up "+typ+" by slug.")
+		return
+	}
 	p, err := s.restBySlug.BySlug(r.Context(), slug, typ)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -120,7 +131,7 @@ func (s *Server) writeRESTPostsBySlug(w http.ResponseWriter, r *http.Request, ty
 		writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not look up "+typ+" by slug.")
 		return
 	}
-	item, links, embedded, err := s.mapRESTPost(r, typ, p)
+	item, links, embedded, err := s.mapRESTPost(r, typ, p, hier)
 	if err != nil {
 		writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
 		return
@@ -161,11 +172,16 @@ func (s *Server) handleRESTPostSingle(typ string) http.HandlerFunc {
 			writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
 			return
 		}
-		if p.Status != "publish" && !s.canEditPosts(r) {
+		if p.Status != "publish" && !s.canReadUnpublished(r, typ) {
 			writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
 			return
 		}
-		item, links, embedded, err := s.mapRESTPost(r, typ, p)
+		hier, err := s.restHierarchy(r, typ)
+		if err != nil {
+			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
+			return
+		}
+		item, links, embedded, err := s.mapRESTPost(r, typ, p, hier)
 		if err != nil {
 			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
 			return
@@ -184,6 +200,43 @@ func (s *Server) handleRESTPostSingle(typ string) http.HandlerFunc {
 func (s *Server) canEditPosts(r *http.Request) bool {
 	p, ok := PrincipalFrom(r.Context())
 	return ok && p.Can("edit_posts")
+}
+
+// canReadUnpublished reports whether the caller may read non-published items
+// of typ: edit_ plus the type's capability suffix for a registered custom
+// type, edit_posts otherwise.
+func (s *Server) canReadUnpublished(r *http.Request, typ string) bool {
+	if pt, ok := s.registry.PostType(typ); ok && typ != "post" && typ != "page" {
+		p, has := PrincipalFrom(r.Context())
+		return has && p.Can("edit_"+auth.CapabilitySuffix(pt.CapabilityType))
+	}
+	return s.canEditPosts(r)
+}
+
+// restPostRoute returns the REST collection route segment for a post type:
+// "/posts", "/pages", or "/"+rest_base for a registered custom type.
+func (s *Server) restPostRoute(typ string) string {
+	switch typ {
+	case "post", "page":
+		return "/" + typ + "s"
+	}
+	if pt, ok := s.registry.PostType(typ); ok && pt.RESTBase != "" {
+		return "/" + pt.RESTBase
+	}
+	return "/" + typ + "s"
+}
+
+// restHierarchy loads the node graph once for a hierarchical registered
+// custom type; it returns nil for every other type.
+func (s *Server) restHierarchy(r *http.Request, typ string) (*content.PageHierarchy, error) {
+	if s.customPosts == nil {
+		return nil, nil
+	}
+	pt, ok := s.registry.PostType(typ)
+	if !ok || !pt.Hierarchical || typ == "post" || typ == "page" {
+		return nil, nil
+	}
+	return s.customPosts.Hierarchy(r.Context(), typ)
 }
 
 // restPostWriteRequest is the JSON body shape POST/PUT/PATCH
@@ -443,7 +496,7 @@ func (s *Server) handleRESTPostDelete(typ string) http.HandlerFunc {
 			writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
 			return
 		}
-		item, links, embedded, err := s.mapRESTPost(r, typ, current)
+		item, links, embedded, err := s.mapRESTPost(r, typ, current, nil)
 		if err != nil {
 			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
 			return
@@ -474,7 +527,7 @@ func (s *Server) writeRESTPostResult(w http.ResponseWriter, r *http.Request, typ
 		writeRESTError(w, http.StatusInternalServerError, "rest_post_invalid_id", "Could not look up "+typ+" after write.")
 		return
 	}
-	item, links, embedded, err := s.mapRESTPost(r, typ, p)
+	item, links, embedded, err := s.mapRESTPost(r, typ, p, nil)
 	if err != nil {
 		writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
 		return
@@ -490,8 +543,8 @@ func (s *Server) writeRESTPostResult(w http.ResponseWriter, r *http.Request, typ
 // mapRESTPost maps a domain.Post through content.RESTMapper.Post/Page and
 // builds its _links (+ _embedded, on ?_embed), applying restAbs to every
 // relative link/URL the mapper produced (Req 6.6).
-func (s *Server) mapRESTPost(r *http.Request, typ string, p domain.Post) (any, restLinks, map[string]any, error) {
-	base := "/wp-json/wp/v2/" + typ + "s"
+func (s *Server) mapRESTPost(r *http.Request, typ string, p domain.Post, hier *content.PageHierarchy) (any, restLinks, map[string]any, error) {
+	base := "/wp-json/wp/v2" + s.restPostRoute(typ)
 	b := newRESTLinks()
 	b.add("self", restAbs(r, base+"/"+strconv.FormatInt(p.ID, 10)))
 	b.add("collection", restAbs(r, base))
@@ -506,8 +559,33 @@ func (s *Server) mapRESTPost(r *http.Request, typ string, p domain.Post) (any, r
 		mapped.Link = restAbs(r, mapped.Link)
 		mapped.GUID.Rendered = restAbs(r, mapped.GUID.Rendered)
 		item = mapped
-	default:
+	case "post":
 		mapped, err := s.restMapper.Post(r.Context(), p)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		mapped.Link = restAbs(r, mapped.Link)
+		mapped.GUID.Rendered = restAbs(r, mapped.GUID.Rendered)
+		item = mapped
+	default:
+		pt, ok := s.registry.PostType(typ)
+		if !ok {
+			mapped, err := s.restMapper.Post(r.Context(), p)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			mapped.Link = restAbs(r, mapped.Link)
+			mapped.GUID.Rendered = restAbs(r, mapped.GUID.Rendered)
+			item = mapped
+			break
+		}
+		ancestry := []string{p.Slug}
+		if hier != nil {
+			if a := hier.Ancestry(p.ID); a != nil {
+				ancestry = a
+			}
+		}
+		mapped, err := s.restMapper.CustomPost(r.Context(), p, pt, ancestry)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -560,6 +638,8 @@ func restCommonFeaturedMedia(item any) int64 {
 	case content.RESTPost:
 		return v.FeaturedMedia
 	case content.RESTPage:
+		return v.FeaturedMedia
+	case content.RESTCustomPost:
 		return v.FeaturedMedia
 	}
 	return 0

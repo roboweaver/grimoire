@@ -3,6 +3,7 @@ package content
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	stdhtml "html"
 	"sort"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/php"
+	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/routing"
 )
 
@@ -198,6 +200,10 @@ type RESTMapper struct {
 	// never saw WithPages leaves PageAncestry unset, so Canonical's page guard
 	// degrades a page to /{slug} exactly as before M15 (Req 4.5).
 	pages *PageService
+
+	// registry is the custom type/taxonomy registry CustomPost reads. nil is the
+	// default (Registry methods are nil-safe).
+	registry *registry.Registry
 }
 
 // NewRESTMapper constructs a RESTMapper. prefix is the usermeta key prefix
@@ -369,6 +375,91 @@ func (m *RESTMapper) Page(ctx context.Context, p domain.Post) (RESTPage, error) 
 		return RESTPage{}, err
 	}
 	return RESTPage{restItemCommon: m.restCommon(ctx, p, featured)}, nil
+}
+
+// RESTCustomPost is the REST shape for an item of a registered custom post
+// type (M12 Component 6c). Terms holds one term-id array per taxonomy attached
+// to the type, keyed by the taxonomy's rest_base; MarshalJSON flattens them
+// beside the common fields so no categories/tags key appears unless attached.
+type RESTCustomPost struct {
+	restItemCommon
+	Terms map[string][]int64
+}
+
+// MarshalJSON emits the common fields followed by one key per Terms entry in
+// sorted order. A nil term slice is written as [] and never null.
+func (p RESTCustomPost) MarshalJSON() ([]byte, error) {
+	base, err := json.Marshal(p.restItemCommon)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(p.Terms))
+	for k := range p.Terms {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := bytes.TrimSuffix(base, []byte("}"))
+	for _, k := range keys {
+		ids := p.Terms[k]
+		if ids == nil {
+			ids = []int64{}
+		}
+		kb, err := json.Marshal(k)
+		if err != nil {
+			return nil, err
+		}
+		vb, err := json.Marshal(ids)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ',')
+		out = append(out, kb...)
+		out = append(out, ':')
+		out = append(out, vb...)
+	}
+	return append(out, '}'), nil
+}
+
+// WithRegistry configures the custom type/taxonomy registry CustomPost reads
+// to key term arrays by rest_base. It returns the same RESTMapper for chaining.
+func (m *RESTMapper) WithRegistry(r *registry.Registry) *RESTMapper {
+	m.registry = r
+	return m
+}
+
+// CustomPost maps a row of registered post type pt into its REST view model.
+// ancestry is root-first and self-inclusive. The link is built by
+// Structure.CustomPostPath, never by postLink: postLink calls Canonical, which
+// would give a custom row the dated/post-shaped permalink. A type that is not
+// routed (public: false) yields "" there, and restAbs("") resolves to the site
+// root, so such a row falls back to the plain permalink
+// /?p={id}&post_type={name}, which always distinguishes it.
+func (m *RESTMapper) CustomPost(ctx context.Context, p domain.Post, pt registry.PostType, ancestry []string) (RESTCustomPost, error) {
+	featured, err := m.meta.FeaturedMediaID(ctx, p.ID)
+	if err != nil {
+		return RESTCustomPost{}, err
+	}
+	common := m.restCommon(ctx, p, featured)
+	common.Link = m.permalinks.CustomPostPath(pt.Name, ancestry)
+	if common.Link == "" {
+		common.Link = "/?p=" + strconv.FormatInt(p.ID, 10) + "&post_type=" + pt.Name
+	}
+	terms := make(map[string][]int64, len(pt.Taxonomies))
+	for _, tax := range pt.Taxonomies {
+		base, ok := m.registry.TaxonomyRESTBase(tax)
+		if !ok || base == "" {
+			continue
+		}
+		ids, err := m.terms.TermsForPost(ctx, p.ID, tax)
+		if err != nil {
+			return RESTCustomPost{}, err
+		}
+		if ids == nil {
+			ids = []int64{}
+		}
+		terms[base] = ids
+	}
+	return RESTCustomPost{restItemCommon: common, Terms: terms}, nil
 }
 
 // restCommentStatus maps the raw comment_approved enum ("0"/"1"/"spam"/

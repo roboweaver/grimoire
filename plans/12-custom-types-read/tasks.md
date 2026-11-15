@@ -669,7 +669,7 @@
 
 > Ships in PR 3.
 
-- [~] 10.1 Write the failing `AuthorsOfTypes` and diagnostic-read contract assertions.
+- [x] 10.1 Write the failing `AuthorsOfTypes` and diagnostic-read contract assertions.
       In `internal/storage/storagetest/contract.go` (serialized after 6.1/6.2, PR 2) add
       assertions: `AuthorsOfTypes(ctx, {"post","page"})` equals `Authors(ctx)` on the
       same fixture; `AuthorsOfTypes(ctx, {"post","page","book"})` additionally includes
@@ -684,7 +684,7 @@
       (`AuthorsOfTypes`, `DistinctPostTypes`, `DistinctTaxonomies` not implemented).
       _(Req 2.3, 11.1, 11.2, 14.1; D9)_
 
-- [~] 10.2 Implement `AuthorsOfTypes` and the two diagnostic reads. In `internal/domain/repository.go` (beside `PostNodeReader`) add `AuthorTypeReader`, `TypeCount`, `PostTypeAuditor` and `TaxonomyAuditor` with doc comments naming each requirement. In `internal/storage/wprepo/adminreads.go` add `(*PostRepo).AuthorsOfTypes(ctx,
+- [x] 10.2 Implement `AuthorsOfTypes` and the two diagnostic reads. In `internal/domain/repository.go` (beside `PostNodeReader`) add `AuthorTypeReader`, `TypeCount`, `PostTypeAuditor` and `TaxonomyAuditor` with doc comments naming each requirement. In `internal/storage/wprepo/adminreads.go` add `(*PostRepo).AuthorsOfTypes(ctx,
       types)` — the body of `Authors` (`adminreads.go:109`, hard-coded list at `:118`)
       with the type list as a parameter — and make `Authors(ctx)` call
       `AuthorsOfTypes(ctx, []string{"post","page"})`, producing the identical statement.
@@ -703,7 +703,7 @@
 
 > Ships in PR 3.
 
-- [~] 11.1 Write the failing `AdminService.WithAuthorTypes` tests. Add
+- [x] 11.1 Write the failing `AdminService.WithAuthorTypes` tests. Add
       `internal/content/adminread_authortypes_test.go` asserting: when
       `WithAuthorTypes(reader, types)` is set, `Authors` calls
       `reader.AuthorsOfTypes(ctx, types)`; without it `Authors` behaves exactly as today
@@ -712,14 +712,14 @@
       Verify: `go test ./internal/content -run AuthorTypes` — fails to compile.
       _(Req 2.3; D9)_
 
-- [~] 11.2 Implement `WithAuthorTypes`. In `internal/content/adminread.go` (near `:112`)
+- [x] 11.2 Implement `WithAuthorTypes`. In `internal/content/adminread.go` (near `:112`)
       add `AdminService.WithAuthorTypes(r domain.AuthorTypeReader, types []string)` and
       route `Authors` through it when set.
       Files: `internal/content/adminread.go`
       Verify: `go test ./internal/content -run AuthorTypes` green; `go test
       ./internal/content`; `go build ./...`; `go vet ./...`. _(Req 2.3; D9)_
 
-- [~] 11.3 Write the failing REST mapper tests (7c). Add
+- [x] 11.3 Write the failing REST mapper tests (7c). Add
       `internal/content/rest_custom_test.go` asserting `RESTMapper.WithRegistry(reg)` and
       `RESTMapper.CustomPost(ctx, p, pt, ancestry)`: `type` equals the CPT name; `link`
       equals `Structure.CustomPostPath(pt.Name, ancestry)` (never the post-shape
@@ -736,7 +736,7 @@
       (`RESTCustomPost`, `WithRegistry`, `CustomPost` undefined). _(Req 4.6, 9.3, 9.4;
       D8)_
 
-- [~] 11.4 Implement the REST view model. In `internal/content/rest.go` (beside
+- [x] 11.4 Implement the REST view model. In `internal/content/rest.go` (beside
       `:337`) add `RESTCustomPost{restItemCommon; Terms map[string][]int64}` with
       `MarshalJSON`, `RESTMapper.WithRegistry`, and `RESTMapper.CustomPost` per design
       Component 6c: call `restCommon`, overwrite `Link` from `CustomPostPath` with the
@@ -753,7 +753,7 @@
 
 > Ships in PR 3.
 
-- [~] 12.1 Write the failing admin-list `type` validation tests (8d). Add
+- [x] 12.1 Write the failing admin-list `type` validation tests (8d). Add
       `internal/web/adminapi_type_test.go` asserting `GET` on the admin posts list: a
       `type` that is not `post`, not `page` and not a registered name responds 400 with
       code `invalid_type` and reads NOTHING (the fake repo records zero calls); a
@@ -767,7 +767,7 @@
       Verify: `go test ./internal/web -run AdminAPIType` — fails (unvalidated `type`
       forwarded). _(Req 2.1, 2.2, 2.8, 2.9, 2.10, 12.2, 12.3; D1, D9)_
 
-- [~] 12.2 Implement the `type` validation. In `internal/web/adminapi.go` (`adminPosts`,
+- [x] 12.2 Implement the `type` validation. In `internal/web/adminapi.go` (`adminPosts`,
       `:213`, forwarding at `:226`) reject a `type` outside `{post, page}` plus
       `s.registry` names with 400 `invalid_type` before any read (the `invalid_status`
       precedent, `:222`). Edit any pre-existing test the tightening breaks. Write
@@ -777,7 +777,7 @@
       `go build ./...`; `go vet ./...`. _(Req 2.1, 2.2, 2.8, 2.9, 2.10, 12.2, 12.3; D1,
       D9)_
 
-- [~] 12.3 Write the failing REST CPT read tests (8c, posts). Add
+- [x] 12.3 Write the failing REST CPT read tests (8c, posts). Add
       `internal/web/rest_custom_posts_test.go` asserting for a registered CPT at
       `/wp-json/wp/v2/{rest_base}`: GET collection in the posts/pages envelope with the
       same pagination headers and the `slug` filter; GET single; `type` equals the CPT
@@ -798,7 +798,7 @@
       unregistered: 404). _(Req 8.1, 8.2, 8.4, 8.5, 8.6, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6,
       12.1, 14.5; D1, D7, D8)_
 
-- [~] 12.4 Implement REST CPT registration. New `internal/web/rest_custom_posts.go` with
+- [x] 12.4 Implement REST CPT registration. New `internal/web/rest_custom_posts.go` with
       `registerRESTCustomPosts` (for each `s.registry.PostTypes()`, public or not: GET
       collection → `handleRESTPostsCollection(pt.Name)`, GET single →
       `handleRESTPostSingle(pt.Name)`, every write verb → `restNotImplemented`). In
@@ -890,7 +890,7 @@
 
 > Ships in PR 3.
 
-- [~] 13.1 Write the failing diagnostic tests first. Add
+- [x] 13.1 Write the failing diagnostic tests first. Add
       `cmd/grimoire-cli/contenttypes_test.go` over fakes, as
       `TestReportDuplicateNicenamesNamesEachConflict` does for its auditor, asserting
       `reportUndeclaredContentTypes(ctx, w, postTypes, taxonomies, declared)`: names each
@@ -907,7 +907,7 @@
       Verify: `go test ./cmd/grimoire-cli -run UndeclaredContentTypes` — fails to compile
       (`reportUndeclaredContentTypes` undefined). _(Req 11.1, 11.2, 11.3, 11.4; D2, D9)_
 
-- [~] 13.2 Implement the report. New `cmd/grimoire-cli/contenttypes.go` with
+- [x] 13.2 Implement the report. New `cmd/grimoire-cli/contenttypes.go` with
       `reportUndeclaredContentTypes` (pure subtraction in a small function the test
       drives; read-only; uses `registry.ReservedPostTypes()`/`ReservedTaxonomies()`),
       mirroring `reportDuplicateNicenames` (`permalinks.go:167`). In

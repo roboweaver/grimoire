@@ -223,7 +223,14 @@ func (s *Server) adminPosts(w http.ResponseWriter, r *http.Request) error {
 			return nil
 		}
 	}
-	f := content.AdminListFilter{Type: q.Get("type"), Status: status, Search: q.Get("search")}
+	postType := q.Get("type")
+	if postType != "" && postType != "post" && postType != "page" {
+		if _, ok := s.registry.PostType(postType); !ok {
+			writeJSONError(w, http.StatusBadRequest, "invalid_type", "type must be post, page, or a registered post type")
+			return nil
+		}
+	}
+	f := content.AdminListFilter{Type: postType, Status: status, Search: q.Get("search")}
 	if raw := q.Get("author"); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || id <= 0 {

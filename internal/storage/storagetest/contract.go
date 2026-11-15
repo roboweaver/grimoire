@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -398,6 +400,7 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 	runPostContentBackfillContract(t, newRepos)
 	runPageReaderContract(t, newRepos)
 	runPostNodeReaderContract(t, newRepos)
+	runCustomTypeReadsContract(t, newRepos)
 }
 
 // runUserContract covers UserRepository + UserMetaRepository, including the
@@ -2508,6 +2511,287 @@ func runPostNodeReaderContract(t *testing.T, newRepos NewReposFunc) {
 			if gotPages[i] != wantPages[i] {
 				t.Errorf("row %d: ListPostNodes(page) = %+v, ListPages = %+v", i, gotPages[i], wantPages[i])
 			}
+		}
+	})
+}
+
+// runCustomTypeReadsContract covers the additive M12 typed author read and the
+// two operator-only diagnostic reads behind `migrate -check` (Req 2.3, 11.1,
+// 11.2, 11.3, 14.1; D9).
+//
+// None of the three ports has a storage.Set field. Following the
+// repos.NavMenus.(domain.NavMenuWriter) and repos.Users.(domain.NicenameAuditor)
+// precedents, each is reached by type assertion on a concrete repo that already
+// sits in the Set: AuthorTypeReader and PostTypeAuditor on repos.AdminPosts /
+// repos.Posts (the *wprepo.PostRepo), TaxonomyAuditor on repos.Terms (the
+// *wprepo.TermRepo).
+//
+// Until the ports land (domain.AuthorTypeReader, domain.PostTypeAuditor,
+// domain.TaxonomyAuditor, domain.TypeCount and the PostRepo/TermRepo methods)
+// this file does not compile; the failure names exactly those domain symbols
+// (TDD-red for task 10.1).
+//
+// Decision on empty input: AuthorsOfTypes(ctx, nil) and AuthorsOfTypes(ctx,
+// []string{}) return an empty, error-free result. It must NOT silently fall
+// back to the post/page default (design: an empty type list is never turned into
+// a default inside storage; the REST caller owns the "absent type means
+// post/page" rule and calls Authors in that case).
+func runCustomTypeReadsContract(t *testing.T, newRepos NewReposFunc) {
+	t.Helper()
+	ctx := context.Background()
+
+	mkUser := func(t *testing.T, repos *storage.Repositories, login, display string) int64 {
+		t.Helper()
+		id, err := repos.Users.Create(ctx, domain.User{Login: login, Nicename: login, DisplayName: display})
+		if err != nil {
+			t.Fatalf("create user %s: %v", login, err)
+		}
+		return id
+	}
+	mkPost := func(t *testing.T, repos *storage.Repositories, author int64, postType, slug, status string) {
+		t.Helper()
+		if _, err := repos.PostWriter.Create(ctx, domain.Post{
+			Author:        author,
+			Date:          time.Date(2024, 10, 1, 0, 0, 0, 0, time.UTC),
+			Content:       "<p>body</p>",
+			Title:         slug,
+			Excerpt:       "ex",
+			Status:        status,
+			Slug:          slug,
+			Type:          postType,
+			CommentStatus: "closed",
+		}); err != nil {
+			t.Fatalf("seed %s %s/%s: %v", postType, slug, status, err)
+		}
+	}
+	postsOf := func(t *testing.T, repos *storage.Repositories) (domain.AuthorTypeReader, domain.PostTypeAuditor) {
+		t.Helper()
+		atr, ok := repos.AdminPosts.(domain.AuthorTypeReader)
+		if !ok {
+			t.Fatalf("repos.AdminPosts (%T) does not implement domain.AuthorTypeReader", repos.AdminPosts)
+		}
+		pta, ok := repos.AdminPosts.(domain.PostTypeAuditor)
+		if !ok {
+			t.Fatalf("repos.AdminPosts (%T) does not implement domain.PostTypeAuditor", repos.AdminPosts)
+		}
+		return atr, pta
+	}
+	toMap := func(t *testing.T, tc []domain.TypeCount) map[string]int {
+		t.Helper()
+		m := make(map[string]int, len(tc))
+		for _, c := range tc {
+			if _, dup := m[c.Name]; dup {
+				t.Fatalf("duplicate name %q in %+v", c.Name, tc)
+			}
+			m[c.Name] = c.Count
+		}
+		return m
+	}
+	sortedByName := func(tc []domain.TypeCount) bool {
+		names := make([]string, len(tc))
+		for i, c := range tc {
+			names[i] = c.Name
+		}
+		return sort.StringsAreSorted(names)
+	}
+	ids := func(a []domain.AuthorOption) []string {
+		out := make([]string, len(a))
+		for i, o := range a {
+			out[i] = fmt.Sprintf("%d:%s", o.ID, o.DisplayName)
+		}
+		return out
+	}
+
+	t.Run("AuthorsOfTypes lists authors over the given post types", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		atr, _ := postsOf(t, repos)
+
+		// Fixture author 1 ("Admin") owns post and page rows only.
+		bookworm := mkUser(t, repos, "bookworm", "Bookworm")
+		shopper := mkUser(t, repos, "shopper", "Aaron Shopper") // sorts BEFORE Admin
+		mkPost(t, repos, bookworm, "book", "ct-book-1", "publish")
+		mkPost(t, repos, bookworm, "book", "ct-book-2", "draft") // dedupe: one row per author
+		mkPost(t, repos, shopper, "shop_order", "ct-order-1", "private")
+
+		// Authors() is unchanged: post/page only, so neither custom-type author.
+		base, err := repos.AdminPosts.Authors(ctx)
+		if err != nil {
+			t.Fatalf("Authors: %v", err)
+		}
+		if len(base) != 1 || base[0].ID != 1 || base[0].DisplayName != "Admin" {
+			t.Fatalf("Authors must stay post/page only [Admin], got %v", ids(base))
+		}
+
+		// {post,page} is exactly Authors().
+		pp, err := atr.AuthorsOfTypes(ctx, []string{"post", "page"})
+		if err != nil {
+			t.Fatalf("AuthorsOfTypes post,page: %v", err)
+		}
+		if !reflect.DeepEqual(pp, base) {
+			t.Fatalf("AuthorsOfTypes(post,page) = %v, want Authors() = %v", ids(pp), ids(base))
+		}
+
+		// Adding book additionally includes the book-only author, once,
+		// ordered by display name; the shop_order author is never listed.
+		withBook, err := atr.AuthorsOfTypes(ctx, []string{"post", "page", "book"})
+		if err != nil {
+			t.Fatalf("AuthorsOfTypes post,page,book: %v", err)
+		}
+		want := []domain.AuthorOption{{ID: 1, DisplayName: "Admin"}, {ID: bookworm, DisplayName: "Bookworm"}}
+		if !reflect.DeepEqual(withBook, want) {
+			t.Fatalf("AuthorsOfTypes(post,page,book) = %v, want %v", ids(withBook), ids(want))
+		}
+
+		// Only book: the post/page author drops out.
+		onlyBook, err := atr.AuthorsOfTypes(ctx, []string{"book"})
+		if err != nil {
+			t.Fatalf("AuthorsOfTypes book: %v", err)
+		}
+		if want := []domain.AuthorOption{{ID: bookworm, DisplayName: "Bookworm"}}; !reflect.DeepEqual(onlyBook, want) {
+			t.Fatalf("AuthorsOfTypes(book) = %v, want %v", ids(onlyBook), ids(want))
+		}
+
+		// Explicitly asking for shop_order lists its author, ordered by name
+		// alongside the others.
+		all, err := atr.AuthorsOfTypes(ctx, []string{"post", "book", "shop_order"})
+		if err != nil {
+			t.Fatalf("AuthorsOfTypes post,book,shop_order: %v", err)
+		}
+		want = []domain.AuthorOption{
+			{ID: shopper, DisplayName: "Aaron Shopper"},
+			{ID: 1, DisplayName: "Admin"},
+			{ID: bookworm, DisplayName: "Bookworm"},
+		}
+		if !reflect.DeepEqual(all, want) {
+			t.Fatalf("AuthorsOfTypes(post,book,shop_order) = %v, want %v", ids(all), ids(want))
+		}
+	})
+
+	t.Run("AuthorsOfTypes with no types returns empty, not the default", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		atr, _ := postsOf(t, repos)
+		for _, types := range [][]string{nil, {}} {
+			got, err := atr.AuthorsOfTypes(ctx, types)
+			if err != nil {
+				t.Fatalf("AuthorsOfTypes(%#v): %v", types, err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("AuthorsOfTypes(%#v) = %v, want empty", types, ids(got))
+			}
+		}
+	})
+
+	t.Run("TypeCount carries names and counts only", func(t *testing.T) {
+		rt := reflect.TypeOf(domain.TypeCount{})
+		if rt.NumField() != 2 {
+			t.Fatalf("TypeCount must have exactly Name and Count, has %d fields", rt.NumField())
+		}
+		if f, ok := rt.FieldByName("Name"); !ok || f.Type.Kind() != reflect.String {
+			t.Fatalf("TypeCount.Name must be a string, got %+v", f)
+		}
+		if f, ok := rt.FieldByName("Count"); !ok || f.Type.Kind() != reflect.Int {
+			t.Fatalf("TypeCount.Count must be an int, got %+v", f)
+		}
+	})
+
+	t.Run("DistinctPostTypes counts every post_type across all statuses", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		_, pta := postsOf(t, repos)
+
+		before, err := pta.DistinctPostTypes(ctx)
+		if err != nil {
+			t.Fatalf("DistinctPostTypes (baseline): %v", err)
+		}
+		base := toMap(t, before)
+		for _, builtin := range []string{"post", "page", "attachment", "nav_menu_item"} {
+			if base[builtin] == 0 {
+				t.Fatalf("baseline must include built-in %q with a non-zero count, got %+v", builtin, before)
+			}
+		}
+		if !sortedByName(before) {
+			t.Fatalf("baseline not ordered by name: %+v", before)
+		}
+
+		// A types-only plugin leaves rows behind: custom types in several
+		// statuses, including trash and private.
+		mkPost(t, repos, 1, "book", "dp-book-1", "publish")
+		mkPost(t, repos, 1, "book", "dp-book-2", "draft")
+		mkPost(t, repos, 1, "book", "dp-book-3", "trash")
+		mkPost(t, repos, 1, "shop_order", "dp-order-1", "private")
+		mkPost(t, repos, 1, "shop_order", "dp-order-2", "pending")
+		mkPost(t, repos, 1, "post", "dp-post-extra", "draft") // built-in count rises, any status
+
+		after, err := pta.DistinctPostTypes(ctx)
+		if err != nil {
+			t.Fatalf("DistinctPostTypes: %v", err)
+		}
+		if !sortedByName(after) {
+			t.Fatalf("not ordered by name: %+v", after)
+		}
+		want := map[string]int{}
+		for k, v := range base {
+			want[k] = v
+		}
+		want["book"] += 3
+		want["shop_order"] += 2
+		want["post"]++
+		if got := toMap(t, after); !reflect.DeepEqual(got, want) {
+			t.Fatalf("DistinctPostTypes = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("DistinctTaxonomies counts every term_taxonomy.taxonomy", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		tax, ok := repos.Terms.(domain.TaxonomyAuditor)
+		if !ok {
+			t.Fatalf("repos.Terms (%T) does not implement domain.TaxonomyAuditor", repos.Terms)
+		}
+
+		before, err := tax.DistinctTaxonomies(ctx)
+		if err != nil {
+			t.Fatalf("DistinctTaxonomies (baseline): %v", err)
+		}
+		base := toMap(t, before)
+		for _, builtin := range []string{"category", "post_tag", "nav_menu"} {
+			if base[builtin] == 0 {
+				t.Fatalf("baseline must include built-in %q with a non-zero count, got %+v", builtin, before)
+			}
+		}
+		if !sortedByName(before) {
+			t.Fatalf("baseline not ordered by name: %+v", before)
+		}
+
+		for _, term := range []domain.Term{
+			{Name: "Fantasy", Slug: "fantasy", Taxonomy: "genre"},
+			{Name: "Noir", Slug: "noir", Taxonomy: "genre"},
+			{Name: "Rush", Slug: "rush", Taxonomy: "shop_order_status"},
+			{Name: "Extra", Slug: "extra", Taxonomy: "post_tag"},
+		} {
+			if _, err := repos.TermWriter.Create(ctx, term); err != nil {
+				t.Fatalf("seed term %s/%s: %v", term.Taxonomy, term.Slug, err)
+			}
+		}
+
+		after, err := tax.DistinctTaxonomies(ctx)
+		if err != nil {
+			t.Fatalf("DistinctTaxonomies: %v", err)
+		}
+		if !sortedByName(after) {
+			t.Fatalf("not ordered by name: %+v", after)
+		}
+		want := map[string]int{}
+		for k, v := range base {
+			want[k] = v
+		}
+		want["genre"] += 2
+		want["shop_order_status"]++
+		want["post_tag"]++
+		if got := toMap(t, after); !reflect.DeepEqual(got, want) {
+			t.Fatalf("DistinctTaxonomies = %v, want %v", got, want)
 		}
 	})
 }

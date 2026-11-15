@@ -110,3 +110,9 @@ func (s *CustomPostService) Archive(ctx context.Context, typeName string, page, 
 	}
 	return Archive{Posts: posts, Page: newPage(clampedPage, limit, total)}, nil
 }
+
+// Hierarchy loads the node graph of typeName once, for callers (the REST read
+// surface) that need ancestry for many rows of one request.
+func (s *CustomPostService) Hierarchy(ctx context.Context, typeName string) (*PageHierarchy, error) {
+	return s.load(ctx, typeName)
+}

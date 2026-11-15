@@ -59,6 +59,9 @@ type AdminService struct {
 	uc     domain.UserCounter
 	tc     domain.TermCounter
 	users  userByID
+
+	authorTypes domain.AuthorTypeReader // optional; see WithAuthorTypes
+	authorKinds []string
 }
 
 // NewAdminService constructs an AdminService from the admin list/count ports, a
@@ -72,6 +75,16 @@ func NewAdminService(
 	users userByID,
 ) *AdminService {
 	return &AdminService{posts: posts, detail: detail, pc: pc, uc: uc, tc: tc, users: users}
+}
+
+// WithAuthorTypes routes Authors through r for the given post types instead of
+// the default post/page read, so authors of custom post types appear in admin
+// filter UIs (M12 Req 2.3; D9). It mutates and returns the receiver for
+// chaining at wiring time; call it before the service is shared.
+func (s *AdminService) WithAuthorTypes(r domain.AuthorTypeReader, types []string) *AdminService {
+	s.authorTypes = r
+	s.authorKinds = append([]string(nil), types...)
+	return s
 }
 
 // List returns a page of content (posts and pages, including drafts) matching
@@ -109,6 +122,9 @@ func (s *AdminService) List(ctx context.Context, page, perPage int, f AdminListF
 // for admin filter UIs (Req 4.3). See domain.AuthorOption's doc comment for
 // the privacy rationale.
 func (s *AdminService) Authors(ctx context.Context) ([]domain.AuthorOption, error) {
+	if s.authorTypes != nil {
+		return s.authorTypes.AuthorsOfTypes(ctx, s.authorKinds)
+	}
 	return s.posts.Authors(ctx)
 }
 

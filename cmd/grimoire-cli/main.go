@@ -108,7 +108,7 @@ func runMigrate(args []string) error {
 	ctx := context.Background()
 
 	if *checkMode {
-		return reportPreflight(ctx, db, vendor, prefix)
+		return reportPreflight(ctx, db, vendor, prefix, cfg.Content)
 	}
 
 	if *overlayMode {
@@ -153,7 +153,7 @@ func runMigrate(args []string) error {
 // -- zero-row SELECTs for the schema probe, three single-row option reads for the
 // permalink report and one aggregate over {prefix}users for the nicename report
 // -- so it is safe to point at a production database.
-func reportPreflight(ctx context.Context, db *sql.DB, vendor, prefix string) error {
+func reportPreflight(ctx context.Context, db *sql.DB, vendor, prefix string, declared config.ContentConfig) error {
 	report, err := migrate.Preflight(ctx, db, vendor, prefix)
 	if err != nil {
 		return err
@@ -186,6 +186,12 @@ func reportPreflight(ctx context.Context, db *sql.DB, vendor, prefix string) err
 	// above: the pending-migration summary below is worth more than a
 	// diagnostic line, so reportDuplicateNicenames absorbs it.
 	reportDuplicateNicenames(ctx, os.Stdout, wprepo.NewUserRepo(bunDB, prefix))
+
+	// Post types and taxonomies present in the database but not declared under
+	// content: (M12 Req 11.1-11.4). Read-only, names and counts only, and like
+	// the reports above it absorbs read errors.
+	reportUndeclaredContentTypes(ctx, os.Stdout,
+		wprepo.NewPostRepo(bunDB, prefix), wprepo.NewTermRepo(bunDB, prefix), declared)
 
 	overlayFS, err := storage.OverlayMigrationsFS(vendor)
 	if err != nil {

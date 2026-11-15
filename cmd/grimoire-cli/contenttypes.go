@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	"github.com/roboweaver/grimoire/internal/config"
 	"github.com/roboweaver/grimoire/internal/domain"
@@ -81,9 +82,17 @@ func reportTypeCounts(w io.Writer, noun, key string, rows []domain.TypeCount, re
 		}
 	}
 	if len(empty) > 0 {
-		fmt.Fprintf(w, "Declared %ss with no rows in the database:\n", noun)
+		fmt.Fprintf(w, "Declared %s with no rows in the database:\n", plural(noun))
 		for _, name := range empty {
 			fmt.Fprintf(w, "  %q\n", name)
 		}
 	}
+}
+
+// plural returns the plural of a content-type noun ("post type", "taxonomy").
+func plural(noun string) string {
+	if strings.HasSuffix(noun, "y") {
+		return strings.TrimSuffix(noun, "y") + "ies"
+	}
+	return noun + "s"
 }

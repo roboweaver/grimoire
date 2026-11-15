@@ -15,6 +15,9 @@ var (
 	_ domain.TermRepository      = (*TermRepo)(nil)
 	_ domain.UserCounter         = (*UserRepo)(nil)
 	_ domain.TermCounter         = (*TermRepo)(nil)
+	_ domain.AuthorTypeReader    = (*PostRepo)(nil)
+	_ domain.PostTypeAuditor     = (*PostRepo)(nil)
+	_ domain.TaxonomyAuditor     = (*TermRepo)(nil)
 )
 
 // adminTypes resolves the effective post_type set for an admin query. An empty
@@ -107,6 +110,16 @@ func (r *PostRepo) CountForAdmin(ctx context.Context, f domain.AdminPostFilter) 
 // user with no authored posts never appears, so this cannot enumerate the
 // full user table.
 func (r *PostRepo) Authors(ctx context.Context) ([]domain.AuthorOption, error) {
+	return r.AuthorsOfTypes(ctx, []string{"post", "page"})
+}
+
+// AuthorsOfTypes returns the distinct users who authored at least one row of
+// any of the given post types, ordered by display name. An empty types slice
+// returns an empty result (no default is substituted). Pure SELECT.
+func (r *PostRepo) AuthorsOfTypes(ctx context.Context, types []string) ([]domain.AuthorOption, error) {
+	if len(types) == 0 {
+		return []domain.AuthorOption{}, nil
+	}
 	var rows []struct {
 		ID          int64  `bun:"ID"`
 		DisplayName string `bun:"display_name"`
@@ -115,7 +128,7 @@ func (r *PostRepo) Authors(ctx context.Context) ([]domain.AuthorOption, error) {
 		TableExpr("? AS p", bun.Ident(r.prefix+"posts")).
 		ColumnExpr("DISTINCT u.?, u.display_name", bun.Ident("ID")).
 		Join("JOIN ? AS u ON u.? = p.post_author", bun.Ident(r.prefix+"users"), bun.Ident("ID")).
-		Where("p.post_type IN (?)", bun.In([]string{"post", "page"})).
+		Where("p.post_type IN (?)", bun.In(types)).
 		OrderExpr("u.display_name ASC").
 		Scan(ctx, &rows)
 	if err != nil {

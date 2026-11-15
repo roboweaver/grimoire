@@ -545,6 +545,36 @@ type PostNodeReader interface {
 	ListPostNodes(ctx context.Context, postType string, afterID int64, limit int) ([]PostNode, error)
 }
 
+// AuthorTypeReader is the type-parameterized sibling of AdminPostRepository.Authors
+// (M12 Req 2.3; D9). It is additive and alters no existing read.
+type AuthorTypeReader interface {
+	// AuthorsOfTypes returns the distinct users who authored at least one row
+	// of any of the given post types, ordered by display name. An empty types
+	// slice yields an empty result; storage never substitutes a default.
+	AuthorsOfTypes(ctx context.Context, types []string) ([]AuthorOption, error)
+}
+
+// TypeCount is a name with a row count. It carries no content (M12 Req 11.3).
+type TypeCount struct {
+	Name  string
+	Count int
+}
+
+// PostTypeAuditor is the operator-only diagnostic read behind `migrate -check`
+// (M12 Req 11.1, 14.1; D9).
+type PostTypeAuditor interface {
+	// DistinctPostTypes returns every post_type with its row count across all
+	// post_status values, ordered by name.
+	DistinctPostTypes(ctx context.Context) ([]TypeCount, error)
+}
+
+// TaxonomyAuditor is the taxonomy twin of PostTypeAuditor (M12 Req 11.2, 14.1; D9).
+type TaxonomyAuditor interface {
+	// DistinctTaxonomies returns every term_taxonomy.taxonomy with its row
+	// count, ordered by name.
+	DistinctTaxonomies(ctx context.Context) ([]TypeCount, error)
+}
+
 // RevisionWriter is the storage port used by content.RevisionWriteService and
 // content.AutosaveService. Revisions and autosave rows are ordinary rows in
 // the same {prefix}posts table PostWriter already owns (post_type

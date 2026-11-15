@@ -30,7 +30,7 @@
 > [`../11-rest-delete-parity`](../11-rest-delete-parity) (PR #64), its box below
 > ticked with a shipped-via note. **M12's read half (12.A/12.B) is shipped** via
 > [`../12-custom-types-read`](../12-custom-types-read) (PRs #75/#76/#77); 12.C
-> (write parity) remains open. **M13–M16 are open or shipped roadmap-level task groups,
+> (write parity) remains open. **M13–M16 are roadmap-level task groups,
 > each requiring its own dedicated spec** (`requirements.md`/`design.md`/
 > `tasks.md`) before implementation begins — the same posture M8/M9/M10 carried
 > here before each was refined into its own spec; this file does not authorize

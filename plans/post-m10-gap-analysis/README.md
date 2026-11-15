@@ -60,11 +60,16 @@ nested-hierarchy, and pagination machinery; `/wp-json/wp/v2/{rest_base}` REST
 reads in the existing envelopes; admin type validation; and a migrate diagnostic.
 Delivered across PRs #75, #76, #77. **12.C (custom type/taxonomy write parity) is
 a separate later spec and remains open.**
-**Known M15 follow-up (found while building M12):** M15's `PageService.Resolve`
-confirms the leaf with `BySlug(leaf.Slug)`, which is ambiguous for same-slug
-leaves under different parents, and its recovery path can disclose unpublished
-pages. M12's `CustomPostService` avoids both. A separate M15 fix is recommended.
-
+**M15 follow-up (found while building M12) — fixed in PR #79.** M15's
+`PageService.Resolve` confirmed the leaf with `BySlug(leaf.Slug)`, which was
+ambiguous for same-slug leaves under different parents, and its recovery path
+could disclose unpublished pages. `Resolve` now confirms the leaf by ID via
+`PublishedByID(..., "page")` and gates the moved-page redirect on the page being
+published (spec `plans/16-page-resolve-fix`).
+**M12 real-DB verification:** the real-database fixture
+(`internal/routing/realdb_custom_test.go`) ran green against the dev Docker
+WordPress database (custom post type `boxes`, taxonomy `box-sets`, permalink
+structure `/%year%/%monthnum%/%day%/%postname%/`).
 ### M13 — Term re-parenting and hierarchy writes  ✅ shipped (`../13-term-reparenting`, PR #67)
 
 **Gap.** M9b *reads* `term_taxonomy.parent` into `domain.Term.ParentID`, but

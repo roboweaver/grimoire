@@ -1,15 +1,16 @@
 # Post-M10 Gap Analysis — Candidate Milestones (M11+)
 
-> **Status: 📝 Proposal (M11, M13, M14, M15 ✅ shipped).** This document is a gap analysis, not a
+> **Status: 📝 Proposal (M11, M12 read half, M13, M14, M15 ✅ shipped).** This document is a gap analysis, not a
 > committed roadmap. The WordPress-core-parity roadmap
 > ([`../wordpress-core-parity-roadmap`](../wordpress-core-parity-roadmap)) is
 > complete through its final group (M10.G). Each candidate below is a documented,
 > code-verified limitation of the current implementation, written up so a future
 > milestone can refine it into its own `requirements.md`/`design.md`/`tasks.md`.
 > **M11 (REST delete parity, PR #64), M13 (term re-parenting, PR #67), and M14
-> (sanitization backfill, PR #70) have since been specified and merged.** The
-> remaining candidates (M12, M15, M16) are still open; pick one and spec it
-> first.
+> (sanitization backfill, PR #70) have since been specified and merged.** M12's
+> read half (12.A/12.B, PRs #75/#76/#77) and M15 (PR #72) have shipped too; M12's
+> write parity (12.C) is a separate later spec. The remaining candidate is M16
+> (optional).
 
 Every gap is traced to where it is already acknowledged in
 [`../../docs/compatibility.md`](../../docs/compatibility.md) or the root
@@ -36,7 +37,7 @@ routes. Likely adds a `domain.MediaWriter.Delete` / `domain.UserRepository.Delet
 
 **Shipped in M11:** `MediaWriter.Delete`/`UserRepository.Delete` ports + wprepo impls, `MediaWriteService.Delete`/`UserService.Delete`, and the two REST handlers — `force=true` required, media per-attachment `CanDeletePost` gate with on-disk file unlink, user `reassign` (id or `false`) with self-delete/`delete_users` guards, transactional reassign-or-delete, `{"deleted":true,"previous":...}` envelope. Collection-level DELETE stays `501`.
 
-### M12 — Custom post types and custom taxonomies
+### M12 — Custom post types and custom taxonomies  ✅ read shipped (`../12-custom-types-read`, PRs #75/#76/#77)
 
 **Gap.** Only `post`/`page` rows and the `category`/`post_tag` taxonomies are
 served; admin reads filter `post_type IN ('post','page')`
@@ -51,6 +52,18 @@ database's own rows and/or configuration, since grimoire has no PHP
 `register_post_type`), public + admin + REST read/write for them, archive and
 single routing, and the capability model. Large; would likely split into
 read-first then write-parity sub-milestones.
+**Shipped in M12 (read half, 12.A/12.B):** a custom post type/taxonomy registry
+sourced from the database's own rows and grimoire configuration, replacing the
+hard-coded `post_type IN ('post','page')` / `post_type = 'post'` filters;
+archive/single and term-archive routing through the existing permalink,
+nested-hierarchy, and pagination machinery; `/wp-json/wp/v2/{rest_base}` REST
+reads in the existing envelopes; admin type validation; and a migrate diagnostic.
+Delivered across PRs #75, #76, #77. **12.C (custom type/taxonomy write parity) is
+a separate later spec and remains open.**
+**Known M15 follow-up (found while building M12):** M15's `PageService.Resolve`
+confirms the leaf with `BySlug(leaf.Slug)`, which is ambiguous for same-slug
+leaves under different parents, and its recovery path can disclose unpublished
+pages. M12's `CustomPostService` avoids both. A separate M15 fix is recommended.
 
 ### M13 — Term re-parenting and hierarchy writes  ✅ shipped (`../13-term-reparenting`, PR #67)
 
@@ -134,6 +147,6 @@ and documented.
    standing security caveat from M10a, CLI-only.
 4. ~~**M15 (hierarchical page URLs)**~~ — ✅ shipped (PR #72); completed
    WordPress routing parity for pages.
-5. **M12 (custom post types/taxonomies)** — largest; the biggest real-site
-   parity win, best tackled once the smaller gaps are closed. **Next.**
-6. **M16 (pagination path form)** — optional polish.
+5. ~~**M12 (custom post types/taxonomies, read)**~~ — ✅ shipped (PRs
+   #75/#76/#77); 12.C write parity is a separate later spec.
+6. **M16 (pagination path form)** — optional polish. **Next (optional).**

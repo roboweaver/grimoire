@@ -56,6 +56,11 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 		return nil, nil, fmt.Errorf("nav menu repository %T does not implement domain.NavMenuWriter", repos.NavMenus)
 	}
 
+	authorReader, ok := repos.AdminPosts.(domain.AuthorTypeReader)
+	if !ok {
+		return nil, nil, fmt.Errorf("admin post repository %T does not implement domain.AuthorTypeReader", repos.AdminPosts)
+	}
+
 	options := content.NewOptionService(repos.Options)
 	comments := content.NewCommentService(repos.Comments, repos.CommentWriter, repos.CommentMeta, repos.PostWriter, content.NewBasicCommentSpamFilter(content.BasicCommentSpamFilterConfig{}), contentPolicy)
 	menus := content.NewNavMenuService(repos.NavMenus, cfg.Theme)
@@ -72,7 +77,7 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	// registered at all and a nested page 404s in the real binary, however well
 	// the handler tests pass: they build their own Server.
 	pageSvc := content.NewPageService(repos.PageReader, repos.Posts)
-	restMapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, cfg.Database.TablePrefix).WithPermalinks(permalinks).WithUploadsBaseURL(uploadsBaseURL).WithPages(pageSvc)
+	restMapper := content.NewRESTMapper(repos.PostTerms, repos.PostMeta, repos.UserMeta, cfg.Database.TablePrefix).WithPermalinks(permalinks).WithUploadsBaseURL(uploadsBaseURL).WithPages(pageSvc).WithRegistry(deps.Registry)
 	featured := content.NewFeaturedImageService(repos.PostMeta, repos.Media)
 	appPasswords := &auth.ApplicationPasswords{
 		Users:  repos.Users,
@@ -146,7 +151,7 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	}).WithAdmin(admin.Handler("/admin"), content.NewAdminService(
 		repos.AdminPosts, repos.PostWriter, repos.PostCounter,
 		repos.UserCounter, repos.TermCounter, repos.Users,
-	)).WithAdminWrites(
+	).WithAuthorTypes(authorReader, registeredTypeNames(deps.Registry))).WithAdminWrites(
 		postWrite, termWrite, postTermsWrite, repos.PostTerms,
 	).WithAdminRevisions(
 		revisionWrite, autosave,
@@ -168,4 +173,15 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 type termReadWriter struct {
 	domain.TermWriter
 	domain.TermReader
+}
+
+// registeredTypeNames returns the post types the admin author filter spans:
+// the built-in post and page plus every registered custom type, in declaration
+// order. A nil registry yields just post and page.
+func registeredTypeNames(reg *registry.Registry) []string {
+	names := []string{"post", "page"}
+	for _, pt := range reg.PostTypes() {
+		names = append(names, pt.Name)
+	}
+	return names
 }

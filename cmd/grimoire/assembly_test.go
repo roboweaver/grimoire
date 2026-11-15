@@ -357,6 +357,164 @@ func TestBuildHandlerServesCustomTypes(t *testing.T) {
 	})
 }
 
+// TestBuildHandlerServesCustomTypesREST drives buildHandler with a registry and
+// asserts the /wp-json custom-type rows through httptest only. Each row guards
+// one wiring call inside buildHandler, so removing that call fails go test.
+//
+//	assertion                                         guards
+//	------------------------------------------------  ---------------------------------
+//	GET /wp-json/wp/v2/books -> 200, one item         Server.WithRegistry (REST route
+//	                                                  registration)
+//	  item type == "book"                             Server.WithRegistry (CustomPost arm; the
+//	  item link ends /book/dune/                      mapper's CustomPost needs no registry
+//	                                                  for these two)
+//	  item shelves has one term id                    restMapper.WithRegistry (term arrays
+//	                                                  keyed by rest_base; without a registry
+//	                                                  the array is empty)
+//	GET /wp-json/wp/v2/shelves -> 200, one term       Server.WithRegistry (CT registration)
+//	GET /wp-json/wp/v2/ lists both routes             Server.WithRegistry (restRouteIndex)
+//	empty registry: /wp-json/wp/v2/books -> 404       Server.WithRegistry (nothing registered)
+func TestBuildHandlerServesCustomTypesREST(t *testing.T) {
+	repos, dbCfg := newAssemblySQLite(t)
+	seedAssemblyPages(t, repos, dbCfg.TablePrefix)
+	seedAssemblyCustom(t, repos, dbCfg.TablePrefix)
+
+	cfg := config.Config{
+		Theme:    "default",
+		Database: dbCfg,
+		Session:  config.SessionConfig{CookieName: "grimoire_session", TTLHours: 24},
+		Media:    config.MediaConfig{UploadsDir: t.TempDir()},
+		REST:     config.RESTConfig{PerPageMax: 100},
+	}
+	themesDir := filepath.Join("..", "..", "themes")
+	eng, err := render.Load(themesDir, cfg.Theme)
+	if err != nil {
+		t.Fatalf("render.Load: %v", err)
+	}
+	st, err := routing.Parse("/%postname%/", "", "")
+	if err != nil {
+		t.Fatalf("routing.Parse: %v", err)
+	}
+	yes := true
+	reg, err := registry.Build(config.ContentConfig{
+		PostTypes: []config.PostTypeConfig{
+			{Name: "book", Public: &yes, Slug: "book", WithFront: &yes, RESTBase: "books",
+				HasArchive: config.HasArchive{Enabled: true, Slug: "library"},
+				Taxonomies: []string{"genre", "shelf"}},
+		},
+		Taxonomies: []config.TaxonomyConfig{
+			{Name: "genre", Public: &yes, Slug: "genre", WithFront: &yes, ObjectTypes: []string{"book"}},
+			{Name: "shelf", Public: &yes, Slug: "shelf", WithFront: &yes, Hierarchical: true, RESTBase: "shelves", ObjectTypes: []string{"book"}},
+		},
+	}, st)
+	if err != nil {
+		t.Fatalf("registry.Build: %v", err)
+	}
+	emptyReg, err := registry.Build(config.ContentConfig{}, st)
+	if err != nil {
+		t.Fatalf("registry.Build (empty): %v", err)
+	}
+
+	build := func(r *registry.Registry) http.Handler {
+		t.Helper()
+		h, _, err := buildHandler(serverDeps{
+			Repos:      repos,
+			Config:     cfg,
+			Log:        slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+			Permalinks: st,
+			Registry:   r,
+			Sessions: &auth.SessionManager{
+				Users:    repos.Users,
+				Meta:     repos.UserMeta,
+				Sessions: repos.Sessions,
+				TTL:      cfg.Session.TTL(),
+				Prefix:   cfg.Database.TablePrefix,
+			},
+			ContentPolicy: sanitize.New(),
+			Engine:        eng,
+			ThemesDir:     themesDir,
+		})
+		if err != nil {
+			t.Fatalf("buildHandler: %v", err)
+		}
+		return h
+	}
+	getFrom := func(h http.Handler, path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+
+	full := build(reg)
+
+	t.Run("books collection carries type, link and term array", func(t *testing.T) {
+		rec := getFrom(full, "/wp-json/wp/v2/books")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /wp-json/wp/v2/books = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		var items []struct {
+			Type   string  `json:"type"`
+			Link   string  `json:"link"`
+			Shelf  []int64 `json:"shelves"`
+			Genres []int64 `json:"genre"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &items); err != nil {
+			t.Fatalf("decode books: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("books = %d items, want 1: %s", len(items), rec.Body.String())
+		}
+		it := items[0]
+		if it.Type != "book" {
+			t.Errorf("type = %q, want book", it.Type)
+		}
+		if !strings.HasSuffix(it.Link, "/book/dune/") {
+			t.Errorf("link = %q, want suffix /book/dune/", it.Link)
+		}
+		if len(it.Shelf) != 1 {
+			t.Errorf("shelves = %v, want one term id", it.Shelf)
+		}
+	})
+	t.Run("shelves collection serves one term", func(t *testing.T) {
+		rec := getFrom(full, "/wp-json/wp/v2/shelves")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /wp-json/wp/v2/shelves = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		var terms []struct {
+			Slug     string `json:"slug"`
+			Taxonomy string `json:"taxonomy"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &terms); err != nil {
+			t.Fatalf("decode shelves: %v", err)
+		}
+		if len(terms) == 0 {
+			t.Fatalf("shelves = no terms: %s", rec.Body.String())
+		}
+		for _, tm := range terms {
+			if tm.Taxonomy != "shelf" {
+				t.Errorf("term %q taxonomy = %q, want shelf", tm.Slug, tm.Taxonomy)
+			}
+		}
+	})
+	t.Run("namespace index lists both routes", func(t *testing.T) {
+		rec := getFrom(full, "/wp-json/wp/v2/")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /wp-json/wp/v2/ = %d, want 200", rec.Code)
+		}
+		for _, route := range []string{"/wp/v2/books", "/wp/v2/shelves"} {
+			if !strings.Contains(rec.Body.String(), route) {
+				t.Errorf("namespace index does not list %s", route)
+			}
+		}
+	})
+	t.Run("empty registry books 404", func(t *testing.T) {
+		empty := build(emptyReg)
+		if rec := getFrom(empty, "/wp-json/wp/v2/books"); rec.Code != http.StatusNotFound {
+			t.Fatalf("GET /wp-json/wp/v2/books (empty registry) = %d, want 404", rec.Code)
+		}
+	})
+}
+
 // testWriter routes slog output into the test log.
 type testWriter struct{ t *testing.T }
 

@@ -94,6 +94,7 @@ func (s *Server) registerREST(r chi.Router) {
 			s.registerRESTComments(nr)
 			s.registerRESTTerms(nr)
 			s.registerRESTCustomPosts(nr)
+			s.registerRESTCustomTerms(nr)
 		})
 	})
 }
@@ -172,6 +173,23 @@ func restRoutes() map[string]restRouteEntry {
 	}
 }
 
+// restRouteIndex is restRoutes() plus a GET collection and single route for
+// every registered post type and taxonomy. With no registry it returns
+// restRoutes() unchanged.
+func (s *Server) restRouteIndex() map[string]restRouteEntry {
+	routes := restRoutes()
+	get := []string{http.MethodGet}
+	for _, pt := range s.registry.PostTypes() {
+		routes["/wp/v2/"+pt.RESTBase] = restRouteEntry{Methods: get}
+		routes["/wp/v2/"+pt.RESTBase+"/(?P<id>[\\d]+)"] = restRouteEntry{Methods: get}
+	}
+	for _, tax := range s.registry.Taxonomies() {
+		routes["/wp/v2/"+tax.RESTBase] = restRouteEntry{Methods: get}
+		routes["/wp/v2/"+tax.RESTBase+"/(?P<id>[\\d]+)"] = restRouteEntry{Methods: get}
+	}
+	return routes
+}
+
 // handleRESTIndex serves GET /wp-json/: the top-level API index (Req 1.1).
 func (s *Server) handleRESTIndex(w http.ResponseWriter, r *http.Request) {
 	name, description := s.options.SiteInfo(r.Context())
@@ -180,7 +198,7 @@ func (s *Server) handleRESTIndex(w http.ResponseWriter, r *http.Request) {
 		"description": description,
 		"url":         requestBaseURL(r) + "/",
 		"namespaces":  []string{"wp/v2"},
-		"routes":      restRoutes(),
+		"routes":      s.restRouteIndex(),
 	})
 }
 
@@ -189,6 +207,6 @@ func (s *Server) handleRESTIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRESTNamespaceIndex(w http.ResponseWriter, r *http.Request) {
 	_ = writeRESTResponse(w, r, http.StatusOK, map[string]any{
 		"namespace": "wp/v2",
-		"routes":    restRoutes(),
+		"routes":    s.restRouteIndex(),
 	})
 }

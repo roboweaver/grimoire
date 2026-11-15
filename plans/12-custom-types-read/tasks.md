@@ -819,7 +819,7 @@
       ./internal/web`; `go build ./...`; `go vet ./...`. _(Req 8.1, 8.2, 8.4, 8.5, 8.6,
       9.1–9.6, 12.1, 14.5; D1, D7, D8)_
 
-- [~] 12.5 Write the failing REST CT read and route-index tests (8c, terms). Add
+- [x] 12.5 Write the failing REST CT read and route-index tests (8c, terms). Add
       `internal/web/rest_custom_terms_test.go` asserting for a registered CT: GET
       collection and single in the categories/tags shape (`id`, `count`, `link`, `name`,
       `slug`, `taxonomy`, `parent`; `count` the documented literal 0; `description` stays
@@ -839,7 +839,7 @@
       Verify: `go test ./internal/web -run RESTCustomTerms` — fails. _(Req 6.6, 10.1,
       10.2, 10.3, 10.4, 10.5, 10.6, 12.1, 14.5; D1, D8)_
 
-- [~] 12.6 Implement REST CT registration and the route index. New
+- [x] 12.6 Implement REST CT registration and the route index. New
       `internal/web/rest_custom_terms.go` with `registerRESTCustomTerms` (own
       `"/"+RESTBase` path computation; GET → `handleRESTTermsCollection(tax.Name)` /
       `handleRESTTermSingle(tax.Name)`; write verbs → `restNotImplemented`). In
@@ -856,7 +856,7 @@
       ./internal/web`; `go build ./...`; `go vet ./...`; `gofmt -l .` empty (phase
       gate). _(Req 6.6, 10.1–10.6, 12.1, 14.5; D1, D8)_
 
-- [~] 12.7 Extend the failing assembly test with the REST rows. In
+- [x] 12.7 Extend the failing assembly test with the REST rows. In
       `cmd/grimoire/assembly_test.go`, reusing the 9.1 `book`/`shelf` fixture and
       registry, assert through the handler: `/wp-json/wp/v2/books` 200 with one item
       whose `type` is `book` and whose `link` ends `/books/dune/`, carrying the `shelf`
@@ -872,7 +872,7 @@
       _(Req 9.1, 9.3, 9.4, 10.1, 10.2, 13.3; D8, D10)_
 
 
-- [~] 12.8 Wire the API-side registry consumers inside `buildHandler`. In
+- [x] 12.8 Wire the API-side registry consumers inside `buildHandler`. In
       `cmd/grimoire/assembly.go` add `.WithRegistry(deps.Registry)` to the REST mapper
       chain (after `.WithPages(pageSvc)`) and wire `content.NewAdminService(...).
       WithAuthorTypes(authorReader, registeredTypeNames(deps.Registry))` where
@@ -927,7 +927,7 @@
 
 > Ships in PR 3.
 
-- [~] 14.1 Add the real-WordPress-DB custom-type fixture test. New
+- [x] 14.1 Add the real-WordPress-DB custom-type fixture test. New
       `internal/routing/realdb_custom_test.go` with `TestRealWordPressCustomTypes`,
       modeled on `realdb_pages_test.go` (reuse its DSN/prefix helpers): gated by
       `GRIMOIRE_TEST_WP_DSN` with the same prefix variable (NO new `GRIMOIRE_TEST_*`
@@ -946,7 +946,7 @@
       skips cleanly with its precondition message when the fixture is absent; `go vet
       ./...` clean. _(Req 14.6, 14.7; D10)_
 
-- [~] 14.2 Record the compatibility-boundary expansion. Edit `docs/compatibility.md` to
+- [x] 14.2 Record the compatibility-boundary expansion. Edit `docs/compatibility.md` to
       move custom post types and taxonomies from "out of scope" to "a scoped milestone
       (read-first, M12)", stating the config-only registry (D2), the READ-only scope
       with 501 on write verbs (D1), the documented consequences (a page or post slugged
@@ -957,7 +957,7 @@
       Verify: the file renders; `gofmt -l .` empty; `go build ./...` unaffected.
       _(Roadmap Req 25.3; D1, D2, D6)_
 
-- [~] 14.3 Final gate — verification only. Confirm: NO file added under
+- [x] 14.3 Final gate — verification only. Confirm: NO file added under
       `internal/storage/migrations` (`git status --porcelain internal/storage/migrations`
       empty); the `postColumns` var (`internal/storage/wprepo/repo.go:17-24`) unchanged;
       NO new capability NAME (only `auth.CapabilitySuffix`); `ListPages` and every

@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M10)
+# WordPress Compatibility (M1-M12)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -320,11 +320,12 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     unaffected; adding one would break the zero-migration property, which
     is a worse trade than a scan over the `users` table of a database only
     grimoire's own tests and fresh installs create.
-  - Custom taxonomies beyond `category` and `post_tag`, custom post types,
-    the `%category%`/`%author%` permalink tokens, and plugin-registered rewrite
-    rules remain out of scope, unchanged by this milestone. (Term-hierarchy
+  - The `%category%`/`%author%` permalink tokens and plugin-registered rewrite
+    rules remain out of scope, unchanged by this milestone. Custom taxonomies
+    beyond `category` and `post_tag`, and custom post types, were out of scope
+    here and are now a scoped, read-first milestone (M12, below). (Term-hierarchy
     *editing* shipped in M13 and hierarchical *page* URLs in M15; this M9b note
-    predates both.)
+    predates all three.)
 
   Validated read-only against a reference WordPress database (a local
   Podman dev stack, MySQL 8.0, `permalink_structure`
@@ -377,6 +378,70 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   bare bcrypt, and `NeedsRehash` upgrades a legacy bcrypt or phpass row to
   `$wp$` on the user's next successful login. A password changed in grimoire
   now round-trips to a live WordPress 6.8 install and back.
+
+- **M12 — Custom post types and taxonomies (read-first):** custom post types
+  and taxonomies move from "out of scope" to a scoped milestone. This
+  milestone is **read only**; write parity is a separate, later spec.
+
+  - **Config-only registry.** Types are declared in a top-level `content:`
+    section of the configuration file, with `post_types:` and `taxonomies:`
+    lists. Configuration declares, the database validates and informs. grimoire
+    never auto-exposes a `post_type` or taxonomy merely because rows exist in
+    the database, so private data under types such as `shop_order` or
+    `wpcf7_contact_form` is never published. Executing plugin or theme PHP to
+    discover types stays permanently out of scope.
+    - Post type keys: `name` (required), `public` (default `true`; `false`
+      registers the type for REST and admin read only, with no public route),
+      `rest_base` (default `name`), `has_archive` (`true`, `false`, or a slug;
+      default `false`), `slug` (default `name`), `with_front` (default `true`),
+      and `hierarchical`.
+    - Taxonomy keys: `name` (required), `object_types`, `public` (default
+      `true`), `rest_base` (default `name`), `slug` (default `name`),
+      `with_front` (default `true`), and `hierarchical`.
+    - The config is validated at startup and grimoire refuses to start on an
+      invalid entry: an empty or malformed name (lowercase alphanumerics, dash
+      and underscore; at most 20 characters for post types and 32 for
+      taxonomies), a built-in or duplicate name, a rewrite slug or `rest_base`
+      that collides with another entry or a built-in base, or a reference to an
+      unregistered taxonomy or object type. Multi-segment rewrite slugs are
+      rejected. Database state is never a startup failure.
+  - **Public routes (published rows only).** A custom post type single is served
+    at `/{slug}/{postname}/` (nested ancestry for a hierarchical type), its
+    archive at `/{archive-slug}/` when `has_archive` is set, and a custom
+    taxonomy term archive at `/{slug}/{term}/` (nested when hierarchical).
+    Archive pagination stays `?page=N`. Custom post type URLs do not use the
+    dated permalink tokens. Custom post type date archives and feeds are out of
+    scope.
+  - **REST read, 501 write.** `GET /wp-json/wp/v2/{rest_base}` (collection and
+    single) is served for each registered post type and taxonomy, in the same
+    envelope and pagination headers as posts and pages. Custom post type items
+    carry a term-id array per attached taxonomy, keyed by that taxonomy's
+    `rest_base`. `POST`, `PUT`, `PATCH` and `DELETE` on these routes answer
+    `501`, via the same not-implemented response as the REST media and user
+    `DELETE` verbs. `/wp/v2/types` and `/wp/v2/taxonomies` are not implemented.
+    A non-published custom post row requested by id is returned only to a
+    caller holding the edit capability derived from the type's
+    `capability_type` (default `post`); every other caller receives `404
+    rest_post_invalid_id`, as for posts and pages. No new capability names are
+    introduced.
+  - **Admin type validation.** The admin-API post list accepts `type` values
+    that are `post`, `page`, or the name of a registered post type, and answers
+    `400` with error code `invalid_type` for any other value, without reading
+    the database. With no `type` the default stays `post` and `page`. The
+    admin-API write paths still reject any type other than `post` and `page`,
+    and the admin SPA UI is unchanged. The admin author list includes authors of
+    registered types.
+  - **`migrate -check` diagnostic.** `grimoire-cli migrate -check` reports,
+    read only, each distinct `post_type` in `{prefix}posts` and each taxonomy
+    in `{prefix}term_taxonomy` that is neither built in nor declared, naming
+    the config key to add (`content.post_types` or `content.taxonomies`). It
+    also notes a declared type that has no rows. Nothing is exposed as a result
+    of this report.
+  - **Documented consequences.** Registering a custom base or archive slug
+    takes that URL space: a page or post slugged like a registered custom
+    base or archive slug becomes unreachable at that URL, because the custom
+    route is classified first. Precedence is fixed in
+    `routing.Structure.Classify`; see the M12 design for the full table.
 
 ## Public read guarantees
 

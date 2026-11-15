@@ -89,6 +89,15 @@ func restTermBase(taxonomy string) (collection, single string) {
 // canonical one rather than a dead URL.
 func (s *Server) restTermLink(r *http.Request, t domain.Term, hier *content.TermHierarchy) string {
 	if t.Taxonomy != content.TaxonomyCategory {
+		if _, ok := s.registry.Taxonomy(t.Taxonomy); ok {
+			ancestry := []string{t.Slug}
+			if hier != nil {
+				if got := hier.Ancestry(t.ID); len(got) > 0 {
+					ancestry = got
+				}
+			}
+			return restAbs(r, s.permalinks.CustomTermPath(t.Taxonomy, ancestry))
+		}
 		return restAbs(r, s.permalinks.TagPath(t.Slug))
 	}
 	ancestry := []string{t.Slug}
@@ -102,7 +111,7 @@ func (s *Server) restTermLink(r *http.Request, t domain.Term, hier *content.Term
 
 // termToREST maps a domain.Term to its wp-json view (Req 6.1). hier is the
 // per-request term graph restTermLink resolves a category's ancestry from;
-// see restTermCategoryGraph for who loads it and when it is nil.
+// see restTermGraph for who loads it and when it is nil.
 func (s *Server) termToREST(r *http.Request, t domain.Term, hier *content.TermHierarchy) restTerm {
 	return restTerm{
 		ID:       t.ID,
@@ -115,7 +124,7 @@ func (s *Server) termToREST(r *http.Request, t domain.Term, hier *content.TermHi
 	}
 }
 
-// restTermCategoryGraph resolves the category taxonomy's parent/child graph
+// restTermGraph resolves the category taxonomy's parent/child graph
 // once for the current REST request, for reuse across every term in the
 // response (Req 10.2). It returns nil -- never an error -- for three cases
 // that all want the same degradation rather than a 500 on a link field:
@@ -126,11 +135,18 @@ func (s *Server) termToREST(r *http.Request, t domain.Term, hier *content.TermHi
 //   - the read failed. restTermLink then advertises the flat path, which the
 //     archive route 301s to the canonical one, and the request still answers
 //     with the term data it successfully read.
-func (s *Server) restTermCategoryGraph(r *http.Request, taxonomy string) *content.TermHierarchy {
-	if taxonomy != content.TaxonomyCategory || s.termWrite == nil {
+func (s *Server) restTermGraph(r *http.Request, taxonomy string) *content.TermHierarchy {
+	if s.termWrite == nil {
 		return nil
 	}
-	hier, err := content.LoadTermHierarchy(r.Context(), s.termWrite, content.TaxonomyCategory)
+	if taxonomy != content.TaxonomyCategory {
+		// A registered hierarchical taxonomy needs its graph too; post_tag and
+		// flat custom taxonomies read none.
+		if tax, ok := s.registry.Taxonomy(taxonomy); !ok || !tax.Hierarchical {
+			return nil
+		}
+	}
+	hier, err := content.LoadTermHierarchy(r.Context(), s.termWrite, taxonomy)
 	if err != nil {
 		s.log.Error("rest term hierarchy", "method", r.Method, "path", r.URL.Path, "err", err)
 		return nil
@@ -174,7 +190,7 @@ func (s *Server) handleRESTTermsCollection(taxonomy string) http.HandlerFunc {
 		}
 		// One graph read for the whole listing, taken after the rows so a
 		// failed listing costs nothing (Req 10.2).
-		hier := s.restTermCategoryGraph(r, taxonomy)
+		hier := s.restTermGraph(r, taxonomy)
 		out := make([]restTerm, len(terms))
 		for i, t := range terms {
 			out[i] = s.termToREST(r, t, hier)
@@ -212,7 +228,7 @@ func (s *Server) handleRESTTermSingle(taxonomy string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		_ = writeRESTResponse(w, r, http.StatusOK, s.termToREST(r, t, s.restTermCategoryGraph(r, taxonomy)))
+		_ = writeRESTResponse(w, r, http.StatusOK, s.termToREST(r, t, s.restTermGraph(r, taxonomy)))
 	}
 }
 
@@ -277,7 +293,7 @@ func (s *Server) handleRESTTermCreate(taxonomy string) http.HandlerFunc {
 		// Read after the write, so the new term is in the graph its own link
 		// is built from, and the response reflects the written parent from the
 		// same source the archive route walks rather than an assumption here.
-		_ = writeRESTResponse(w, r, http.StatusCreated, s.termToREST(r, created, s.restTermCategoryGraph(r, taxonomy)))
+		_ = writeRESTResponse(w, r, http.StatusCreated, s.termToREST(r, created, s.restTermGraph(r, taxonomy)))
 	}
 }
 
@@ -329,7 +345,7 @@ func (s *Server) handleRESTTermUpdate(taxonomy string) http.HandlerFunc {
 		}
 		// Read after the rename, so a slug change is reflected in the link
 		// the response advertises for it.
-		_ = writeRESTResponse(w, r, http.StatusOK, s.termToREST(r, updated, s.restTermCategoryGraph(r, taxonomy)))
+		_ = writeRESTResponse(w, r, http.StatusOK, s.termToREST(r, updated, s.restTermGraph(r, taxonomy)))
 	}
 }
 
@@ -352,7 +368,7 @@ func (s *Server) handleRESTTermDelete(taxonomy string) http.HandlerFunc {
 		// Read the graph before the delete, not after: the echoed "previous"
 		// describes the term as it was, and a graph read taken afterwards no
 		// longer holds it, so its ancestry would come back empty.
-		hier := s.restTermCategoryGraph(r, taxonomy)
+		hier := s.restTermGraph(r, taxonomy)
 		principal, _ := PrincipalFrom(r.Context())
 		if err := s.termWrite.Delete(r.Context(), principal, current.ID); err != nil {
 			switch {

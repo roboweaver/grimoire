@@ -267,7 +267,7 @@ func TestPageHierarchyRecoverPathCycleEqualAncestryIsNotFound(t *testing.T) {
 // fixed point the canonical is built from, Req 3.5).
 func TestPageServiceResolvePublishedLeaf(t *testing.T) {
 	posts := &fakePostRepo{
-		bySlugPost: domain.Post{ID: 3, Slug: "history", Type: "page", Status: "publish"},
+		byIDPost: domain.Post{ID: 3, Slug: "history", Type: "page", Status: "publish"},
 	}
 	svc := &PageService{pages: pageGraph(), posts: posts}
 

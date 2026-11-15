@@ -2,6 +2,7 @@ package content
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sort"
 	"strings"
@@ -232,13 +233,13 @@ func (h *PageHierarchy) FindBySlug(slug string) (domain.PageNode, bool) {
 // PageService resolves nested page paths and page ancestries over post_parent.
 // It holds a PageReader (the additive page-graph read port) the way TermService
 // holds a TermReader for CategoryArchive, and a PostRepository for the
-// published-leaf confirmation. Published-only: the leaf is confirmed through the
-// existing BySlug/PublishedByID published filters (Req 3.4). It is the single
+// published-leaf confirmation. Published-only: the leaf is confirmed by ID and
+// type "page" through PublishedByID, never by slug (Req 3.4). It is the single
 // home of the page walk for both handler entry points and the REST mapper, so
 // there is one page-ancestry computation (Req 4.3).
 type PageService struct {
 	pages domain.PageReader     // the new additive read port (Req 7)
-	posts domain.PostRepository // BySlug/PublishedByID for the published leaf
+	posts domain.PostRepository // PublishedByID for the published leaf
 }
 
 // NewPageService constructs a PageService over a PageReader and a
@@ -253,9 +254,11 @@ func NewPageService(pages domain.PageReader, posts domain.PostRepository) *PageS
 // canonical is built from, Req 3.5). A failed walk whose final segment names a
 // page returns a *PageMovedError carrying that page's ancestry (Req 5.1, 5.2); a
 // final segment naming nothing returns domain.ErrNotFound (Req 3.3). The leaf
-// node from the graph is confirmed published via posts.BySlug before a 200 is
-// possible, so a draft/private page in the graph resolves to not-found exactly
-// as today (Req 3.4).
+// node from the graph is confirmed by ID with posts.PublishedByID(leaf.ID, "page")
+// before a 200 is possible, so a draft/private page resolves to not-found and a
+// same-slug page or post can never stand in for it. The moved-page redirect is
+// gated on the target being published, so an unpublished page is never
+// disclosed (Req 3.4).
 func (s *PageService) Resolve(ctx context.Context, segments []string) (domain.Post, []string, error) {
 	h, err := LoadPageHierarchy(ctx, s.pages)
 	if err != nil {
@@ -263,13 +266,20 @@ func (s *PageService) Resolve(ctx context.Context, segments []string) (domain.Po
 	}
 	leaf, ok := h.ResolvePath(segments)
 	if !ok {
-		return domain.Post{}, nil, h.recoverPath(segments)
+		rerr := h.recoverPath(segments)
+		var moved *PageMovedError
+		if errors.As(rerr, &moved) {
+			// Never disclose an unpublished page by redirecting to it.
+			if _, err := s.posts.PublishedByID(ctx, moved.Page.ID, "page"); err != nil {
+				return domain.Post{}, nil, err
+			}
+		}
+		return domain.Post{}, nil, rerr
 	}
 	ancestry := h.Ancestry(leaf.ID)
-	// Confirm the leaf is published through the existing published-only filter.
-	// BySlug defaults to {"post","page"} with post_status='publish', so a draft
-	// leaf present in the graph returns ErrNotFound here (Req 3.4).
-	post, err := s.posts.BySlug(ctx, leaf.Slug)
+	// Confirm the walked leaf by ID and type "page" with the published-only
+	// filter, so a draft leaf returns ErrNotFound (Req 3.4).
+	post, err := s.posts.PublishedByID(ctx, leaf.ID, "page")
 	if err != nil {
 		return domain.Post{}, nil, err
 	}

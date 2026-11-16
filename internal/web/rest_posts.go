@@ -1,8 +1,11 @@
 package web
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -263,6 +266,9 @@ type restPostWriteRequest struct {
 	Status        *string `json:"status"`
 	Date          *string `json:"date"`
 	CommentStatus *string `json:"comment_status"`
+	// Parent is honoured only for a registered custom type; nil leaves the
+	// stored parent untouched, 0 makes the item top-level.
+	Parent *int64 `json:"parent"`
 }
 
 // parseRESTPostWrite validates body per Req 6.1, reusing the admin API's
@@ -297,6 +303,9 @@ func (s *Server) parseRESTPostWrite(body restPostWriteRequest, typ string, curre
 	}
 	if body.CommentStatus != nil {
 		p.CommentStatus = *body.CommentStatus
+	}
+	if body.Parent != nil && s.isRegisteredPostType(typ) && typ != "post" && typ != "page" {
+		p.ParentID = *body.Parent
 	}
 	if body.Status != nil {
 		p.Status = *body.Status
@@ -357,8 +366,16 @@ func (s *Server) handleRESTPostCreate(typ string) http.HandlerFunc {
 		}
 		principal, _ := PrincipalFrom(r.Context())
 		var body restPostWriteRequest
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		raw, err := io.ReadAll(r.Body)
+		if err == nil {
+			err = json.Unmarshal(raw, &body)
+		}
+		if err != nil {
 			writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid request body.")
+			return
+		}
+		terms, ok := s.restTermAssignments(w, r, principal, typ, raw, "rest_cannot_create", "Sorry, you are not allowed to create "+typ+"s as this user.")
+		if !ok {
 			return
 		}
 		p, code, err := s.parseRESTPostWrite(body, typ, nil)
@@ -383,7 +400,14 @@ func (s *Server) handleRESTPostCreate(typ string) http.HandlerFunc {
 				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "slug is invalid")
 				return
 			}
+			if errors.Is(err, content.ErrPostParentInvalid) || errors.Is(err, content.ErrPostParentCycle) {
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "parent is invalid")
+				return
+			}
 			writeRESTError(w, http.StatusInternalServerError, "rest_create_failed", "Could not create "+typ+".")
+			return
+		}
+		if !s.applyRESTTerms(w, r, principal, typ, id, terms) {
 			return
 		}
 		s.writeRESTPostResult(w, r, typ, id, http.StatusCreated)
@@ -428,8 +452,16 @@ func (s *Server) handleRESTPostUpdate(typ string) http.HandlerFunc {
 			return
 		}
 		var body restPostWriteRequest
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		raw, err := io.ReadAll(r.Body)
+		if err == nil {
+			err = json.Unmarshal(raw, &body)
+		}
+		if err != nil {
 			writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid request body.")
+			return
+		}
+		terms, ok := s.restTermAssignments(w, r, principal, typ, raw, "rest_cannot_edit", "Sorry, you are not allowed to update this "+typ+".")
+		if !ok {
 			return
 		}
 		p, code, err := s.parseRESTPostWrite(body, typ, &current)
@@ -458,9 +490,14 @@ func (s *Server) handleRESTPostUpdate(typ string) http.HandlerFunc {
 				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "title is required unless status is draft")
 			case errors.Is(err, content.ErrSlugInvalid):
 				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "slug is invalid")
+			case errors.Is(err, content.ErrPostParentInvalid), errors.Is(err, content.ErrPostParentCycle):
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "parent is invalid")
 			default:
 				writeRESTError(w, http.StatusInternalServerError, "rest_update_failed", "Could not update "+typ+".")
 			}
+			return
+		}
+		if !s.applyRESTTerms(w, r, principal, typ, id, terms) {
 			return
 		}
 		s.writeRESTPostResult(w, r, typ, id, http.StatusOK)
@@ -502,7 +539,12 @@ func (s *Server) handleRESTPostDelete(typ string) http.HandlerFunc {
 			writeRESTError(w, http.StatusNotFound, "rest_post_invalid_id", "Invalid "+typ+" ID.")
 			return
 		}
-		item, links, embedded, err := s.mapRESTPost(r, typ, current, nil)
+		hier, err := s.restHierarchy(r, typ)
+		if err != nil {
+			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
+			return
+		}
+		item, links, embedded, err := s.mapRESTPost(r, typ, current, hier)
 		if err != nil {
 			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
 			return
@@ -533,7 +575,12 @@ func (s *Server) writeRESTPostResult(w http.ResponseWriter, r *http.Request, typ
 		writeRESTError(w, http.StatusInternalServerError, "rest_post_invalid_id", "Could not look up "+typ+" after write.")
 		return
 	}
-	item, links, embedded, err := s.mapRESTPost(r, typ, p, nil)
+	hier, err := s.restHierarchy(r, typ)
+	if err != nil {
+		writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
+		return
+	}
+	item, links, embedded, err := s.mapRESTPost(r, typ, p, hier)
 	if err != nil {
 		writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not map "+typ+".")
 		return
@@ -670,4 +717,110 @@ func (s *Server) authorEmbed(r *http.Request, authorID int64, embed bool) (*doma
 		return nil, nil, err
 	}
 	return &u, view, nil
+}
+
+// restTermChecker is the optional pre-write guard of the post-terms service
+// (content.PostTermsWriteService.CheckAssignable), asserted on
+// s.postTermsWrite so the admin writer interface stays unchanged.
+type restTermChecker interface {
+	CheckAssignable(ctx context.Context, actor auth.Principal, typ, taxonomy string, termIDs []int64) error
+}
+
+// restTermAssignment is one taxonomy's requested term set.
+type restTermAssignment struct {
+	taxonomy string
+	ids      []int64
+}
+
+// parseRESTTermIDs decodes a rest_base value as an array of positive integers.
+// null, non-arrays, non-integers and non-positive ids are all rejected.
+func parseRESTTermIDs(raw json.RawMessage) ([]int64, bool) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, false
+	}
+	var ids []int64
+	if err := json.Unmarshal(raw, &ids); err != nil {
+		return nil, false
+	}
+	if ids == nil {
+		ids = []int64{}
+	}
+	for _, id := range ids {
+		if id <= 0 {
+			return nil, false
+		}
+	}
+	return ids, true
+}
+
+// restTermAssignments reads the rest_base keys of a registered custom type's
+// attached taxonomies from the raw body and validates them before any write
+// (Req 12.1-12.3, 12.5). Capability is checked first so a caller lacking it
+// gets 403 whatever the value. On failure it writes the response and returns
+// ok=false. Built-in types and unregistered keys yield no assignments.
+func (s *Server) restTermAssignments(w http.ResponseWriter, r *http.Request, actor auth.Principal, typ string, raw []byte, forbiddenCode, forbiddenMsg string) ([]restTermAssignment, bool) {
+	if s.registry == nil || typ == "post" || typ == "page" {
+		return nil, true
+	}
+	pt, registered := s.registry.PostType(typ)
+	checker, hasChecker := s.postTermsWrite.(restTermChecker)
+	if !registered || !hasChecker {
+		return nil, true
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, true
+	}
+	var out []restTermAssignment
+	for _, taxonomy := range pt.Taxonomies {
+		base, ok := s.registry.TaxonomyRESTBase(taxonomy)
+		if !ok {
+			continue
+		}
+		val, present := fields[base]
+		if !present {
+			continue
+		}
+		ids, valid := parseRESTTermIDs(val)
+		if !valid {
+			// Capability first, so the caller learns nothing about values.
+			if err := checker.CheckAssignable(r.Context(), actor, typ, taxonomy, nil); err != nil {
+				s.writeRESTTermError(w, typ, err, forbiddenCode, forbiddenMsg)
+				return nil, false
+			}
+			writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", base+" must be an array of positive term ids")
+			return nil, false
+		}
+		if err := checker.CheckAssignable(r.Context(), actor, typ, taxonomy, ids); err != nil {
+			s.writeRESTTermError(w, typ, err, forbiddenCode, forbiddenMsg)
+			return nil, false
+		}
+		out = append(out, restTermAssignment{taxonomy: taxonomy, ids: ids})
+	}
+	return out, true
+}
+
+// writeRESTTermError maps a CheckAssignable/SetPostTerms failure.
+func (s *Server) writeRESTTermError(w http.ResponseWriter, typ string, err error, forbiddenCode, forbiddenMsg string) {
+	switch {
+	case errors.Is(err, content.ErrForbidden):
+		writeRESTError(w, http.StatusForbidden, forbiddenCode, forbiddenMsg)
+	case errors.Is(err, content.ErrTaxonomyNotAttached), errors.Is(err, content.ErrTermInvalid):
+		writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "term ids are invalid for this taxonomy")
+	default:
+		writeRESTError(w, http.StatusInternalServerError, "rest_term_assign_failed", "Could not assign terms to "+typ+".")
+	}
+}
+
+// applyRESTTerms assigns the validated sets after the post write succeeded. A
+// failure here is a 500: the ids were already validated, so it is not the
+// caller's fault (design D10).
+func (s *Server) applyRESTTerms(w http.ResponseWriter, r *http.Request, actor auth.Principal, typ string, postID int64, terms []restTermAssignment) bool {
+	for _, t := range terms {
+		if err := s.postTermsWrite.SetPostTerms(r.Context(), actor, postID, t.taxonomy, t.ids); err != nil {
+			writeRESTError(w, http.StatusInternalServerError, "rest_term_assign_failed", "Could not assign terms to "+typ+".")
+			return false
+		}
+	}
+	return true
 }

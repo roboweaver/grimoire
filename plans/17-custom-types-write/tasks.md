@@ -441,7 +441,7 @@
 
 ## Phase 13 — Content: hierarchical `post_parent` (`internal/content`, TDD) — PR C
 
-- [~] 13.1 Write the failing hierarchy tests first. Add
+- [x] 13.1 Write the failing hierarchy tests first. Add
       `internal/content/postparent_test.go` over the Phase 8 fake with a seeded
       `guide` graph (root, child, grandchild, a sibling) and a `product` row:
       `Create` and `Update` with a valid same-type parent write `ParentID` (11.1);
@@ -459,7 +459,7 @@
       Verify: `go test ./internal/content -run PostParent` — fails (compile, then
       the parent is ignored). _(Req 11.1-11.4, 11.6, 11.7, 11.9; D7)_
 
-- [~] 13.2 Implement the parent guard. In `internal/content/writeservices.go` add
+- [x] 13.2 Implement the parent guard. In `internal/content/writeservices.go` add
       `ErrPostParentInvalid`, `ErrPostParentCycle`, `validatePostParent` as
       designed, call it from `Create` and from `Update` only when
       `p.ParentID != cur.ParentID` and only for a registered type, and assign
@@ -472,7 +472,7 @@
 
 ## Phase 14 — Web: `parent` on REST and admin, nested links (`internal/web`, `internal/content`, TDD) — PR C
 
-- [~] 14.1 Write the failing handler and mapper tests first. Add
+- [x] 14.1 Write the failing handler and mapper tests first. Add
       `internal/web/rest_custom_posts_parent_test.go`: REST create of a `guide`
       with `parent` → stored and echoed, omitted `parent` on `PATCH` unchanged,
       `parent: 0` makes top-level (11.1, 11.5); the response `link` is the nested
@@ -491,7 +491,7 @@
       Verify: `go test ./internal/web ./internal/content -run 'Parent'` — fails
       (parent ignored; link flat). _(Req 11.1-11.5, 11.8, 11.9; D7)_
 
-- [~] 14.2 Implement parent handling and nested links. In
+- [x] 14.2 Implement parent handling and nested links. In
       `internal/web/rest_posts.go`: add `Parent *int64 json:"parent"` to
       `restPostWriteRequest`; apply it to the domain post only when the type is
       registered; map the two parent sentinels to `400 rest_invalid_param`; pass
@@ -511,7 +511,7 @@
 
 ## Phase 15 — Content: term assignment to registered taxonomies (`internal/content`, TDD) — PR C
 
-- [~] 15.1 Write the failing service tests first. Add
+- [x] 15.1 Write the failing service tests first. Add
       `internal/content/postterms_custom_test.go`: `SetPostTerms` on a `product`
       row with an attached taxonomy and ids that belong to it writes (12.1);
       a taxonomy not attached to the type → `ErrTaxonomyNotAttached` (12.4); an id
@@ -527,7 +527,7 @@
       Verify: `go test ./internal/content -run PostTermsCustom` — fails (compile).
       _(Req 12.1-12.5, 12.7; D10)_
 
-- [~] 15.2 Implement the assignment guards. In `internal/content/postterms.go`
+- [x] 15.2 Implement the assignment guards. In `internal/content/postterms.go`
       make `NewPostTermsWriteService` variadic over `PostTermsOption`
       (`WithPostTermsRegistry`, `WithPostTermsReader`), add `ErrTaxonomyNotAttached`
       and `ErrTermInvalid`, use `suffixFor`-equivalent logic (share one exported
@@ -539,7 +539,7 @@
 
 ## Phase 16 — Web: term assignment on REST and admin (`internal/web`, TDD) — PR C
 
-- [~] 16.1 Write the failing handler tests first. Add
+- [x] 16.1 Write the failing handler tests first. Add
       `internal/web/rest_custom_posts_terms_test.go`: REST create of a `product`
       with `"genre": [1,2]` assigns both and the response lists them under the
       `genre` key (12.1, 12.6); a non-array or non-positive value → `400
@@ -559,7 +559,7 @@
       Verify: `go test ./internal/web -run 'CustomPostTerms|AdminPostTerms'` —
       fails (keys ignored, `terms` map built-in only). _(Req 12; D10)_
 
-- [~] 16.2 Implement the handler changes. In `internal/web/rest_posts.go` read the
+- [x] 16.2 Implement the handler changes. In `internal/web/rest_posts.go` read the
       body once into bytes, decode the typed request and, for registered types, a
       `map[string]json.RawMessage` for the `rest_base` keys of `pt.Taxonomies`
       (reverse lookup through `registry.TaxonomyRESTBase`); call
@@ -576,7 +576,7 @@
 
 ## Phase 17 — Assembly: wire PR C and drive it through `buildHandler` (`cmd/grimoire`, TDD) — PR C
 
-- [~] 17.1 Write the failing assembly tests first. Extend
+- [x] 17.1 Write the failing assembly tests first. Extend
       `cmd/grimoire/assembly_custom_write_test.go` with
       `TestBuildHandlerCustomHierarchyAndTerms`: create a `guide` tree through REST
       and admin with `parent`; the child serves at its nested public URL; a cycle
@@ -590,7 +590,7 @@
       term-assignment steps (the post-terms service has no registry or term reader
       set in `buildHandler`). _(Req 11, 12, 13.3, 14.3, 17.1, 17.3; D3, D7, D10)_
 
-- [~] 17.2 Wire the post-terms options. In `cmd/grimoire/assembly.go` pass
+- [x] 17.2 Wire the post-terms options. In `cmd/grimoire/assembly.go` pass
       `content.WithPostTermsRegistry(deps.Registry)` and
       `content.WithPostTermsReader(repos.TermReader)` to
       `NewPostTermsWriteService`.
@@ -598,7 +598,7 @@
       Verify: `go test ./cmd/grimoire` — 17.1 passes; remove one option locally and
       confirm 17.1 fails; golden green. _(Req 12, 17.1; D3)_
 
-- [~] 18. Checkpoint — PR C gate
+- [x] 18. Checkpoint — PR C gate
   - Run `gofmt -l .` (empty), `go vet ./...`, `go build ./...`, `go test ./...`.
   - Confirm no storage port, migration or capability name was added
     (`git diff --stat main -- internal/storage internal/domain`). Ensure all tests

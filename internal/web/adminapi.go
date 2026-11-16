@@ -158,6 +158,7 @@ type postDetailResponse struct {
 	Excerpt       string                   `json:"excerpt"`
 	Content       string                   `json:"content"`
 	CommentStatus string                   `json:"commentStatus"`
+	Parent        int64                    `json:"parent,omitempty"`
 	Terms         map[string][]termSummary `json:"terms"`
 	Partial       map[string]string        `json:"partial,omitempty"`
 }

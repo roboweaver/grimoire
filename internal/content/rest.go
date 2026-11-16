@@ -384,6 +384,9 @@ func (m *RESTMapper) Page(ctx context.Context, p domain.Post) (RESTPage, error) 
 type RESTCustomPost struct {
 	restItemCommon
 	Terms map[string][]int64
+	// Parent is the post_parent id, set only for a hierarchical type (0 for a
+	// top-level item). Nil omits the key, as for a flat type.
+	Parent *int64
 }
 
 // MarshalJSON emits the common fields followed by one key per Terms entry in
@@ -399,6 +402,9 @@ func (p RESTCustomPost) MarshalJSON() ([]byte, error) {
 	}
 	sort.Strings(keys)
 	out := bytes.TrimSuffix(base, []byte("}"))
+	if p.Parent != nil {
+		out = append(out, []byte(`,"parent":`+strconv.FormatInt(*p.Parent, 10))...)
+	}
 	for _, k := range keys {
 		ids := p.Terms[k]
 		if ids == nil {
@@ -459,7 +465,12 @@ func (m *RESTMapper) CustomPost(ctx context.Context, p domain.Post, pt registry.
 		}
 		terms[base] = ids
 	}
-	return RESTCustomPost{restItemCommon: common, Terms: terms}, nil
+	out := RESTCustomPost{restItemCommon: common, Terms: terms}
+	if pt.Hierarchical {
+		parent := p.ParentID
+		out.Parent = &parent
+	}
+	return out, nil
 }
 
 // restCommentStatus maps the raw comment_approved enum ("0"/"1"/"spam"/

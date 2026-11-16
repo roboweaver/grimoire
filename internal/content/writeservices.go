@@ -100,6 +100,20 @@ type PostWriteService struct {
 // is written. Handlers map it to 400.
 var ErrSlugInvalid = errors.New("content: post slug is invalid")
 
+// ErrPostParentInvalid is returned when a registered-type post names a parent
+// that is not allowed: any non-zero parent on a flat type, or a parent that is
+// absent or of another type on a hierarchical one. Nothing is written.
+var ErrPostParentInvalid = errors.New("content: post parent is invalid")
+
+// ErrPostParentCycle is returned when the requested parent is the post itself
+// or one of its descendants. Nothing is written.
+var ErrPostParentCycle = errors.New("content: post parent would create a cycle")
+
+// errPostNodesUnavailable reports a parent validation that cannot run because
+// no PostNodeReader was wired. It fails the write rather than skipping the
+// check.
+var errPostNodesUnavailable = errors.New("content: post parent cannot be validated without a node reader")
+
 // revisionSnapshotter is the narrow capability PostWriteService.Update needs
 // from a *RevisionWriteService: snapshot the pre-edit post as a new revision
 // (Req 1.1), enforcing whatever retention policy that service was configured
@@ -171,13 +185,8 @@ func (s *PostWriteService) registered(typ string) (registry.PostType, bool) {
 // suffixFor returns the capability suffix that decides writes of typ: the
 // registered type's capability_type family, else the legacy page/post family.
 func (s *PostWriteService) suffixFor(typ string) string {
-	if pt, ok := s.registered(typ); ok {
-		return auth.CapabilitySuffix(pt.CapabilityType)
-	}
-	if typ == "page" {
-		return auth.CapabilitySuffix("page")
-	}
-	return auth.CapabilitySuffix("post")
+	suf, _, _ := CapabilitySuffixFor(s.reg, typ)
+	return suf
 }
 
 // resolveSlug validates, derives and de-duplicates the slug of a
@@ -202,6 +211,39 @@ func (s *PostWriteService) resolveSlug(ctx context.Context, pt registry.PostType
 		cand = slug + "-" + strconv.Itoa(n)
 	}
 	return cand, nil
+}
+
+// validatePostParent checks the parent of a registered-type post. id is 0 on
+// create. The node reader is type-scoped, so membership in the loaded graph
+// means "exists and is of this type".
+func (s *PostWriteService) validatePostParent(ctx context.Context, pt registry.PostType, id, parent int64) error {
+	if parent == 0 {
+		return nil
+	}
+	if !pt.Hierarchical {
+		return ErrPostParentInvalid
+	}
+	if id != 0 && parent == id {
+		return ErrPostParentCycle
+	}
+	if s.nodes == nil {
+		return errPostNodesUnavailable
+	}
+	nodes, err := loadPostNodes(ctx, s.nodes, pt.Name)
+	if err != nil {
+		return err
+	}
+	h := &PageHierarchy{byID: make(map[int64]domain.PageNode, len(nodes))}
+	for _, n := range nodes {
+		h.byID[n.ID] = n
+	}
+	if _, ok := h.byID[parent]; !ok {
+		return ErrPostParentInvalid
+	}
+	if id != 0 && h.isAncestorOrSelf(id, parent) {
+		return ErrPostParentCycle
+	}
+	return nil
 }
 
 // NewPostWriteService constructs a PostWriteService over a PostWriter. By
@@ -251,6 +293,9 @@ func (s *PostWriteService) Create(ctx context.Context, actor auth.Principal, p d
 	p.Content = clean.Content
 	p.Excerpt = clean.Excerpt
 	if pt, ok := s.registered(p.Type); ok {
+		if err := s.validatePostParent(ctx, pt, 0, p.ParentID); err != nil {
+			return 0, err
+		}
 		slug, err := s.resolveSlug(ctx, pt, p.Slug, p.Title, p.ParentID, 0)
 		if err != nil {
 			return 0, err
@@ -362,6 +407,12 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	cur.Excerpt = clean.Excerpt
 	cur.Slug = p.Slug
 	if pt, ok := s.registered(cur.Type); ok {
+		if p.ParentID != cur.ParentID {
+			if err := s.validatePostParent(ctx, pt, cur.ID, p.ParentID); err != nil {
+				return err
+			}
+			cur.ParentID = p.ParentID
+		}
 		slug, err := s.resolveSlug(ctx, pt, p.Slug, cur.Title, cur.ParentID, cur.ID)
 		if err != nil {
 			return err

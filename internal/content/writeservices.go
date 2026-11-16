@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,7 +86,19 @@ type PostWriteService struct {
 	// fail-closed guarantee (Req 1.8) holds even for a call site that forgets
 	// WithContentPolicy.
 	policy *sanitize.Policy
+
+	// reg, nodes and detacher are the M17 registered-type collaborators. All
+	// are optional; with reg nil no type is "registered" and every code path
+	// below behaves exactly as before M17 (built-in types never enter them).
+	reg      *registry.Registry
+	nodes    domain.PostNodeReader
+	detacher domain.PostTermsWriter
 }
+
+// ErrSlugInvalid is returned when a registered-type post slug does not match
+// ^[a-z0-9][a-z0-9_-]*$ or when no slug can be derived from the title. Nothing
+// is written. Handlers map it to 400.
+var ErrSlugInvalid = errors.New("content: post slug is invalid")
 
 // revisionSnapshotter is the narrow capability PostWriteService.Update needs
 // from a *RevisionWriteService: snapshot the pre-edit post as a new revision
@@ -128,6 +141,69 @@ func WithContentPolicy(p *sanitize.Policy) PostWriteOption {
 	return func(s *PostWriteService) { s.policy = p }
 }
 
+// WithPostRegistry enables writes to registered custom post types. A nil
+// registry leaves built-in behavior unchanged.
+func WithPostRegistry(r *registry.Registry) PostWriteOption {
+	return func(s *PostWriteService) { s.reg = r }
+}
+
+// WithPostNodeReader wires the post-node read used to detect slug collisions
+// among registered-type posts.
+func WithPostNodeReader(n domain.PostNodeReader) PostWriteOption {
+	return func(s *PostWriteService) { s.nodes = n }
+}
+
+// WithTermDetacher wires the writer used to detach a registered-type post's
+// terms before the row is deleted.
+func WithTermDetacher(w domain.PostTermsWriter) PostWriteOption {
+	return func(s *PostWriteService) { s.detacher = w }
+}
+
+// registered returns the registry entry for typ. Built-in types are never
+// registered (the registry reserves their names).
+func (s *PostWriteService) registered(typ string) (registry.PostType, bool) {
+	if s.reg == nil || typ == "" || typ == "post" || typ == "page" {
+		return registry.PostType{}, false
+	}
+	return s.reg.PostType(typ)
+}
+
+// suffixFor returns the capability suffix that decides writes of typ: the
+// registered type's capability_type family, else the legacy page/post family.
+func (s *PostWriteService) suffixFor(typ string) string {
+	if pt, ok := s.registered(typ); ok {
+		return auth.CapabilitySuffix(pt.CapabilityType)
+	}
+	if typ == "page" {
+		return auth.CapabilitySuffix("page")
+	}
+	return auth.CapabilitySuffix("post")
+}
+
+// resolveSlug validates, derives and de-duplicates the slug of a
+// registered-type post. title is the already-sanitized title. selfID excludes
+// the post being updated; parent scopes hierarchical types.
+func (s *PostWriteService) resolveSlug(ctx context.Context, pt registry.PostType, slug, title string, parent, selfID int64) (string, error) {
+	if slug == "" {
+		slug = Slugify(title)
+	}
+	if !slugRE.MatchString(slug) {
+		return "", ErrSlugInvalid
+	}
+	if s.nodes == nil {
+		return slug, nil
+	}
+	nodes, err := loadPostNodes(ctx, s.nodes, pt.Name)
+	if err != nil {
+		return "", err
+	}
+	cand := slug
+	for n := 2; slugTaken(nodes, cand, pt.Hierarchical, parent, selfID); n++ {
+		cand = slug + "-" + strconv.Itoa(n)
+	}
+	return cand, nil
+}
+
 // NewPostWriteService constructs a PostWriteService over a PostWriter. By
 // default Update's revision-snapshot hook is a no-op; pass
 // WithRevisionSnapshotter to wire in real revisioning (Req 1.1). The content
@@ -157,7 +233,7 @@ func (s *PostWriteService) Create(ctx context.Context, actor auth.Principal, p d
 	if p.Date.IsZero() {
 		p.Date = time.Now()
 	}
-	if !auth.CanCreatePost(actor, p.Type, p.Status, p.Author) {
+	if !auth.CanCreatePostSuffix(actor, s.suffixFor(p.Type), p.Status, p.Author) {
 		return 0, ErrForbidden
 	}
 	// Req 4.2: sanitize the caller's values at the actor's tier, after the
@@ -174,6 +250,13 @@ func (s *PostWriteService) Create(ctx context.Context, actor auth.Principal, p d
 	p.Title = clean.Title
 	p.Content = clean.Content
 	p.Excerpt = clean.Excerpt
+	if pt, ok := s.registered(p.Type); ok {
+		slug, err := s.resolveSlug(ctx, pt, p.Slug, p.Title, p.ParentID, 0)
+		if err != nil {
+			return 0, err
+		}
+		p.Slug = slug
+	}
 	return s.w.Create(ctx, p)
 }
 
@@ -249,7 +332,8 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	if cur.Type == "" {
 		cur.Type = "post"
 	}
-	if !auth.CanEditPost(actor, cur.Type, cur.Status, cur.Author) {
+	suffix := s.suffixFor(cur.Type)
+	if !auth.CanEditPostSuffix(actor, suffix, cur.Status, cur.Author) {
 		return ErrForbidden
 	}
 	if !expectedModified.IsZero() && !cur.Modified.Equal(expectedModified) {
@@ -277,6 +361,13 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	cur.Content = clean.Content
 	cur.Excerpt = clean.Excerpt
 	cur.Slug = p.Slug
+	if pt, ok := s.registered(cur.Type); ok {
+		slug, err := s.resolveSlug(ctx, pt, p.Slug, cur.Title, cur.ParentID, cur.ID)
+		if err != nil {
+			return err
+		}
+		cur.Slug = slug
+	}
 	cur.CommentStatus = p.CommentStatus
 	if !p.Date.IsZero() && !p.Date.Equal(cur.Date) {
 		cur.Date = p.Date
@@ -289,7 +380,7 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 		cur.DateGMT = time.Time{}
 	}
 	if p.Status != "" && p.Status != cur.Status {
-		if !auth.CanEditPost(actor, cur.Type, p.Status, cur.Author) {
+		if !auth.CanEditPostSuffix(actor, suffix, p.Status, cur.Author) {
 			return ErrForbidden
 		}
 		cur.Status = p.Status
@@ -319,12 +410,19 @@ func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p d
 	if cur.Type == "" {
 		cur.Type = "post"
 	}
-	if !auth.CanDeletePost(actor, cur.Type, cur.Status, cur.Author) {
+	if !auth.CanDeletePostSuffix(actor, s.suffixFor(cur.Type), cur.Status, cur.Author) {
 		return ErrForbidden
 	}
 	if rw, ok := s.w.(domain.RevisionWriter); ok {
 		if err := rw.DeleteRevisionsOf(ctx, cur.ID); err != nil {
 			return err
+		}
+	}
+	if pt, ok := s.registered(cur.Type); ok && s.detacher != nil {
+		for _, tax := range pt.Taxonomies {
+			if err := s.detacher.SetPostTerms(ctx, cur.ID, tax, nil); err != nil {
+				return err
+			}
 		}
 	}
 	return s.w.Delete(ctx, cur.ID)

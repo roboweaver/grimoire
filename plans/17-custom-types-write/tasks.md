@@ -258,7 +258,7 @@
 
 ## Phase 7 — Auth: suffix-taking capability functions (`internal/auth`, TDD) — PR B
 
-- [~] 7.1 Write the failing policy tests first. Add
+- [x] 7.1 Write the failing policy tests first. Add
       `internal/auth/policy_suffix_test.go`: table tests of
       `CanCreatePostSuffix`, `CanEditPostSuffix`, `CanDeletePostSuffix` for suffix
       `"products"` against principals built with `NewPrincipal` from each role in
@@ -275,7 +275,7 @@
       Verify: `go test ./internal/auth -run Suffix` — fails (undefined symbols).
       _(Req 7.1, 7.4, 15.3; D2)_
 
-- [~] 7.2 Implement the suffix variants. In `internal/auth/policy.go` move the
+- [x] 7.2 Implement the suffix variants. In `internal/auth/policy.go` move the
       three bodies into `CanCreatePostSuffix`, `CanEditPostSuffix`,
       `CanDeletePostSuffix` and make `CanCreatePost`, `CanEditPost`,
       `CanDeletePost` call them with `capSuffix(postType)`. No behavior change for
@@ -286,7 +286,7 @@
 
 ## Phase 8 — Content: `PostWriteService` for registered types (`internal/content`, TDD) — PR B
 
-- [~] 8.1 Write the failing service tests first. Add
+- [x] 8.1 Write the failing service tests first. Add
       `internal/content/postwrite_custom_test.go` with an in-memory fake that is a
       `domain.PostWriter` + `domain.PostNodeReader` + `domain.PostTermsWriter`
       (records calls and order). Service built with the registry, node reader and
@@ -312,7 +312,7 @@
       then `edit_posts` holders may write `product`). _(Req 7.1-7.4, 8.1-8.4,
       9.1-9.5, 13.2, 13.3, 13.5; D2, D4, D5, D11)_
 
-- [~] 8.2 Implement the post service changes. In
+- [x] 8.2 Implement the post service changes. In
       `internal/content/writeservices.go` add `WithPostRegistry`,
       `WithPostNodeReader`, `WithTermDetacher`, the sentinel `ErrSlugInvalid`,
       `registered(typ)`, `suffixFor(typ)`, and route `Create`/`Update`/`Delete`
@@ -331,7 +331,7 @@
 
 ## Phase 9 — Web REST: custom post writes (`internal/web`, TDD) — PR B
 
-- [~] 9.1 Write the failing REST tests first. Add
+- [x] 9.1 Write the failing REST tests first. Add
       `internal/web/rest_custom_posts_write_test.go` over a real router with the
       registry fixture, in the shape of `rest_posts_write_test.go` and
       `rest_custom_posts_test.go`. Assert: `POST /wp-json/wp/v2/product` by a
@@ -353,7 +353,7 @@
       Verify: `go test ./internal/web -run RESTCustomPostWrite` — fails with `501`.
       _(Req 6.1-6.7, 7.1, 7.7, 8.1-8.3, 9.2, 9.3, 13.1; D1, D2, D17)_
 
-- [~] 9.2 Implement REST custom post writes. In
+- [x] 9.2 Implement REST custom post writes. In
       `internal/web/rest_custom_posts.go` bind `handleRESTPostCreate(pt.Name)` to
       `POST /{base}` and `handleRESTPostUpdate`/`handleRESTPostDelete` to
       `PUT`/`PATCH`/`DELETE /{base}/{id}`, only when `s.postWrite != nil`; keep the
@@ -369,7 +369,7 @@
 
 ## Phase 10 — Web admin: custom post writes (`internal/web`, TDD) — PR B
 
-- [~] 10.1 Write the failing admin tests first. Add
+- [x] 10.1 Write the failing admin tests first. Add
       `internal/web/adminapi_posts_custom_test.go`: `POST /admin/api/posts` with
       `type: "product"` → `201` writing `post_type = product` (10.1); `type:
       "nonsense"` → `400`, and with no registry the message is unchanged (10.2);
@@ -383,7 +383,7 @@
       Verify: `go test ./internal/web -run AdminPostCustom` — fails (`type must be
       "post" or "page"`). _(Req 7.7, 8, 9, 10.1-10.6; D13)_
 
-- [~] 10.2 Implement admin custom post writes. In
+- [x] 10.2 Implement admin custom post writes. In
       `internal/web/adminapi_posts.go` make the `parsePostWrite` type check accept
       registered types (message unchanged with no registry), map `ErrSlugInvalid`
       to `badRequestError` in create and update. Leave `adminKnownTaxonomies`,
@@ -394,7 +394,7 @@
 
 ## Phase 11 — Assembly: wire posts and the scheduler (`cmd/grimoire`, `internal/scheduler`, TDD) — PR B
 
-- [~] 11.1 Write the failing wiring tests first. Extend
+- [x] 11.1 Write the failing wiring tests first. Extend
       `cmd/grimoire/assembly_custom_write_test.go` with
       `TestBuildHandlerCustomPostWrites`: through `buildHandler`, an editor holding
       `edit_products`/`publish_products` creates, updates and deletes a `product`
@@ -417,7 +417,7 @@
       answers `403` or `501`: no registry on the service; `buildScheduler` and the
       option do not exist). _(Req 7.6, 13.3, 14.1, 14.2, 17.1-17.3; D3, D12, D14)_
 
-- [~] 11.2 Wire the post options and the scheduler. In
+- [x] 11.2 Wire the post options and the scheduler. In
       `internal/scheduler/scheduler.go` add `Option`, `WithCapabilitySuffixes` and
       the per-scheduler `principal` (copy of `systemPrincipal` plus the four
       capabilities per suffix); make `New` variadic. In
@@ -434,7 +434,7 @@
       `m7_scheduler_test.go` e2e still passes; golden green. _(Req 7.6, 13.3, 14,
       17.1, 17.2; D3, D14)_
 
-- [~] 12. Checkpoint — PR B gate
+- [x] 12. Checkpoint — PR B gate
   - Run `gofmt -l .` (empty), `go vet ./...`, `go build ./...`, `go test ./...`.
   - Confirm no file under `internal/storage` or any migration changed. Ensure all
     tests pass, ask the user if questions arise.

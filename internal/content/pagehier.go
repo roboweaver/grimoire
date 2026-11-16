@@ -297,3 +297,40 @@ func (s *PageService) AncestryFor(ctx context.Context, id int64) ([]string, erro
 	}
 	return h.Ancestry(id), nil
 }
+
+// loadPostNodes reads every row of postType (all statuses) through the keyset
+// port, pageHierarchyPageSize at a time.
+func loadPostNodes(ctx context.Context, r domain.PostNodeReader, postType string) ([]domain.PostNode, error) {
+	var all []domain.PostNode
+	var afterID int64
+	for {
+		batch, err := r.ListPostNodes(ctx, postType, afterID, pageHierarchyPageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			return all, nil
+		}
+		all = append(all, batch...)
+		afterID = batch[len(batch)-1].ID
+		if len(batch) < pageHierarchyPageSize {
+			return all, nil
+		}
+	}
+}
+
+// slugTaken reports whether slug is used by a node other than selfID. For a
+// hierarchical type only nodes under the same parent count; a flat type scopes
+// by type alone (nodes are already of one type).
+func slugTaken(nodes []domain.PostNode, slug string, hierarchical bool, parent, selfID int64) bool {
+	for _, n := range nodes {
+		if n.ID == selfID || n.Slug != slug {
+			continue
+		}
+		if hierarchical && n.ParentID != parent {
+			continue
+		}
+		return true
+	}
+	return false
+}

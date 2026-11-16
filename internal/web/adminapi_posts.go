@@ -103,7 +103,7 @@ func (s *Server) parsePostWrite(body postWriteRequest, current *domain.Post) (do
 	if typ == "" {
 		typ = "post"
 	}
-	if typ != "post" && typ != "page" {
+	if typ != "post" && typ != "page" && !s.isRegisteredPostType(typ) {
 		return domain.Post{}, badRequestError{msg: "type must be \"post\" or \"page\""}
 	}
 	status := body.Status
@@ -154,6 +154,16 @@ func (s *Server) parsePostWrite(body postWriteRequest, current *domain.Post) (do
 		Date:          date,
 		CommentStatus: body.CommentStatus,
 	}, nil
+}
+
+// isRegisteredPostType reports whether typ is a registry-declared custom post
+// type. With no registry it is always false, so the built-in message stands.
+func (s *Server) isRegisteredPostType(typ string) bool {
+	if s.registry == nil {
+		return false
+	}
+	_, ok := s.registry.PostType(typ)
+	return ok
 }
 
 // postDetail builds the shared Req 4.1 detail response for p, resolving its
@@ -248,6 +258,9 @@ func (s *Server) adminPostCreate(w http.ResponseWriter, r *http.Request) error {
 		if errors.Is(err, content.ErrTitleEmpty) {
 			return badRequestError{msg: "title is required unless status is draft"}
 		}
+		if errors.Is(err, content.ErrSlugInvalid) {
+			return badRequestError{msg: "invalid slug"}
+		}
 		return err
 	}
 	partial := s.applyTermIDs(r.Context(), principal, id, body.TermIDs)
@@ -300,6 +313,9 @@ func (s *Server) adminPostUpdate(w http.ResponseWriter, r *http.Request) error {
 		// 500 (Req 4.2/4.4).
 		if errors.Is(err, content.ErrTitleEmpty) {
 			return badRequestError{msg: "title is required unless status is draft"}
+		}
+		if errors.Is(err, content.ErrSlugInvalid) {
+			return badRequestError{msg: "invalid slug"}
 		}
 		return err
 	}

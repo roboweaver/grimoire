@@ -29,7 +29,12 @@ func CapabilitySuffix(capabilityType string) string {
 // status authored by authorID. Creating on another user's behalf requires the
 // edit_others_* capability; publishing requires publish_*.
 func CanCreatePost(actor Principal, postType, status string, authorID int64) bool {
-	suf := capSuffix(postType)
+	return CanCreatePostSuffix(actor, capSuffix(postType), status, authorID)
+}
+
+// CanCreatePostSuffix is CanCreatePost driven by an explicit capability suffix
+// (for example "products" for edit_products) instead of a post type.
+func CanCreatePostSuffix(actor Principal, suf, status string, authorID int64) bool {
 	if !actor.Can("edit_" + suf) {
 		return false
 	}
@@ -47,7 +52,12 @@ func CanCreatePost(actor Principal, postType, status string, authorID int64) boo
 // published post requires edit_published_*; editing another's private post
 // requires edit_private_*.
 func CanEditPost(actor Principal, postType, status string, authorID int64) bool {
-	suf := capSuffix(postType)
+	return CanEditPostSuffix(actor, capSuffix(postType), status, authorID)
+}
+
+// CanEditPostSuffix is CanEditPost driven by an explicit capability suffix
+// (for example "products" for edit_products) instead of a post type.
+func CanEditPostSuffix(actor Principal, suf, status string, authorID int64) bool {
 	if authorID == actor.UserID {
 		if !actor.Can("edit_" + suf) {
 			return false
@@ -67,7 +77,12 @@ func CanEditPost(actor Principal, postType, status string, authorID int64) bool 
 // CanDeletePost reports whether actor may delete an existing post of the given
 // type, status, and author. It mirrors CanEditPost with the delete_* family.
 func CanDeletePost(actor Principal, postType, status string, authorID int64) bool {
-	suf := capSuffix(postType)
+	return CanDeletePostSuffix(actor, capSuffix(postType), status, authorID)
+}
+
+// CanDeletePostSuffix is CanDeletePost driven by an explicit capability suffix
+// (for example "products" for edit_products) instead of a post type.
+func CanDeletePostSuffix(actor Principal, suf, status string, authorID int64) bool {
 	if authorID == actor.UserID {
 		if !actor.Can("delete_" + suf) {
 			return false

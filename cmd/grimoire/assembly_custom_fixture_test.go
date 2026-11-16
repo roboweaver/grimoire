@@ -13,6 +13,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/domain"
 	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/routing"
+	"github.com/roboweaver/grimoire/internal/storage"
 )
 
 // Shared fixture for the M17 (custom type and taxonomy write) tests. Task 1.1
@@ -70,6 +71,23 @@ type customWriteEnv struct {
 	Contrib customWriteActor
 	// Products holds only edit_products (and read): the custom-role user.
 	Products customWriteActor
+	// Repos and Prefix give a test direct SQL access to the same database.
+	Repos  *storage.Repositories
+	Prefix string
+}
+
+// productsCaps is the custom-role grant: read plus the whole capability family
+// of the product and secret capability types (edit, edit others, edit
+// published, publish, delete, delete others, delete published), and nothing
+// from the built-in post family except the edit_posts admin floor (D13).
+func productsCaps() []string {
+	caps := []string{"read", "edit_posts"}
+	for _, s := range []string{"products", "secrets"} {
+		for _, v := range []string{"edit_", "edit_others_", "edit_published_", "publish_", "delete_", "delete_others_", "delete_published_"} {
+			caps = append(caps, v+s)
+		}
+	}
+	return caps
 }
 
 // newCustomWriteHandler builds the production handler (buildHandler through
@@ -93,7 +111,7 @@ func newCustomWriteHandler(t *testing.T, withRegistry bool) customWriteEnv {
 	mk("editor", auth.RoleEditor)
 	mk("author", auth.RoleAuthor)
 	mk("contrib", auth.RoleContributor)
-	mk("products", "read", "edit_products")
+	mk("products", productsCaps()...)
 
 	var reg *registry.Registry
 	if withRegistry {
@@ -119,6 +137,8 @@ func newCustomWriteHandler(t *testing.T, withRegistry bool) customWriteEnv {
 		Author:   login("author"),
 		Contrib:  login("contrib"),
 		Products: login("products"),
+		Repos:    repos,
+		Prefix:   dbCfg.TablePrefix,
 	}
 }
 

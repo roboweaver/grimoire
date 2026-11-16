@@ -174,7 +174,8 @@ func restRoutes() map[string]restRouteEntry {
 }
 
 // restRouteIndex is restRoutes() plus a GET collection and single route for
-// every registered post type and taxonomy. With no registry it returns
+// every registered post type and taxonomy (registered taxonomies also list their
+// write methods when a term-write service is configured). With no registry it returns
 // restRoutes() unchanged.
 func (s *Server) restRouteIndex() map[string]restRouteEntry {
 	routes := restRoutes()
@@ -184,8 +185,13 @@ func (s *Server) restRouteIndex() map[string]restRouteEntry {
 		routes["/wp/v2/"+pt.RESTBase+"/(?P<id>[\\d]+)"] = restRouteEntry{Methods: get}
 	}
 	for _, tax := range s.registry.Taxonomies() {
-		routes["/wp/v2/"+tax.RESTBase] = restRouteEntry{Methods: get}
-		routes["/wp/v2/"+tax.RESTBase+"/(?P<id>[\\d]+)"] = restRouteEntry{Methods: get}
+		coll, single := get, get
+		if s.termWrite != nil { // write routes exist only with a term-write service
+			coll = []string{http.MethodGet, http.MethodPost}
+			single = []string{http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete}
+		}
+		routes["/wp/v2/"+tax.RESTBase] = restRouteEntry{Methods: coll}
+		routes["/wp/v2/"+tax.RESTBase+"/(?P<id>[\\d]+)"] = restRouteEntry{Methods: single}
 	}
 	return routes
 }

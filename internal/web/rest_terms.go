@@ -282,6 +282,10 @@ func (s *Server) handleRESTTermCreate(taxonomy string) http.HandlerFunc {
 			switch {
 			case errors.Is(err, content.ErrForbidden):
 				writeRESTError(w, http.StatusForbidden, "rest_cannot_create", "Sorry, you are not allowed to create terms as this user.")
+			case errors.Is(err, content.ErrTermSlugTaken):
+				writeRESTError(w, http.StatusBadRequest, "term_exists", "A term with the same slug already exists.")
+			case errors.Is(err, content.ErrTermSlugInvalid), errors.Is(err, content.ErrTermNameEmpty), errors.Is(err, content.ErrTaxonomyUnknown):
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid term name or slug.")
 			case errors.Is(err, content.ErrTermParentCycle), errors.Is(err, content.ErrTermParentInvalid):
 				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid parent term.")
 			default:
@@ -334,6 +338,10 @@ func (s *Server) handleRESTTermUpdate(taxonomy string) http.HandlerFunc {
 			switch {
 			case errors.Is(err, content.ErrForbidden):
 				writeRESTError(w, http.StatusForbidden, "rest_cannot_edit", "Sorry, you are not allowed to update this term.")
+			case errors.Is(err, content.ErrTermSlugTaken):
+				writeRESTError(w, http.StatusBadRequest, "term_exists", "A term with the same slug already exists.")
+			case errors.Is(err, content.ErrTermSlugInvalid), errors.Is(err, content.ErrTermNameEmpty), errors.Is(err, content.ErrTaxonomyUnknown):
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid term name or slug.")
 			case errors.Is(err, content.ErrTermParentCycle), errors.Is(err, content.ErrTermParentInvalid):
 				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "Invalid parent term.")
 			case errors.Is(err, domain.ErrNotFound):

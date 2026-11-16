@@ -192,7 +192,11 @@ func (e *rctEnv) handler(t *testing.T, withRegistry, withTermWrite bool, caps ..
 			termReadWriter: termReadWriter{TermWriter: repos.TermWriter, TermReader: repos.TermReader},
 			reads:          e.listReads,
 		}
-		srv = srv.WithAdminWrites(nil, content.NewTermWriteService(trw), nil, nil)
+		var opts []content.TermWriteOption
+		if withRegistry {
+			opts = append(opts, content.WithTermRegistry(e.reg))
+		}
+		srv = srv.WithAdminWrites(nil, content.NewTermWriteService(trw, opts...), nil, nil)
 	}
 	srv = srv.WithREST(mapper, repos.AdminPosts, repos.PostWriter, repos.Posts, repos.Media, repos.Users, 0)
 	if withRegistry {
@@ -410,11 +414,12 @@ func TestRESTCustomTermsWritesAre501AndWriteNothing(t *testing.T) {
 	before := count()
 	coll := "/wp-json/wp/v2/genres"
 	single := coll + "/" + rctID(rctGenre)
+	// M17 3.2: create/update/delete are live; only these verbs stay 501.
 	cases := []struct{ method, path, code string }{
-		{http.MethodPost, coll, "rest_cannot_create"},
-		{http.MethodPut, single, "rest_cannot_edit"},
-		{http.MethodPatch, single, "rest_cannot_edit"},
-		{http.MethodDelete, single, "rest_cannot_edit"},
+		{http.MethodPost, single, "rest_cannot_create"},
+		{http.MethodPut, coll, "rest_cannot_edit"},
+		{http.MethodPatch, coll, "rest_cannot_edit"},
+		{http.MethodDelete, coll, "rest_cannot_edit"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
@@ -492,6 +497,14 @@ func TestRESTRouteIndexListsRegisteredTypesAndTaxonomies(t *testing.T) {
 			if !ok {
 				t.Errorf("GET %s: routes lacks %q", index, route)
 				continue
+			}
+			// M17 3.2: registered taxonomies also list their write methods.
+			wantGet := wantGet
+			if strings.Contains(route, "/genres") || strings.Contains(route, "/topics") {
+				wantGet = []string{http.MethodGet, http.MethodPost}
+				if strings.Contains(route, "(?P<id>") {
+					wantGet = []string{http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete}
+				}
 			}
 			if !reflect.DeepEqual(got, wantGet) {
 				t.Errorf("GET %s: routes[%q] methods = %v, want %v (write verbs are 501)", index, route, got, wantGet)

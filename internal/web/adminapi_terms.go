@@ -62,7 +62,7 @@ func (s *Server) adminTerms(w http.ResponseWriter, r *http.Request) error {
 	if taxonomy == "" {
 		return badRequestError{msg: "taxonomy query parameter is required"}
 	}
-	if !isKnownAdminTaxonomy(taxonomy) {
+	if !s.isKnownAdminTaxonomy(taxonomy) {
 		return badRequestError{msg: "unknown taxonomy"}
 	}
 	terms, err := s.termWrite.ListByTaxonomy(r.Context(), taxonomy)
@@ -99,6 +99,9 @@ func (s *Server) adminTermCreate(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		if errors.Is(err, content.ErrTermParentCycle) || errors.Is(err, content.ErrTermParentInvalid) {
 			return badRequestError{msg: "invalid parent term"} // -> 400 via jsonHandler (Req 3.3, 4.1-4.3)
+		}
+		if msg, ok := termValidationMessage(err); ok {
+			return badRequestError{msg: msg}
 		}
 		return err // ErrForbidden -> 403 unchanged (Req 5.2)
 	}
@@ -156,6 +159,9 @@ func (s *Server) adminTermUpdate(w http.ResponseWriter, r *http.Request) error {
 		if errors.Is(err, content.ErrTermParentCycle) || errors.Is(err, content.ErrTermParentInvalid) {
 			return badRequestError{msg: "invalid parent term"} // -> 400 via jsonHandler (Req 3.3, 4.1-4.3)
 		}
+		if msg, ok := termValidationMessage(err); ok {
+			return badRequestError{msg: msg}
+		}
 		return err // ErrForbidden -> 403, ErrNotFound -> 404, else 500
 	}
 	// Echo the merged fields -- the real pre-read taxonomy, not the request body
@@ -177,4 +183,20 @@ func (s *Server) adminTermDelete(w http.ResponseWriter, r *http.Request) error {
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+// termValidationMessage maps the custom-taxonomy term sentinels to a 400
+// message (Req 4.2-4.6, 5.x).
+func termValidationMessage(err error) (string, bool) {
+	switch {
+	case errors.Is(err, content.ErrTermSlugTaken):
+		return "term slug already exists", true
+	case errors.Is(err, content.ErrTermSlugInvalid):
+		return "invalid term slug", true
+	case errors.Is(err, content.ErrTermNameEmpty):
+		return "term name is empty", true
+	case errors.Is(err, content.ErrTaxonomyUnknown):
+		return "unknown taxonomy", true
+	}
+	return "", false
 }

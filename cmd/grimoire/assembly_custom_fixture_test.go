@@ -71,6 +71,9 @@ type customWriteEnv struct {
 	Contrib customWriteActor
 	// Products holds only edit_products (and read): the custom-role user.
 	Products customWriteActor
+	// Curator holds the full capability family of product, secret and guide
+	// (task 17.1): the only fixture user that can write hierarchical guides.
+	Curator customWriteActor
 	// Repos and Prefix give a test direct SQL access to the same database.
 	Repos  *storage.Repositories
 	Prefix string
@@ -80,9 +83,13 @@ type customWriteEnv struct {
 // of the product and secret capability types (edit, edit others, edit
 // published, publish, delete, delete others, delete published), and nothing
 // from the built-in post family except the edit_posts admin floor (D13).
-func productsCaps() []string {
+func productsCaps() []string { return capsFor("products", "secrets") }
+
+// capsFor is read, the edit_posts admin floor and the seven-verb capability
+// family of each plural suffix.
+func capsFor(suffixes ...string) []string {
 	caps := []string{"read", "edit_posts"}
-	for _, s := range []string{"products", "secrets"} {
+	for _, s := range suffixes {
 		for _, v := range []string{"edit_", "edit_others_", "edit_published_", "publish_", "delete_", "delete_others_", "delete_published_"} {
 			caps = append(caps, v+s)
 		}
@@ -112,6 +119,7 @@ func newCustomWriteHandler(t *testing.T, withRegistry bool) customWriteEnv {
 	mk("author", auth.RoleAuthor)
 	mk("contrib", auth.RoleContributor)
 	mk("products", productsCaps()...)
+	mk("curator", capsFor("products", "secrets", "guides")...)
 
 	var reg *registry.Registry
 	if withRegistry {
@@ -137,6 +145,7 @@ func newCustomWriteHandler(t *testing.T, withRegistry bool) customWriteEnv {
 		Author:   login("author"),
 		Contrib:  login("contrib"),
 		Products: login("products"),
+		Curator:  login("curator"),
 		Repos:    repos,
 		Prefix:   dbCfg.TablePrefix,
 	}

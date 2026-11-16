@@ -30,11 +30,42 @@ type Scheduler struct {
 	posts    postUpdater
 	interval time.Duration
 	log      *slog.Logger
+	// principal is the acting identity for every publish; it starts as a copy
+	// of systemPrincipal and gains capabilities per WithCapabilitySuffixes.
+	principal auth.Principal
+}
+
+// Option customizes a Scheduler at construction.
+type Option func(*Scheduler)
+
+// WithCapabilitySuffixes grants the scheduler's principal the four capabilities
+// needed to publish a post whose type uses each capability suffix (for example
+// "products" grants edit_products, edit_others_products,
+// edit_published_products and publish_products). Without it the scheduler can
+// only publish built-in post types.
+func WithCapabilitySuffixes(suffixes ...string) Option {
+	return func(s *Scheduler) {
+		for _, suffix := range suffixes {
+			for _, verb := range []string{"edit_", "edit_others_", "edit_published_", "publish_"} {
+				s.principal.Caps[verb+suffix] = true
+			}
+		}
+	}
 }
 
 // New constructs a Scheduler.
-func New(finder domain.ScheduledPostFinder, posts postUpdater, interval time.Duration, log *slog.Logger) *Scheduler {
-	return &Scheduler{finder: finder, posts: posts, interval: interval, log: log}
+func New(finder domain.ScheduledPostFinder, posts postUpdater, interval time.Duration, log *slog.Logger, opts ...Option) *Scheduler {
+	caps := make(map[string]bool, len(systemPrincipal.Caps))
+	for k, v := range systemPrincipal.Caps {
+		caps[k] = v
+	}
+	principal := systemPrincipal
+	principal.Caps = caps
+	s := &Scheduler{finder: finder, posts: posts, interval: interval, log: log, principal: principal}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // systemPrincipal is unexported: constructed once inside this package,
@@ -87,7 +118,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 		// prior "loaded at" timestamp to compare against, and Requirement
 		// 4.7 requires that a concurrently-edited post simply be skipped,
 		// not treated as a conflict error that aborts the whole tick.
-		if err := s.posts.Update(ctx, systemPrincipal, p, time.Time{}); err != nil {
+		if err := s.posts.Update(ctx, s.principal, p, time.Time{}); err != nil {
 			if s.log != nil {
 				s.log.Error("scheduler: failed to publish scheduled post", "post_id", p.ID, "error", err)
 			}

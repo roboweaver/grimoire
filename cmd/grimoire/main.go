@@ -21,7 +21,6 @@ import (
 	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/sanitize"
-	"github.com/roboweaver/grimoire/internal/scheduler"
 	"github.com/roboweaver/grimoire/internal/storage"
 	// Extension packages register grimoire hooks (see pkg/extensions:
 	// RegisterAction/RegisterFilter) from their init() function. To compile
@@ -123,7 +122,7 @@ func main() {
 		}
 	}
 
-	handler, postWrite, err := buildHandler(serverDeps{
+	deps := serverDeps{
 		Registry:      reg,
 		Repos:         repos,
 		Config:        cfg,
@@ -133,7 +132,8 @@ func main() {
 		ContentPolicy: contentPolicy,
 		Engine:        eng,
 		ThemesDir:     *themesDir,
-	})
+	}
+	handler, postWrite, err := buildHandler(deps)
 	if err != nil {
 		log.Error("assemble handler", "err", err)
 		os.Exit(1)
@@ -156,7 +156,7 @@ func main() {
 	// goroutine above, so cancelling ctx (via signal or the server error
 	// path) stops both the same way -- no separate scheduler lifecycle to
 	// reason about (Req 4.3).
-	sched := scheduler.New(repos.Scheduled, postWrite, cfg.Scheduler.Interval(), log)
+	sched := buildScheduler(deps, postWrite)
 	go sched.Run(ctx)
 
 	<-ctx.Done()

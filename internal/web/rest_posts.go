@@ -379,6 +379,10 @@ func (s *Server) handleRESTPostCreate(typ string) http.HandlerFunc {
 				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "title is required unless status is draft")
 				return
 			}
+			if errors.Is(err, content.ErrSlugInvalid) {
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "slug is invalid")
+				return
+			}
 			writeRESTError(w, http.StatusInternalServerError, "rest_create_failed", "Could not create "+typ+".")
 			return
 		}
@@ -452,6 +456,8 @@ func (s *Server) handleRESTPostUpdate(typ string) http.HandlerFunc {
 				// missing-title 400 parseRESTPostWrite already returns (status
 				// 400, "rest_invalid_param"), not a 500 (Req 4.2/4.4).
 				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "title is required unless status is draft")
+			case errors.Is(err, content.ErrSlugInvalid):
+				writeRESTError(w, http.StatusBadRequest, "rest_invalid_param", "slug is invalid")
 			default:
 				writeRESTError(w, http.StatusInternalServerError, "rest_update_failed", "Could not update "+typ+".")
 			}

@@ -14,6 +14,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/render"
 	"github.com/roboweaver/grimoire/internal/routing"
 	"github.com/roboweaver/grimoire/internal/sanitize"
+	"github.com/roboweaver/grimoire/internal/scheduler"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/web"
 )
@@ -99,7 +100,10 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	// wiring shape.
 	revisionWrite := content.NewRevisionWriteService(repos.Revisions, repos.PostWriter, -1)
 	autosave := content.NewAutosaveService(repos.Revisions, repos.PostWriter)
-	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite), content.WithContentPolicy(contentPolicy))
+	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite), content.WithContentPolicy(contentPolicy),
+		content.WithPostRegistry(deps.Registry),
+		content.WithPostNodeReader(repos.PostNodeReader),
+		content.WithTermDetacher(repos.PostTermsWriter))
 	// mediaWrite backs the REST media write surface (POST/PATCH
 	// /wp-json/wp/v2/media). It layers capability-checked create/update over the
 	// existing media read/write service and the Media reader / MediaWriter ports,
@@ -184,4 +188,27 @@ func registeredTypeNames(reg *registry.Registry) []string {
 		names = append(names, pt.Name)
 	}
 	return names
+}
+
+// registeredSuffixes returns the capability suffix of every registered post
+// type, in declaration order, without duplicates.
+func registeredSuffixes(reg *registry.Registry) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, pt := range reg.PostTypes() {
+		suffix := auth.CapabilitySuffix(pt.CapabilityType)
+		if !seen[suffix] {
+			seen[suffix] = true
+			out = append(out, suffix)
+		}
+	}
+	return out
+}
+
+// buildScheduler constructs the publish scheduler over the same PostWriteService
+// the server uses, granting it the capabilities of every registered custom type
+// so due custom-type rows publish (Req 7.6, 17.2).
+func buildScheduler(deps serverDeps, posts *content.PostWriteService) *scheduler.Scheduler {
+	return scheduler.New(deps.Repos.Scheduled, posts, deps.Config.Scheduler.Interval(), deps.Log,
+		scheduler.WithCapabilitySuffixes(registeredSuffixes(deps.Registry)...))
 }

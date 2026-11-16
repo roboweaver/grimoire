@@ -267,11 +267,10 @@ Known gaps worth knowing before adopting an existing WordPress site:
 - **REST deletes.** `DELETE /wp-json/wp/v2/media/{id}` and `.../users/{id}`
   are not exposed (they return `501`). REST *create* and *update* for media and
   users shipped in M10.B/M10.C; only the delete verb remains deferred.
-- **Taxonomies and post types.** Only `category` and `post_tag` are served, and
-  archives list `post` rows only — custom taxonomies and custom post types are
-  out of scope. Term hierarchy is read-only: M9b reads `term_taxonomy.parent`,
-  but nothing re-parents a term.
-
+- **Taxonomies and post types.** Categories, tags, and custom post types and
+  taxonomies declared under `content:` in the configuration are served and
+  writable (M12 read, M17 write; see `docs/compatibility.md`). Post types and
+  taxonomies that exist only in the database stay unexposed unless declared.
 Permalinks are no longer a gap. M9a serves `permalink_structure` — the
 `%postname%`, `%post_id%`, `%year%`, `%monthnum%` and `%day%` tokens, covering
 WordPress's three presets — and `301`s the flat `/{slug}` path and the

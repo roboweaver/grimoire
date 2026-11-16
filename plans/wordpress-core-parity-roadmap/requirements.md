@@ -67,7 +67,7 @@ milestone-index row for this spec supersedes that forward reference.
   roadmap depth and defer to that spec for the implementation-ready detail.
 - **M12's read half is specified and shipped** in its own
   `plans/12-custom-types-read` spec (PRs #75/#76/#77); Requirements 23–25 record
-  its delivered read behavior at roadmap depth. Write parity (12.C) remains open.
+  its delivered read behavior at roadmap depth. Write parity (12.C) shipped as M17.
 - **M13–M16 are specified at roadmap depth**: each requirement below is still
   testable and EARS-worded, but neither milestone's task list is bite-sized.
   Each explicitly requires its own follow-up spec
@@ -752,7 +752,7 @@ WordPress user-management tooling can remove users unchanged.
 > Roadmap-depth requirements. Each is testable, but implementation does not
 > start from this document alone — see "Specification depth" above.
 
-### Requirement 23: Custom Post Type Read, Routing, and REST  ✅ read shipped (M12, PRs #75/#76/#77)
+### Requirement 23: Custom Post Type Read, Routing, and REST  ✅ read shipped (M12, PRs #75/#76/#77); write shipped (M17)
 
 **User Story:** As a site owner whose WordPress database contains custom post
 types (rows with a `post_type` beyond `post`/`page`), I want grimoire to serve
@@ -760,8 +760,10 @@ them the way it serves posts and pages, so that a real-site import does not lose
 its custom content.
 
 > **✅ Read portions shipped (M12, PRs #75/#76/#77 — `plans/12-custom-types-read`).**
-> Requirements 23–25 read, routing, and REST-read behavior is delivered; the
-> write-parity half (12.C) is a separate later spec and remains open.
+> Requirements 23–25 read, routing, and REST-read behavior is delivered. The
+> write-parity half (12.C) shipped as M17
+> ([`plans/17-custom-types-write`](../17-custom-types-write)): the write
+> portions of Requirements 23.4, 23 and 24 are delivered.
 
 #### Acceptance Criteria
 
@@ -780,8 +782,9 @@ its custom content.
 4. THE system SHALL gate every custom-post-type read and write on the capability
    model derived from that type's registry entry, defaulting to the
    post/page capability set when the registry does not specify otherwise.
+   ✅ read and write shipped (M12 read; M17 write, via `capability_type`).
 
-### Requirement 24: Custom Taxonomy Read, Routing, and REST  ✅ read shipped (M12, PRs #75/#76/#77)
+### Requirement 24: Custom Taxonomy Read, Routing, and REST  ✅ read shipped (M12, PRs #75/#76/#77); write shipped (M17)
 
 **User Story:** As a site owner whose WordPress database contains custom
 taxonomies (terms in a taxonomy beyond `category`/`post_tag`), I want grimoire

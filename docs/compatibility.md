@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M12)
+# WordPress Compatibility (M1-M12, M17)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -323,7 +323,7 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   - The `%category%`/`%author%` permalink tokens and plugin-registered rewrite
     rules remain out of scope, unchanged by this milestone. Custom taxonomies
     beyond `category` and `post_tag`, and custom post types, were out of scope
-    here and are now a scoped, read-first milestone (M12, below). (Term-hierarchy
+    here and are now a scoped milestone (M12 read, M17 write; below). (Term-hierarchy
     *editing* shipped in M13 and hierarchical *page* URLs in M15; this M9b note
     predates all three.)
 
@@ -379,9 +379,10 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   `$wp$` on the user's next successful login. A password changed in grimoire
   now round-trips to a live WordPress 6.8 install and back.
 
-- **M12 — Custom post types and taxonomies (read-first):** custom post types
-  and taxonomies move from "out of scope" to a scoped milestone. This
-  milestone is **read only**; write parity is a separate, later spec.
+- **M12 — Custom post types and taxonomies (read):** custom post types
+  and taxonomies move from "out of scope" to a scoped milestone. M12 is the
+  **read** half; the write half shipped as M17 (see "M17 — Custom type write"
+  below).
 
   - **Config-only registry.** Types are declared in a top-level `content:`
     section of the configuration file, with `post_types:` and `taxonomies:`
@@ -412,13 +413,12 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     Archive pagination stays `?page=N`. Custom post type URLs do not use the
     dated permalink tokens. Custom post type date archives and feeds are out of
     scope.
-  - **REST read, 501 write.** `GET /wp-json/wp/v2/{rest_base}` (collection and
+  - **REST read.** `GET /wp-json/wp/v2/{rest_base}` (collection and
     single) is served for each registered post type and taxonomy, in the same
     envelope and pagination headers as posts and pages. Custom post type items
     carry a term-id array per attached taxonomy, keyed by that taxonomy's
-    `rest_base`. `POST`, `PUT`, `PATCH` and `DELETE` on these routes answer
-    `501`, via the same not-implemented response as the REST media and user
-    `DELETE` verbs. `/wp/v2/types` and `/wp/v2/taxonomies` are not implemented.
+    `rest_base`. The write verbs are covered under "M17 — Custom type write".
+    `/wp/v2/types` and `/wp/v2/taxonomies` are not implemented.
     A non-published custom post row requested by id is returned only to a
     caller holding the edit capability derived from the type's
     `capability_type` (default `post`); every other caller receives `404
@@ -428,8 +428,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     that are `post`, `page`, or the name of a registered post type, and answers
     `400` with error code `invalid_type` for any other value, without reading
     the database. With no `type` the default stays `post` and `page`. The
-    admin-API write paths still reject any type other than `post` and `page`,
-    and the admin SPA UI is unchanged. The admin author list includes authors of
+    admin-API write paths accept `post`, `page` and registered types (M17); the
+    admin SPA UI is unchanged. The admin author list includes authors of
     registered types.
   - **`migrate -check` diagnostic.** `grimoire-cli migrate -check` reports,
     read only, each distinct `post_type` in `{prefix}posts` and each taxonomy
@@ -442,6 +442,58 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     base or archive slug becomes unreachable at that URL, because the custom
     route is classified first. Precedence is fixed in
     `routing.Structure.Classify`; see the M12 design for the full table.
+- **M17 — Custom type write:** REST and admin-API create, update and delete
+  for registered custom post types and taxonomies (roadmap 12.C), over the
+  existing writer ports and M10a's sanitization policy. No schema change, no
+  migration, no new capability string.
+  - **REST verbs.** For each registered post type, `POST /wp-json/wp/v2/{rest_base}`,
+    `PUT`/`PATCH /{rest_base}/{id}` and `DELETE /{rest_base}/{id}` are served;
+    for each registered taxonomy the same verbs serve terms. Still `501`:
+    `POST /{rest_base}/{id}` and collection-level `PUT`/`PATCH`/`DELETE`
+    (and every write verb on the post-type routes when no post-write service is
+    configured). Admin-API post and term writes accept a registered `type` or
+    `taxonomy`; the term-create endpoint now rejects an unknown taxonomy.
+  - **Capabilities.** Post writes derive from the type's `capability_type`
+    (default `post`): `edit_{cap}s`, `edit_others_{cap}s`, `publish_{cap}s`,
+    `edit_published_{cap}s`, `edit_private_{cap}s` and `delete_{cap}s`, so
+    `edit_posts` alone does not permit writing a `capability_type: product`
+    type. Unregistered stored types keep the legacy `*_posts` decision.
+    Taxonomy writes use `manage_categories`, as for categories and tags.
+  - **Sanitization.** Registered post types use the same tiers as posts: title
+    to plain text, content and excerpt by tier B or C depending on
+    `unfiltered_html`. Registered taxonomy term names are reduced to plain text
+    on write, and the response reflects the stored (sanitized) name. Names of
+    built-in `category` and `post_tag` terms are not sanitized at the write
+    boundary (a known divergence, unchanged).
+  - **Slugs.** Post slugs must match `^[a-z0-9][a-z0-9_-]*$`, are derived from
+    the title when absent, and get a `-2`, `-3` suffix on collision (among
+    siblings for a hierarchical type). Term slugs use the same charset and are
+    rejected, not suffixed, when a sibling already uses them (`term_exists`).
+    Percent-encoded non-ASCII slugs that an imported database can hold are
+    readable but cannot be written through the API.
+  - **Parent.** A hierarchical post type accepts `parent` (REST and admin API; a
+    non-hierarchical type rejects a non-zero parent), validated to exist, be of the same type, and not be the post or one of its
+    descendants. A hierarchical taxonomy accepts term `parent` with the M13
+    cycle prevention. Page `parent` writes are not part of this milestone.
+  - **Term assignment.** REST post bodies for a registered type may carry
+    arrays of term ids keyed by the taxonomy's `rest_base`; the admin API uses
+    the `termIds` map keyed by taxonomy name. A taxonomy not attached to the
+    type, or a term belonging to another taxonomy, is rejected (`400` on REST,
+    a `partial` entry on the admin API).
+  - **Delete.** `DELETE` is a permanent delete, with no trash and no
+    re-parenting of children. For registered types the post's
+    `term_relationships` are detached first so term counts stay correct;
+    built-in post and page deletion keeps its current behavior (no term
+    cleanup, postmeta or comments left behind).
+  - **Other behavior.** `public: false` types are writable: `public` governs
+    the public route only. The admin API keeps the `edit_posts` floor, so a role
+    holding only `edit_products` can use REST but not the admin API for that
+    type. The publish scheduler also holds the derived capabilities, so a
+    scheduled custom post publishes on time.
+  - **Known gaps.** An unregistered stored type (for example an imported
+    `shop_order`) stays editable through the admin API by holders of the post
+    capabilities. A hierarchical post type's `parent` is writable, but page
+    `parent` is not.
 
 ## Public read guarantees
 

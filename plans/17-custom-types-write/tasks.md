@@ -606,7 +606,7 @@
 
 ## Phase 19 — End-to-end and built-binary verification (`cmd/grimoire`, `test/e2e`) — PR D
 
-- [~] 19.1 Add the consolidated lifecycle test through `buildHandler`. In
+- [x] 19.1 Add the consolidated lifecycle test through `buildHandler`. In
       `cmd/grimoire/assembly_custom_lifecycle_test.go`, one table-driven test per
       acceptance-criteria group of Requirements 1-14, each row naming the
       requirement it covers, drives REST and admin side by side for create, read,
@@ -621,7 +621,7 @@
       lists Requirements 1-14 with no gaps (a test asserts the set of covered
       requirement ids). _(Req 17.3, 15, 14, 1-13; D16)_
 
-- [~] 19.2 Add the built-binary smoke test. In
+- [x] 19.2 Add the built-binary smoke test. In
       `test/e2e/m17_custom_write_binary_test.go`, `go build` `./cmd/grimoire` into
       `t.TempDir()`, write a config with a SQLite database and a `content:` section
       declaring `product`, `guide` and `genre`, run the binary on a free port with
@@ -638,7 +638,7 @@
 
 ## Phase 20 — Documentation and roadmap (docs only) — PR D
 
-- [~] 20.1 Update the documentation to match the shipped behavior.
+- [x] 20.1 Update the documentation to match the shipped behavior.
       `docs/compatibility.md`: retitle the M12 section's "(read-first)" note and
       replace the "REST read, 501 write" bullet and the admin-write sentence in
       "Admin type validation" with the shipped behavior; add an "M17 — Custom type
@@ -672,7 +672,7 @@
 
 ## Phase 21 — Final gate — PR D
 
-- [~] 21.1 Final gate. Confirm: no new file under `internal/storage/migrations`
+- [x] 21.1 Final gate. Confirm: no new file under `internal/storage/migrations`
       (`git status --porcelain internal/storage/migrations` empty, Req 16.1); no
       change to any interface in `internal/domain/repository.go` (Req 16.3); no
       new capability string introduced anywhere

@@ -105,11 +105,12 @@ func (s *Server) adminTermCreate(w http.ResponseWriter, r *http.Request) error {
 		}
 		return err // ErrForbidden -> 403 unchanged (Req 5.2)
 	}
+	stored := s.storedTerm(r, domain.Term{ID: id, Name: body.Name, Slug: body.Slug, Taxonomy: body.Taxonomy})
 	return writeJSON(w, http.StatusCreated, termDetailResponse{
 		ID:       id,
-		Name:     body.Name,
-		Slug:     body.Slug,
-		Taxonomy: body.Taxonomy,
+		Name:     stored.Name,
+		Slug:     stored.Slug,
+		Taxonomy: stored.Taxonomy,
 	})
 }
 
@@ -166,6 +167,7 @@ func (s *Server) adminTermUpdate(w http.ResponseWriter, r *http.Request) error {
 	}
 	// Echo the merged fields -- the real pre-read taxonomy, not the request body
 	// (Req 6.2).
+	merged = s.storedTerm(r, merged)
 	return writeJSON(w, http.StatusOK, termDetailResponse{
 		ID: id, Name: merged.Name, Slug: merged.Slug, Taxonomy: merged.Taxonomy,
 	})

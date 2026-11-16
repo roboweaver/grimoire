@@ -3,10 +3,13 @@ package content
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/sanitize"
 )
 
@@ -26,6 +29,26 @@ var ErrTermParentCycle = errors.New("content: term parent would create a cycle")
 // a non-zero parent targets a flat (non-hierarchical) taxonomy such as post_tag
 // (Req 4.3). Nothing is written. Handlers map it to 400.
 var ErrTermParentInvalid = errors.New("content: term parent is invalid")
+
+// ErrTermSlugInvalid is returned when a registered-taxonomy term slug does not
+// match ^[a-z0-9][a-z0-9_-]*$. Nothing is written. Handlers map it to 400.
+var ErrTermSlugInvalid = errors.New("content: term slug is invalid")
+
+// ErrTermSlugTaken is returned when a registered-taxonomy term slug duplicates
+// that of a sibling (same parent in a hierarchical taxonomy, any term in a flat
+// one). Nothing is written. Handlers map it to 400 term_exists.
+var ErrTermSlugTaken = errors.New("content: term slug already used among siblings")
+
+// ErrTermNameEmpty is returned when a registered-taxonomy term name sanitizes
+// to an empty string. Nothing is written.
+var ErrTermNameEmpty = errors.New("content: term name empty after sanitization")
+
+// ErrTaxonomyUnknown is returned by TermWriteService.Create for a taxonomy that
+// is neither category, post_tag nor registered. Nothing is written.
+var ErrTaxonomyUnknown = errors.New("content: unknown taxonomy")
+
+// termSlugRE is the allowed slug shape for registered-taxonomy terms.
+var termSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // ErrTitleEmpty is returned by PostWriteService.Create/Update when the caller's
 // post_title sanitizes to an empty string (e.g. a markup-only "<em></em>" that
@@ -317,6 +340,101 @@ type TermWriteService struct {
 		domain.TermWriter
 		domain.TermReader
 	}
+	reg    *registry.Registry
+	policy *sanitize.Policy
+}
+
+// TermWriteOption configures a TermWriteService.
+type TermWriteOption func(*TermWriteService)
+
+// WithTermRegistry enables writes to registered custom taxonomies. A nil
+// registry leaves built-in behavior unchanged.
+func WithTermRegistry(r *registry.Registry) TermWriteOption {
+	return func(s *TermWriteService) { s.reg = r }
+}
+
+// WithTermContentPolicy sets the policy used to sanitize registered-taxonomy
+// term names. A nil policy is ignored (the default stays).
+func WithTermContentPolicy(p *sanitize.Policy) TermWriteOption {
+	return func(s *TermWriteService) {
+		if p != nil {
+			s.policy = p
+		}
+	}
+}
+
+// registryTaxonomy returns the registered entry for name, ok only for entries
+// that are not the built-in category/post_tag.
+func (s *TermWriteService) registryTaxonomy(name string) (registry.Taxonomy, bool) {
+	if s.reg == nil || name == TaxonomyCategory || name == taxonomyPostTag {
+		return registry.Taxonomy{}, false
+	}
+	return s.reg.Taxonomy(name)
+}
+
+// hierarchical reports whether terms of the taxonomy may have a parent.
+func (s *TermWriteService) hierarchical(name string) bool {
+	if name == TaxonomyCategory {
+		return true
+	}
+	rt, ok := s.registryTaxonomy(name)
+	return ok && rt.Hierarchical
+}
+
+// cleanName reduces a registered-taxonomy term name to plain text.
+//
+// The tier is fixed (TierB) rather than derived from the actor: a holder of
+// unfiltered_html would otherwise hit the tier-C bypass and store raw markup in
+// a name that is rendered as plain text.
+func (s *TermWriteService) cleanName(name string) (string, error) {
+	out, err := s.policy.SanitizeAt(sanitize.PostTitle, sanitize.TierB, name)
+	if err != nil {
+		return "", err
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return "", ErrTermNameEmpty
+	}
+	return out, nil
+}
+
+// checkSlug validates the slug charset and sibling uniqueness for a
+// registered taxonomy (one ListByTaxonomy read).
+func (s *TermWriteService) checkSlug(ctx context.Context, t domain.Term, hier bool) error {
+	if !termSlugRE.MatchString(t.Slug) {
+		return ErrTermSlugInvalid
+	}
+	terms, err := s.w.ListByTaxonomy(ctx, t.Taxonomy)
+	if err != nil {
+		return err
+	}
+	for _, o := range terms {
+		if o.ID == t.ID && t.ID != 0 {
+			continue
+		}
+		if o.Slug == t.Slug && (!hier || o.ParentID == t.ParentID) {
+			return ErrTermSlugTaken
+		}
+	}
+	return nil
+}
+
+// prepareRegistered applies the registered-taxonomy name and slug rules.
+// Built-in taxonomies are never passed through it.
+func (s *TermWriteService) prepareRegistered(ctx context.Context, t domain.Term) (domain.Term, error) {
+	rt, ok := s.registryTaxonomy(t.Taxonomy)
+	if !ok {
+		return t, nil
+	}
+	name, err := s.cleanName(t.Name)
+	if err != nil {
+		return t, err
+	}
+	t.Name = name
+	if err := s.checkSlug(ctx, t, rt.Hierarchical); err != nil {
+		return t, err
+	}
+	return t, nil
 }
 
 // NewTermWriteService constructs a TermWriteService over a combined
@@ -324,8 +442,12 @@ type TermWriteService struct {
 func NewTermWriteService(w interface {
 	domain.TermWriter
 	domain.TermReader
-}) *TermWriteService {
-	return &TermWriteService{w: w}
+}, opts ...TermWriteOption) *TermWriteService {
+	s := &TermWriteService{w: w, policy: sanitize.New()}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // validateParent enforces the hierarchy rules for a term write before any row
@@ -352,10 +474,9 @@ func (s *TermWriteService) validateParent(ctx context.Context, t domain.Term, pa
 	if parent == 0 {
 		return nil // top-level, valid for any taxonomy (Req 4.4)
 	}
-	// Flat taxonomies have no meaningful parent (Req 4.3). Only "category" is
-	// hierarchical in M13 (post_tag is flat); a non-zero parent on anything that
-	// is not the hierarchical category taxonomy is rejected.
-	if t.Taxonomy != TaxonomyCategory {
+	// Flat taxonomies have no meaningful parent (Req 4.3). category and
+	// registered hierarchical taxonomies allow one; anything else is rejected.
+	if !s.hierarchical(t.Taxonomy) {
 		return ErrTermParentInvalid
 	}
 	if parent == t.ID {
@@ -387,6 +508,15 @@ func (s *TermWriteService) Create(ctx context.Context, actor auth.Principal, t d
 	if !auth.CanManageTerms(actor) {
 		return 0, ErrForbidden // Req 5.3, fail closed before any read
 	}
+	if t.Taxonomy != TaxonomyCategory && t.Taxonomy != taxonomyPostTag {
+		if _, ok := s.registryTaxonomy(t.Taxonomy); !ok {
+			return 0, ErrTaxonomyUnknown
+		}
+	}
+	t, err := s.prepareRegistered(ctx, t)
+	if err != nil {
+		return 0, err
+	}
 	// t.ParentID is the authoritative value the handler resolved (0 == top-level
 	// on create, Req 1.3). A new term has no descendants, so only a flat-taxonomy
 	// or nonexistent/cross-taxonomy parent can fail here (Req 3.4, 4).
@@ -400,6 +530,10 @@ func (s *TermWriteService) Create(ctx context.Context, actor auth.Principal, t d
 func (s *TermWriteService) Update(ctx context.Context, actor auth.Principal, t domain.Term) error {
 	if !auth.CanManageTerms(actor) {
 		return ErrForbidden // Req 5.3
+	}
+	t, err := s.prepareRegistered(ctx, t)
+	if err != nil {
+		return err
 	}
 	// t carries the authoritative ParentID the handler resolved from the pre-read
 	// (omitted -> current value, Req 2.2; explicit 0 -> top-level, Req 2.3;

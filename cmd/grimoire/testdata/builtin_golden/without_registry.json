@@ -1,0 +1,1349 @@
+[
+  {
+    "name": "rest post create",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=1"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts/1"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=1"
+          }
+        ]
+      },
+      "author": 2,
+      "categories": [],
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "ex"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 1,
+      "link": "http://example.com//",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "",
+      "status": "publish",
+      "tags": [],
+      "title": {
+        "rendered": "Golden Post"
+      },
+      "type": "post"
+    }
+  },
+  {
+    "name": "rest post get",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=1"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts/1"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=1"
+          }
+        ]
+      },
+      "author": 2,
+      "categories": [],
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "ex"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 1,
+      "link": "http://example.com//",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "",
+      "status": "publish",
+      "tags": [],
+      "title": {
+        "rendered": "Golden Post"
+      },
+      "type": "post"
+    }
+  },
+  {
+    "name": "rest post patch",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=1"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts/1"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=1"
+          }
+        ]
+      },
+      "author": 2,
+      "categories": [],
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "ex"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 1,
+      "link": "http://example.com/golden-two/",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "golden-two",
+      "status": "publish",
+      "tags": [],
+      "title": {
+        "rendered": "Golden Post 2"
+      },
+      "type": "post"
+    }
+  },
+  {
+    "name": "rest post put",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=1"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts/1"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=1"
+          }
+        ]
+      },
+      "author": 2,
+      "categories": [],
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "ex2"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 1,
+      "link": "http://example.com/golden-two/",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "golden-two",
+      "status": "publish",
+      "tags": [],
+      "title": {
+        "rendered": "Golden Post 2"
+      },
+      "type": "post"
+    }
+  },
+  {
+    "name": "rest post list",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-WP-Total": "1",
+      "X-WP-TotalPages": "1"
+    },
+    "body": [
+      {
+        "_links": {
+          "author": [
+            {
+              "embeddable": true,
+              "href": "http://example.com/wp-json/wp/v2/users/2"
+            }
+          ],
+          "collection": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts"
+            }
+          ],
+          "replies": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/comments?post=1"
+            }
+          ],
+          "self": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts/1"
+            }
+          ],
+          "wp:attachment": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/media?parent=1"
+            }
+          ]
+        },
+        "author": 2,
+        "categories": [],
+        "comment_status": "",
+        "content": {
+          "protected": false,
+          "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
+        },
+        "date": "\u003cts\u003e",
+        "date_gmt": "\u003cts\u003e",
+        "excerpt": {
+          "rendered": "ex2"
+        },
+        "featured_media": 0,
+        "guid": {
+          "rendered": "http://example.com/"
+        },
+        "id": 1,
+        "link": "http://example.com/golden-two/",
+        "modified": "\u003cts\u003e",
+        "modified_gmt": "\u003cts\u003e",
+        "ping_status": "open",
+        "slug": "golden-two",
+        "status": "publish",
+        "tags": [],
+        "title": {
+          "rendered": "Golden Post 2"
+        },
+        "type": "post"
+      }
+    ]
+  },
+  {
+    "name": "rest post contributor forbidden",
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "code": "rest_cannot_edit",
+      "data": {
+        "status": 403
+      },
+      "message": "Sorry, you are not allowed to update this post."
+    }
+  },
+  {
+    "name": "rest post missing title",
+    "status": 400,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "code": "rest_invalid_param",
+      "data": {
+        "status": 400
+      },
+      "message": "title is required unless status is draft"
+    }
+  },
+  {
+    "name": "rest post delete",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "deleted": true,
+      "previous": {
+        "_links": {
+          "author": [
+            {
+              "embeddable": true,
+              "href": "http://example.com/wp-json/wp/v2/users/2"
+            }
+          ],
+          "collection": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts"
+            }
+          ],
+          "replies": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/comments?post=1"
+            }
+          ],
+          "self": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts/1"
+            }
+          ],
+          "wp:attachment": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/media?parent=1"
+            }
+          ]
+        },
+        "author": 2,
+        "categories": [],
+        "comment_status": "",
+        "content": {
+          "protected": false,
+          "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
+        },
+        "date": "\u003cts\u003e",
+        "date_gmt": "\u003cts\u003e",
+        "excerpt": {
+          "rendered": "ex2"
+        },
+        "featured_media": 0,
+        "guid": {
+          "rendered": "http://example.com/"
+        },
+        "id": 1,
+        "link": "http://example.com/golden-two/",
+        "modified": "\u003cts\u003e",
+        "modified_gmt": "\u003cts\u003e",
+        "ping_status": "open",
+        "slug": "golden-two",
+        "status": "publish",
+        "tags": [],
+        "title": {
+          "rendered": "Golden Post 2"
+        },
+        "type": "post"
+      }
+    }
+  },
+  {
+    "name": "rest post get deleted",
+    "status": 404,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "code": "rest_post_invalid_id",
+      "data": {
+        "status": 404
+      },
+      "message": "Invalid post ID."
+    }
+  },
+  {
+    "name": "rest page create",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/pages"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=4"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/pages/4"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=4"
+          }
+        ]
+      },
+      "author": 2,
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003epage\u003c/p\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "\u003cp\u003epage\u003c/p\u003e"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 4,
+      "link": "http://example.com//",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "",
+      "status": "publish",
+      "title": {
+        "rendered": "Golden Page"
+      },
+      "type": "page"
+    }
+  },
+  {
+    "name": "rest page get",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/pages"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=4"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/pages/4"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=4"
+          }
+        ]
+      },
+      "author": 2,
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003epage\u003c/p\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "\u003cp\u003epage\u003c/p\u003e"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 4,
+      "link": "http://example.com//",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "",
+      "status": "publish",
+      "title": {
+        "rendered": "Golden Page"
+      },
+      "type": "page"
+    }
+  },
+  {
+    "name": "rest page patch",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/pages"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=4"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/pages/4"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=4"
+          }
+        ]
+      },
+      "author": 2,
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003epage\u003c/p\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "\u003cp\u003epage\u003c/p\u003e"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 4,
+      "link": "http://example.com//",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "",
+      "status": "publish",
+      "title": {
+        "rendered": "Golden Page 2"
+      },
+      "type": "page"
+    }
+  },
+  {
+    "name": "rest page list",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-WP-Total": "1",
+      "X-WP-TotalPages": "1"
+    },
+    "body": [
+      {
+        "_links": {
+          "author": [
+            {
+              "embeddable": true,
+              "href": "http://example.com/wp-json/wp/v2/users/2"
+            }
+          ],
+          "collection": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/pages"
+            }
+          ],
+          "replies": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/comments?post=4"
+            }
+          ],
+          "self": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/pages/4"
+            }
+          ],
+          "wp:attachment": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/media?parent=4"
+            }
+          ]
+        },
+        "author": 2,
+        "comment_status": "",
+        "content": {
+          "protected": false,
+          "rendered": "\u003cp\u003epage\u003c/p\u003e"
+        },
+        "date": "\u003cts\u003e",
+        "date_gmt": "\u003cts\u003e",
+        "excerpt": {
+          "rendered": "\u003cp\u003epage\u003c/p\u003e"
+        },
+        "featured_media": 0,
+        "guid": {
+          "rendered": "http://example.com/"
+        },
+        "id": 4,
+        "link": "http://example.com//",
+        "modified": "\u003cts\u003e",
+        "modified_gmt": "\u003cts\u003e",
+        "ping_status": "open",
+        "slug": "",
+        "status": "publish",
+        "title": {
+          "rendered": "Golden Page 2"
+        },
+        "type": "page"
+      }
+    ]
+  },
+  {
+    "name": "rest page delete",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "deleted": true,
+      "previous": {
+        "_links": {
+          "author": [
+            {
+              "embeddable": true,
+              "href": "http://example.com/wp-json/wp/v2/users/2"
+            }
+          ],
+          "collection": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/pages"
+            }
+          ],
+          "replies": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/comments?post=4"
+            }
+          ],
+          "self": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/pages/4"
+            }
+          ],
+          "wp:attachment": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/media?parent=4"
+            }
+          ]
+        },
+        "author": 2,
+        "comment_status": "",
+        "content": {
+          "protected": false,
+          "rendered": "\u003cp\u003epage\u003c/p\u003e"
+        },
+        "date": "\u003cts\u003e",
+        "date_gmt": "\u003cts\u003e",
+        "excerpt": {
+          "rendered": "\u003cp\u003epage\u003c/p\u003e"
+        },
+        "featured_media": 0,
+        "guid": {
+          "rendered": "http://example.com/"
+        },
+        "id": 4,
+        "link": "http://example.com//",
+        "modified": "\u003cts\u003e",
+        "modified_gmt": "\u003cts\u003e",
+        "ping_status": "open",
+        "slug": "",
+        "status": "publish",
+        "title": {
+          "rendered": "Golden Page 2"
+        },
+        "type": "page"
+      }
+    }
+  },
+  {
+    "name": "rest category create",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "count": 0,
+      "id": 1,
+      "link": "http://example.com/category/golden-cat/",
+      "name": "Golden Cat",
+      "parent": 0,
+      "slug": "golden-cat",
+      "taxonomy": "category"
+    }
+  },
+  {
+    "name": "rest category child create",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "count": 0,
+      "id": 2,
+      "link": "http://example.com/category/golden-cat/golden-child/",
+      "name": "Golden Child",
+      "parent": 1,
+      "slug": "golden-child",
+      "taxonomy": "category"
+    }
+  },
+  {
+    "name": "rest category get",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "count": 0,
+      "id": 2,
+      "link": "http://example.com/category/golden-cat/golden-child/",
+      "name": "Golden Child",
+      "parent": 1,
+      "slug": "golden-child",
+      "taxonomy": "category"
+    }
+  },
+  {
+    "name": "rest category patch",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "count": 0,
+      "id": 2,
+      "link": "http://example.com/category/golden-child/",
+      "name": "Golden Child 2",
+      "parent": 0,
+      "slug": "golden-child",
+      "taxonomy": "category"
+    }
+  },
+  {
+    "name": "rest category cycle",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "count": 0,
+      "id": 1,
+      "link": "http://example.com/category/golden-child/golden-cat/",
+      "name": "Golden Cat",
+      "parent": 2,
+      "slug": "golden-cat",
+      "taxonomy": "category"
+    }
+  },
+  {
+    "name": "rest category list",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": [
+      {
+        "count": 0,
+        "id": 1,
+        "link": "http://example.com/category/golden-child/golden-cat/",
+        "name": "Golden Cat",
+        "parent": 2,
+        "slug": "golden-cat",
+        "taxonomy": "category"
+      },
+      {
+        "count": 0,
+        "id": 2,
+        "link": "http://example.com/category/golden-child/",
+        "name": "Golden Child 2",
+        "parent": 0,
+        "slug": "golden-child",
+        "taxonomy": "category"
+      }
+    ]
+  },
+  {
+    "name": "rest category forbidden",
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "code": "rest_cannot_create",
+      "data": {
+        "status": 403
+      },
+      "message": "Sorry, you are not allowed to create terms as this user."
+    }
+  },
+  {
+    "name": "rest category delete",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "deleted": true,
+      "previous": {
+        "count": 0,
+        "id": 2,
+        "link": "http://example.com/category/golden-child/",
+        "name": "Golden Child 2",
+        "parent": 0,
+        "slug": "golden-child",
+        "taxonomy": "category"
+      }
+    }
+  },
+  {
+    "name": "rest tag create",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "count": 0,
+      "id": 3,
+      "link": "http://example.com/tag/golden-tag/",
+      "name": "Golden Tag",
+      "parent": 0,
+      "slug": "golden-tag",
+      "taxonomy": "post_tag"
+    }
+  },
+  {
+    "name": "rest tag parent rejected",
+    "status": 400,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "code": "rest_invalid_param",
+      "data": {
+        "status": 400
+      },
+      "message": "Invalid parent term."
+    }
+  },
+  {
+    "name": "rest tag get",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "count": 0,
+      "id": 3,
+      "link": "http://example.com/tag/golden-tag/",
+      "name": "Golden Tag",
+      "parent": 0,
+      "slug": "golden-tag",
+      "taxonomy": "post_tag"
+    }
+  },
+  {
+    "name": "rest tag patch",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "count": 0,
+      "id": 3,
+      "link": "http://example.com/tag/golden-tag/",
+      "name": "Golden Tag 2",
+      "parent": 0,
+      "slug": "golden-tag",
+      "taxonomy": "post_tag"
+    }
+  },
+  {
+    "name": "rest tag list",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": [
+      {
+        "count": 0,
+        "id": 3,
+        "link": "http://example.com/tag/golden-tag/",
+        "name": "Golden Tag 2",
+        "parent": 0,
+        "slug": "golden-tag",
+        "taxonomy": "post_tag"
+      }
+    ]
+  },
+  {
+    "name": "rest tag delete",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "deleted": true,
+      "previous": {
+        "count": 0,
+        "id": 3,
+        "link": "http://example.com/tag/golden-tag/",
+        "name": "Golden Tag 2",
+        "parent": 0,
+        "slug": "golden-tag",
+        "taxonomy": "post_tag"
+      }
+    }
+  },
+  {
+    "name": "admin post create",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "author": 2,
+      "commentStatus": "",
+      "content": "\u003cp\u003ea\u003c/p\u003e",
+      "date": "\u003cts\u003e",
+      "excerpt": "",
+      "id": 6,
+      "modified": "\u003cts\u003e",
+      "slug": "",
+      "status": "publish",
+      "terms": {
+        "category": [],
+        "post_tag": []
+      },
+      "title": "Admin Post",
+      "type": "post"
+    }
+  },
+  {
+    "name": "admin post get",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "author": 2,
+      "commentStatus": "",
+      "content": "\u003cp\u003ea\u003c/p\u003e",
+      "date": "\u003cts\u003e",
+      "excerpt": "",
+      "id": 6,
+      "modified": "\u003cts\u003e",
+      "slug": "",
+      "status": "publish",
+      "terms": {
+        "category": [],
+        "post_tag": []
+      },
+      "title": "Admin Post",
+      "type": "post"
+    }
+  },
+  {
+    "name": "admin post update",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "author": 2,
+      "commentStatus": "",
+      "content": "\u003cp\u003ea2\u003c/p\u003e",
+      "date": "\u003cts\u003e",
+      "excerpt": "",
+      "id": 6,
+      "modified": "\u003cts\u003e",
+      "slug": "",
+      "status": "publish",
+      "terms": {
+        "category": [],
+        "post_tag": []
+      },
+      "title": "Admin Post 2",
+      "type": "post"
+    }
+  },
+  {
+    "name": "admin post list",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "items": [
+        {
+          "author": 2,
+          "date": "\u003cts\u003e",
+          "id": 6,
+          "slug": "",
+          "status": "publish",
+          "title": "Admin Post 2",
+          "type": "post"
+        }
+      ],
+      "page": 1,
+      "perPage": 10,
+      "total": 1,
+      "totalPages": 1
+    }
+  },
+  {
+    "name": "admin post bad type",
+    "status": 400,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "error": {
+        "code": "bad_request",
+        "message": "type must be \"post\" or \"page\""
+      }
+    }
+  },
+  {
+    "name": "admin post contributor publish",
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "error": {
+        "code": "forbidden",
+        "message": "insufficient permissions"
+      }
+    }
+  },
+  {
+    "name": "admin post delete",
+    "status": 204
+  },
+  {
+    "name": "admin page create",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "author": 2,
+      "commentStatus": "",
+      "content": "\u003cp\u003ep\u003c/p\u003e",
+      "date": "\u003cts\u003e",
+      "excerpt": "",
+      "id": 8,
+      "modified": "\u003cts\u003e",
+      "slug": "",
+      "status": "publish",
+      "terms": {
+        "category": [],
+        "post_tag": []
+      },
+      "title": "Admin Page",
+      "type": "page"
+    }
+  },
+  {
+    "name": "admin page get",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "author": 2,
+      "commentStatus": "",
+      "content": "\u003cp\u003ep\u003c/p\u003e",
+      "date": "\u003cts\u003e",
+      "excerpt": "",
+      "id": 8,
+      "modified": "\u003cts\u003e",
+      "slug": "",
+      "status": "publish",
+      "terms": {
+        "category": [],
+        "post_tag": []
+      },
+      "title": "Admin Page",
+      "type": "page"
+    }
+  },
+  {
+    "name": "admin page update",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "author": 2,
+      "commentStatus": "",
+      "content": "\u003cp\u003ep2\u003c/p\u003e",
+      "date": "\u003cts\u003e",
+      "excerpt": "",
+      "id": 8,
+      "modified": "\u003cts\u003e",
+      "slug": "",
+      "status": "publish",
+      "terms": {
+        "category": [],
+        "post_tag": []
+      },
+      "title": "Admin Page 2",
+      "type": "page"
+    }
+  },
+  {
+    "name": "admin page list",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "items": [
+        {
+          "author": 2,
+          "date": "\u003cts\u003e",
+          "id": 8,
+          "slug": "",
+          "status": "publish",
+          "title": "Admin Page 2",
+          "type": "page"
+        }
+      ],
+      "page": 1,
+      "perPage": 10,
+      "total": 1,
+      "totalPages": 1
+    }
+  },
+  {
+    "name": "admin page delete",
+    "status": 204
+  },
+  {
+    "name": "admin term create category",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "id": 4,
+      "name": "Admin Cat",
+      "slug": "admin-cat",
+      "taxonomy": "category"
+    }
+  },
+  {
+    "name": "admin term create child",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "id": 5,
+      "name": "Admin Child",
+      "slug": "admin-child",
+      "taxonomy": "category"
+    }
+  },
+  {
+    "name": "admin term create tag",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "id": 6,
+      "name": "Admin Tag",
+      "slug": "admin-tag",
+      "taxonomy": "post_tag"
+    }
+  },
+  {
+    "name": "admin term update",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "id": 5,
+      "name": "Admin Child 2",
+      "slug": "admin-child-2",
+      "taxonomy": "category"
+    }
+  },
+  {
+    "name": "admin terms list",
+    "status": 400,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "error": {
+        "code": "bad_request",
+        "message": "taxonomy query parameter is required"
+      }
+    }
+  },
+  {
+    "name": "admin terms list category",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "items": [
+        {
+          "id": 4,
+          "name": "Admin Cat",
+          "slug": "admin-cat"
+        },
+        {
+          "id": 5,
+          "name": "Admin Child 2",
+          "slug": "admin-child-2"
+        },
+        {
+          "id": 1,
+          "name": "Golden Cat",
+          "slug": "golden-cat"
+        }
+      ]
+    }
+  },
+  {
+    "name": "admin terms list unknown",
+    "status": 400,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "error": {
+        "code": "bad_request",
+        "message": "unknown taxonomy"
+      }
+    }
+  },
+  {
+    "name": "admin term forbidden",
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "error": {
+        "code": "forbidden",
+        "message": "insufficient permissions"
+      }
+    }
+  },
+  {
+    "name": "admin term delete",
+    "status": 204
+  }
+]

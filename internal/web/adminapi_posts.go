@@ -35,11 +35,15 @@ var adminKnownTaxonomies = []string{content.TaxonomyCategory, taxonomyPostTag}
 // isKnownAdminTaxonomy reports whether taxonomy is one of adminKnownTaxonomies
 // (tasks.md 2.7: GET /admin/api/terms?taxonomy= 400s on an unrecognized value
 // such as "nav_menu" rather than silently returning an empty list).
-func isKnownAdminTaxonomy(taxonomy string) bool {
+func (s *Server) isKnownAdminTaxonomy(taxonomy string) bool {
 	for _, known := range adminKnownTaxonomies {
 		if taxonomy == known {
 			return true
 		}
+	}
+	if s.registry != nil {
+		_, ok := s.registry.Taxonomy(taxonomy)
+		return ok
 	}
 	return false
 }

@@ -114,7 +114,7 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	// *sanitize.Policy now also governs the user description surface
 	// (Req 9.3, 11.1).
 	userWrite := content.NewUserService(repos.Users, repos.UserMeta, cfg.Database.TablePrefix, content.WithUserContentPolicy(contentPolicy))
-	termWrite := content.NewTermWriteService(termRW)
+	termWrite := content.NewTermWriteService(termRW, content.WithTermRegistry(deps.Registry), content.WithTermContentPolicy(contentPolicy))
 	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
 	// navMenuWrite backs the admin-API menu write surface (POST/PUT/DELETE on
 	// /admin/api/menus and /menus/{id}/items). The factory's repos.NavMenus is a

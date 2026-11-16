@@ -29,8 +29,8 @@
 > **M11 (REST delete parity) is complete** — shipped via its own dedicated spec
 > [`../11-rest-delete-parity`](../11-rest-delete-parity) (PR #64), its box below
 > ticked with a shipped-via note. **M12's read half (12.A/12.B) is shipped** via
-> [`../12-custom-types-read`](../12-custom-types-read) (PRs #75/#76/#77); 12.C
-> (write parity) remains open. **M13–M16 are roadmap-level task groups,
+> [`../12-custom-types-read`](../12-custom-types-read) (PRs #75/#76/#77); **12.C (write parity) is shipped** via
+> [`../17-custom-types-write`](../17-custom-types-write) (M17). **M13–M16 are roadmap-level task groups,
 > each requiring its own dedicated spec** (`requirements.md`/`design.md`/
 > `tasks.md`) before implementation begins — the same posture M8/M9/M10 carried
 > here before each was refined into its own spec; this file does not authorize
@@ -959,12 +959,12 @@ compatibility boundary (see `requirements.md`'s Compatibility boundary note).
       post types and taxonomies under `/wp-json/wp/v2/{rest_base}` in the same
       envelope shapes used for posts, pages, media, categories, and tags, gated
       on each registry entry's capability model (defaulting to the post/page set).
-- [ ] **12.C — Custom post type / taxonomy write.** Enable REST and admin-API
+- [x] **12.C — Custom post type / taxonomy write.** ✅ shipped
+      (`../17-custom-types-write`, M17). Enable REST and admin-API
       create/update for registered custom post types and taxonomies over the
       existing writer ports, passed through M10a's sanitization policy at the
-      write boundary, following the M10.B/M10.C/M10.F write-group pattern. This
-      is the later write-parity half; 12.A/12.B land read-first.
-
+      write boundary, following the M10.B/M10.C/M10.F write-group pattern.
+      (Shipped via the `17-custom-types-write` spec: REST `POST`/`PUT`/`PATCH`/`DELETE` on `/wp-json/wp/v2/{rest_base}` for registered post types and taxonomies using the existing generic handlers; capabilities derived from `capability_type` (taxonomy writes use `manage_categories`); registered-type slug, `parent` (with cycle prevention), term-assignment (`rest_base` keys on REST, `termIds` on the admin API) and term-name sanitizing guards; permanent delete with term cleanup for registered types; scheduler capability suffixes. No schema change, no new capability string. Deferred: unregistered stored types stay editable with post capabilities, page `parent` writes, built-in delete cleanup, built-in term name sanitizing, trash/re-parent delete semantics.)
 ---
 
 ## M13 — Term Re-parenting (roadmap-level task groups)

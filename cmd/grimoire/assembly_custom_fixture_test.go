@@ -74,6 +74,9 @@ type customWriteEnv struct {
 	// Curator holds the full capability family of product, secret and guide
 	// (task 17.1): the only fixture user that can write hierarchical guides.
 	Curator customWriteActor
+	// Termsmith holds manage_categories but not unfiltered_html, so its term
+	// names are sanitized (tier B).
+	Termsmith customWriteActor
 	// Repos and Prefix give a test direct SQL access to the same database.
 	Repos  *storage.Repositories
 	Prefix string
@@ -121,6 +124,7 @@ func newCustomWriteHandler(t *testing.T, withRegistry bool) customWriteEnv {
 	mk("products", productsCaps()...)
 	mk("curator", capsFor("products", "secrets", "guides")...)
 
+	mk("termsmith", "read", "edit_posts", "manage_categories")
 	var reg *registry.Registry
 	if withRegistry {
 		reg = customWriteRegistry(t)
@@ -139,15 +143,16 @@ func newCustomWriteHandler(t *testing.T, withRegistry bool) customWriteEnv {
 		return customWriteActor{Login: name, Token: token, CSRF: sess.CSRFToken}
 	}
 	return customWriteEnv{
-		Handler:  handler,
-		Admin:    login("admin"),
-		Editor:   login("editor"),
-		Author:   login("author"),
-		Contrib:  login("contrib"),
-		Products: login("products"),
-		Curator:  login("curator"),
-		Repos:    repos,
-		Prefix:   dbCfg.TablePrefix,
+		Handler:   handler,
+		Admin:     login("admin"),
+		Editor:    login("editor"),
+		Author:    login("author"),
+		Contrib:   login("contrib"),
+		Products:  login("products"),
+		Curator:   login("curator"),
+		Termsmith: login("termsmith"),
+		Repos:     repos,
+		Prefix:    dbCfg.TablePrefix,
 	}
 }
 

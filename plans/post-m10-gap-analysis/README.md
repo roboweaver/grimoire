@@ -1,16 +1,16 @@
 # Post-M10 Gap Analysis — Candidate Milestones (M11+)
 
-> **Status: 📝 Proposal (M11, M12 read half, M13, M14, M15 ✅ shipped).** This document is a gap analysis, not a
+> **Status: 📝 Proposal (M11, M12 incl. write, M13, M14, M15 ✅ shipped).** This document is a gap analysis, not a
 > committed roadmap. The WordPress-core-parity roadmap
 > ([`../wordpress-core-parity-roadmap`](../wordpress-core-parity-roadmap)) is
 > complete through its final group (M10.G). Each candidate below is a documented,
 > code-verified limitation of the current implementation, written up so a future
 > milestone can refine it into its own `requirements.md`/`design.md`/`tasks.md`.
 > **M11 (REST delete parity, PR #64), M13 (term re-parenting, PR #67), and M14
-> (sanitization backfill, PR #70) have since been specified and merged.** M12's
-> read half (12.A/12.B, PRs #75/#76/#77) and M15 (PR #72) have shipped too; M12's
-> write parity (12.C) is a separate later spec. The remaining candidate is M16
-> (optional).
+> (sanitization backfill, PR #70) have since been specified and merged.** M12 is
+> fully shipped: the read half (12.A/12.B, PRs #75/#76/#77) and the write half
+> (12.C, spec `17-custom-types-write`), as is M15 (PR #72). The remaining
+> candidate is M16 (optional).
 
 Every gap is traced to where it is already acknowledged in
 [`../../docs/compatibility.md`](../../docs/compatibility.md) or the root
@@ -37,7 +37,7 @@ routes. Likely adds a `domain.MediaWriter.Delete` / `domain.UserRepository.Delet
 
 **Shipped in M11:** `MediaWriter.Delete`/`UserRepository.Delete` ports + wprepo impls, `MediaWriteService.Delete`/`UserService.Delete`, and the two REST handlers — `force=true` required, media per-attachment `CanDeletePost` gate with on-disk file unlink, user `reassign` (id or `false`) with self-delete/`delete_users` guards, transactional reassign-or-delete, `{"deleted":true,"previous":...}` envelope. Collection-level DELETE stays `501`.
 
-### M12 — Custom post types and custom taxonomies  ✅ read shipped (`../12-custom-types-read`, PRs #75/#76/#77)
+### M12 — Custom post types and custom taxonomies  ✅ shipped (read: `../12-custom-types-read`, PRs #75/#76/#77; write: `../17-custom-types-write`)
 
 **Gap.** Only `post`/`page` rows and the `category`/`post_tag` taxonomies are
 served; admin reads filter `post_type IN ('post','page')`
@@ -58,8 +58,16 @@ hard-coded `post_type IN ('post','page')` / `post_type = 'post'` filters;
 archive/single and term-archive routing through the existing permalink,
 nested-hierarchy, and pagination machinery; `/wp-json/wp/v2/{rest_base}` REST
 reads in the existing envelopes; admin type validation; and a migrate diagnostic.
-Delivered across PRs #75, #76, #77. **12.C (custom type/taxonomy write parity) is
-a separate later spec and remains open.**
+Delivered across PRs #75, #76, #77.
+**Shipped in M17 (write half, 12.C):** REST and admin-API create, update and
+delete for registered custom post types and taxonomies, with capabilities
+derived from `capability_type`, sanitization, slug and `parent` guards, term
+assignment and delete cleanup (`plans/17-custom-types-write`).
+**Still deferred after M17:** unregistered stored types remain editable with
+post capabilities through the admin API; page `parent` has no write path;
+built-in post delete does not clean up `term_relationships`, counts, postmeta
+or comments; built-in `category`/`post_tag` term names are not sanitized on
+write; delete is permanent, with no trash or child re-parenting.
 **M15 follow-up (found while building M12) — fixed in PR #79.** M15's
 `PageService.Resolve` confirmed the leaf with `BySlug(leaf.Slug)`, which was
 ambiguous for same-slug leaves under different parents, and its recovery path
@@ -152,6 +160,6 @@ and documented.
    standing security caveat from M10a, CLI-only.
 4. ~~**M15 (hierarchical page URLs)**~~ — ✅ shipped (PR #72); completed
    WordPress routing parity for pages.
-5. ~~**M12 (custom post types/taxonomies, read)**~~ — ✅ shipped (PRs
-   #75/#76/#77); 12.C write parity is a separate later spec.
+5. ~~**M12 (custom post types/taxonomies, read and write)**~~ — ✅ shipped
+   (read PRs #75/#76/#77; write via `17-custom-types-write`).
 6. **M16 (pagination path form)** — optional polish. **Next (optional).**

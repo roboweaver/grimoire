@@ -293,12 +293,24 @@ func (s *Server) handleRESTTermCreate(taxonomy string) http.HandlerFunc {
 			}
 			return
 		}
-		created := domain.Term{ID: id, Name: *body.Name, Slug: slug, Taxonomy: taxonomy, ParentID: parentID}
+		// Respond with the stored term: the service may have sanitized the name.
+		created := s.storedTerm(r, domain.Term{ID: id, Name: *body.Name, Slug: slug, Taxonomy: taxonomy, ParentID: parentID})
 		// Read after the write, so the new term is in the graph its own link
 		// is built from, and the response reflects the written parent from the
 		// same source the archive route walks rather than an assumption here.
 		_ = writeRESTResponse(w, r, http.StatusCreated, s.termToREST(r, created, s.restTermGraph(r, taxonomy)))
 	}
+}
+
+// storedTerm reads t back by ID so a response reflects what the service
+// stored (a registered taxonomy's name is sanitized on write). If the read
+// fails or finds nothing it returns t unchanged.
+func (s *Server) storedTerm(r *http.Request, t domain.Term) domain.Term {
+	got, err := s.termWrite.TermsByIDs(r.Context(), []int64{t.ID})
+	if err != nil || len(got) == 0 {
+		return t
+	}
+	return got[0]
 }
 
 // handleRESTTermUpdate handles PUT/PATCH .../categories/{id},
@@ -353,6 +365,7 @@ func (s *Server) handleRESTTermUpdate(taxonomy string) http.HandlerFunc {
 		}
 		// Read after the rename, so a slug change is reflected in the link
 		// the response advertises for it.
+		updated = s.storedTerm(r, updated)
 		_ = writeRESTResponse(w, r, http.StatusOK, s.termToREST(r, updated, s.restTermGraph(r, taxonomy)))
 	}
 }

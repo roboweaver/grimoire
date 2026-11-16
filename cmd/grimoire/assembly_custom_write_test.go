@@ -346,6 +346,229 @@ func TestBuildHandlerCustomPostWrites(t *testing.T) {
 	want(doJSON(t, h, nil, http.MethodGet, "/product/widget/", ""), http.StatusNotFound, "GET deleted product")
 }
 
+// TestBuildHandlerCustomHierarchyAndTerms is the RED test for task 17.1 (Req 11,
+// 12, 13.3, 14.3, 17.1, 17.3; D3, D7, D10). It drives post_parent and term
+// assignment for registered types through buildHandler, on REST and admin.
+//
+//	assertion                                         guards
+//	------------------------------------------------  ---------------------------------------
+//	guide tree via REST and admin with parent         validatePostParent + parent on both surfaces
+//	child serves at nested public URL                 REST link + M12 nested route over written rows
+//	parent cycle -> 400 (REST and admin)              ErrPostParentCycle mapping
+//	parent slug rename -> old nested path 301         M15 redirect over the renamed ancestry (14.3)
+//	product genre assignment (REST key, admin         WithPostTermsRegistry + WithPostTermsReader
+//	  termIds) -> term_taxonomy.count                 in buildHandler (task 17.2)
+//	unattached taxonomy: REST key ignored, admin      ErrTaxonomyNotAttached -> partial
+//	  termIds reported in partial
+//	delete decrements the count                       WithTermDetacher (Req 13.3)
+//	contributor -> 403 throughout                     suffix capability gate
+func TestBuildHandlerCustomHierarchyAndTerms(t *testing.T) {
+	env := newCustomWriteHandler(t, true)
+	h := env.Handler
+	ctx := context.Background()
+	type item struct {
+		ID       int64             `json:"id"`
+		Slug     string            `json:"slug"`
+		Link     string            `json:"link"`
+		Parent   int64             `json:"parent"`
+		Modified string            `json:"modified"`
+		Genre    []int64           `json:"genre"`
+		Badge    []int64           `json:"badge"`
+		Partial  map[string]string `json:"partial"`
+	}
+	decode := func(rec *httptest.ResponseRecorder) item {
+		t.Helper()
+		var out item
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode %q: %v", rec.Body.String(), err)
+		}
+		return out
+	}
+	want := func(rec *httptest.ResponseRecorder, status int, what string) {
+		t.Helper()
+		if rec.Code != status {
+			t.Fatalf("%s: status = %d, want %d; body: %s", what, rec.Code, status, rec.Body.String())
+		}
+	}
+	termCount := func(termID int64) int {
+		t.Helper()
+		var n int
+		if err := env.Repos.DB().QueryRowContext(ctx,
+			"SELECT count FROM "+env.Prefix+"term_taxonomy WHERE term_id = ?", termID).Scan(&n); err != nil {
+			t.Fatalf("read count for term %d: %v", termID, err)
+		}
+		return n
+	}
+	relCount := func(objectID int64) int {
+		t.Helper()
+		var n int
+		if err := env.Repos.DB().QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM "+env.Prefix+"term_relationships WHERE object_id = ?", objectID).Scan(&n); err != nil {
+			t.Fatalf("read relationships for %d: %v", objectID, err)
+		}
+		return n
+	}
+	const restGuide = "/wp-json/wp/v2/guide"
+	const restProduct = "/wp-json/wp/v2/product"
+	pu := &env.Curator // product and guide capabilities (Admin has no derived caps)
+	ad := &env.Curator
+	adm := &env.Admin
+
+	// --- guide tree over REST: parent, nested link, nested public URL ---
+	rec := doJSON(t, h, ad, http.MethodPost, restGuide, `{"title":"Handbook","status":"publish"}`)
+	want(rec, http.StatusCreated, "REST create guide root")
+	root := decode(rec)
+	rec = doJSON(t, h, ad, http.MethodPost, restGuide,
+		fmt.Sprintf(`{"title":"Setup","status":"publish","parent":%d}`, root.ID))
+	want(rec, http.StatusCreated, "REST create guide child")
+	child := decode(rec)
+	if child.Parent != root.ID {
+		t.Fatalf("child parent = %d, want %d", child.Parent, root.ID)
+	}
+	if !strings.HasSuffix(child.Link, "/guide/handbook/setup/") {
+		t.Fatalf("child link = %q, want suffix /guide/handbook/setup/", child.Link)
+	}
+	rec = doJSON(t, h, ad, http.MethodPost, restGuide,
+		fmt.Sprintf(`{"title":"Install","status":"publish","parent":%d}`, child.ID))
+	want(rec, http.StatusCreated, "REST create guide grandchild")
+	grand := decode(rec)
+	want(doJSON(t, h, nil, http.MethodGet, "/guide/handbook/setup/", ""), http.StatusOK, "GET nested child")
+	want(doJSON(t, h, nil, http.MethodGet, "/guide/handbook/setup/install/", ""), http.StatusOK, "GET nested grandchild")
+
+	// --- admin: parent on create, omitted on update keeps it ---
+	rec = doJSON(t, h, ad, http.MethodPost, "/admin/api/posts",
+		`{"title":"Admin Root","type":"guide","status":"publish"}`)
+	want(rec, http.StatusCreated, "admin create guide root")
+	aRoot := decode(rec)
+	rec = doJSON(t, h, ad, http.MethodPost, "/admin/api/posts",
+		fmt.Sprintf(`{"title":"Admin Child","type":"guide","status":"publish","parent":%d}`, aRoot.ID))
+	want(rec, http.StatusCreated, "admin create guide child")
+	aChild := decode(rec)
+	if aChild.Parent != aRoot.ID {
+		t.Fatalf("admin child parent = %d, want %d", aChild.Parent, aRoot.ID)
+	}
+	want(doJSON(t, h, nil, http.MethodGet, "/guide/admin-root/admin-child/", ""), http.StatusOK, "GET admin nested child")
+	rec = doJSON(t, h, ad, http.MethodPut, fmt.Sprintf("/admin/api/posts/%d", aChild.ID),
+		fmt.Sprintf(`{"title":"Admin Child 2","type":"guide","status":"publish","modified":%q}`, aChild.Modified))
+	want(rec, http.StatusOK, "admin update guide child without parent")
+	if got := decode(rec); got.Parent != aRoot.ID {
+		t.Fatalf("admin child parent after update without parent = %d, want %d", got.Parent, aRoot.ID)
+	}
+
+	// --- cycles are 400 on both surfaces ---
+	want(doJSON(t, h, ad, http.MethodPatch, fmt.Sprintf("%s/%d", restGuide, root.ID),
+		fmt.Sprintf(`{"parent":%d}`, grand.ID)), http.StatusBadRequest, "REST parent = descendant")
+	want(doJSON(t, h, ad, http.MethodPatch, fmt.Sprintf("%s/%d", restGuide, root.ID),
+		fmt.Sprintf(`{"parent":%d}`, root.ID)), http.StatusBadRequest, "REST parent = self")
+	want(doJSON(t, h, ad, http.MethodPut, fmt.Sprintf("/admin/api/posts/%d", aRoot.ID),
+		fmt.Sprintf(`{"title":"Admin Root","type":"guide","status":"publish","parent":%d,"modified":%q}`, aChild.ID, aRoot.Modified)),
+		http.StatusBadRequest, "admin parent = descendant")
+	// A flat type refuses a parent.
+	want(doJSON(t, h, ad, http.MethodPost, restProduct,
+		fmt.Sprintf(`{"title":"Flat","status":"publish","parent":%d}`, root.ID)),
+		http.StatusBadRequest, "REST parent on flat product")
+
+	// --- rename the root's slug: the child's canonical path moves, the old one 301s (14.3) ---
+	rec = doJSON(t, h, ad, http.MethodPatch, fmt.Sprintf("%s/%d", restGuide, root.ID), `{"slug":"manual"}`)
+	want(rec, http.StatusOK, "REST rename root slug")
+	want(doJSON(t, h, nil, http.MethodGet, "/guide/manual/setup/", ""), http.StatusOK, "GET renamed nested child")
+	rec = doJSON(t, h, nil, http.MethodGet, "/guide/handbook/setup/", "")
+	want(rec, http.StatusMovedPermanently, "GET old nested path")
+	if loc := rec.Header().Get("Location"); loc != "/guide/manual/setup/" {
+		t.Fatalf("old nested path Location = %q, want /guide/manual/setup/", loc)
+	}
+
+	// --- term assignment to a registered taxonomy ---
+	mkTerm := func(path, name string) int64 {
+		t.Helper()
+		rec := doJSON(t, h, adm, http.MethodPost, path, fmt.Sprintf(`{"name":%q}`, name))
+		want(rec, http.StatusCreated, "create term "+name)
+		return decode(rec).ID
+	}
+	g1 := mkTerm("/wp-json/wp/v2/genre", "Fantasy")
+	g2 := mkTerm("/wp-json/wp/v2/genre", "Mystery")
+	b1 := mkTerm("/wp-json/wp/v2/badge", "New")
+
+	rec = doJSON(t, h, pu, http.MethodPost, restProduct,
+		fmt.Sprintf(`{"title":"Tagged","status":"publish","genre":[%d,%d]}`, g1, g2))
+	want(rec, http.StatusCreated, "REST create product with genre")
+	tagged := decode(rec)
+	if len(tagged.Genre) != 2 {
+		t.Fatalf("response genre = %v, want both terms", tagged.Genre)
+	}
+	if termCount(g1) != 1 || termCount(g2) != 1 {
+		t.Fatalf("counts after REST assign = %d/%d, want 1/1", termCount(g1), termCount(g2))
+	}
+	if relCount(tagged.ID) != 2 {
+		t.Fatalf("relationships after REST assign = %d, want 2", relCount(tagged.ID))
+	}
+
+	// Admin assignment through termIds.
+	rec = doJSON(t, h, pu, http.MethodPost, "/admin/api/posts",
+		fmt.Sprintf(`{"title":"Admin Tagged","type":"product","status":"publish","termIds":{"genre":[%d]}}`, g1))
+	want(rec, http.StatusCreated, "admin create product with termIds")
+	aTagged := decode(rec)
+	if len(aTagged.Partial) != 0 {
+		t.Fatalf("admin partial = %v, want none", aTagged.Partial)
+	}
+	if termCount(g1) != 2 {
+		t.Fatalf("genre count after admin assign = %d, want 2", termCount(g1))
+	}
+
+	// Unattached taxonomy: genre is attached to guide, badge is not.
+	rec = doJSON(t, h, ad, http.MethodPost, "/admin/api/posts",
+		fmt.Sprintf(`{"title":"Guide Badged","type":"guide","status":"publish","termIds":{"badge":[%d]}}`, b1))
+	want(rec, http.StatusCreated, "admin create guide with unattached badge")
+	if got := decode(rec); got.Partial["badge"] == "" {
+		t.Fatalf("admin partial = %v, want an entry for badge", got.Partial)
+	} else if relCount(got.ID) != 0 {
+		t.Fatalf("unattached badge wrote %d relationships", relCount(got.ID))
+	}
+	rec = doJSON(t, h, ad, http.MethodPost, restGuide,
+		fmt.Sprintf(`{"title":"Guide Rest Badged","status":"publish","badge":[%d]}`, b1))
+	want(rec, http.StatusCreated, "REST create guide with unattached badge key")
+	if got := decode(rec); relCount(got.ID) != 0 {
+		t.Fatalf("unattached badge key wrote %d relationships", relCount(got.ID))
+	}
+	if termCount(b1) != 0 {
+		t.Fatalf("badge count = %d, want 0", termCount(b1))
+	}
+	// A term of another taxonomy is refused before any row is created.
+	want(doJSON(t, h, pu, http.MethodPost, restProduct,
+		fmt.Sprintf(`{"title":"Wrong Vocab","status":"publish","genre":[%d]}`, b1)),
+		http.StatusBadRequest, "REST genre with a badge term")
+	want(doJSON(t, h, nil, http.MethodGet, "/product/wrong-vocab/", ""), http.StatusNotFound, "GET refused product")
+
+	// --- delete decrements the counts (13.3) ---
+	want(doJSON(t, h, pu, http.MethodDelete, fmt.Sprintf("%s/%d", restProduct, tagged.ID), ""),
+		http.StatusOK, "REST delete tagged product")
+	if termCount(g1) != 1 || termCount(g2) != 0 {
+		t.Fatalf("counts after delete = %d/%d, want 1/0", termCount(g1), termCount(g2))
+	}
+	want(doJSON(t, h, pu, http.MethodDelete, fmt.Sprintf("/admin/api/posts/%d", aTagged.ID), ""),
+		http.StatusNoContent, "admin delete tagged product")
+	if termCount(g1) != 0 {
+		t.Fatalf("genre count after both deletes = %d, want 0", termCount(g1))
+	}
+
+	// --- contributor lacks the type capabilities: 403 throughout ---
+	co := &env.Contrib
+	want(doJSON(t, h, co, http.MethodPost, restGuide, `{"title":"No","status":"draft"}`), http.StatusForbidden, "contributor REST create guide")
+	want(doJSON(t, h, co, http.MethodPost, restGuide,
+		fmt.Sprintf(`{"title":"No","status":"draft","parent":%d}`, root.ID)), http.StatusForbidden, "contributor REST create with parent")
+	want(doJSON(t, h, co, http.MethodPatch, fmt.Sprintf("%s/%d", restGuide, child.ID),
+		fmt.Sprintf(`{"parent":%d}`, root.ID)), http.StatusForbidden, "contributor REST re-parent")
+	want(doJSON(t, h, co, http.MethodPost, restProduct,
+		fmt.Sprintf(`{"title":"No","status":"draft","genre":[%d]}`, g1)), http.StatusForbidden, "contributor REST assign terms")
+	want(doJSON(t, h, co, http.MethodPost, "/admin/api/posts",
+		fmt.Sprintf(`{"title":"No","type":"guide","status":"draft","parent":%d}`, root.ID)), http.StatusForbidden, "contributor admin create with parent")
+	want(doJSON(t, h, co, http.MethodPut, fmt.Sprintf("/admin/api/posts/%d", aChild.ID),
+		fmt.Sprintf(`{"title":"No","type":"guide","status":"publish","modified":%q}`, aChild.Modified)), http.StatusForbidden, "contributor admin update")
+	if termCount(g1) != 0 {
+		t.Fatalf("contributor attempts changed genre count to %d", termCount(g1))
+	}
+}
+
 // customWriteDeps builds the serverDeps assemblyHandler builds, so a test can
 // call buildHandler and buildScheduler itself.
 func customWriteDeps(t *testing.T, env customWriteEnv, reg *registry.Registry) serverDeps {

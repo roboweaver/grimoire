@@ -83,6 +83,7 @@ type postWriteRequest struct {
 	CommentStatus string             `json:"commentStatus"`
 	Modified      string             `json:"modified"`
 	TermIDs       map[string][]int64 `json:"termIds"`
+	Parent        *int64             `json:"parent"`
 }
 
 // validPostStatuses is the exact vocabulary Req 5.1 accepts.
@@ -144,7 +145,15 @@ func (s *Server) parsePostWrite(body postWriteRequest, current *domain.Post) (do
 			return domain.Post{}, badRequestError{msg: "future status requires a date in the future"}
 		}
 	}
+	var parent int64
+	if current != nil {
+		parent = current.ParentID
+	}
+	if body.Parent != nil && typ != "post" && typ != "page" {
+		parent = *body.Parent
+	}
 	return domain.Post{
+		ParentID:      parent,
 		Title:         body.Title,
 		Content:       body.Content,
 		Excerpt:       body.Excerpt,
@@ -169,11 +178,16 @@ func (s *Server) isRegisteredPostType(typ string) bool {
 // postDetail builds the shared Req 4.1 detail response for p, resolving its
 // assigned terms across every known taxonomy.
 func (s *Server) postDetail(ctx context.Context, p domain.Post) (postDetailResponse, error) {
-	terms, err := s.resolvePostTerms(ctx, p.ID)
+	terms, err := s.resolvePostTerms(ctx, p.ID, p.Type)
 	if err != nil {
 		return postDetailResponse{}, err
 	}
+	var parent int64
+	if p.Type != "post" && p.Type != "page" && s.isRegisteredPostType(p.Type) {
+		parent = p.ParentID
+	}
 	return postDetailResponse{
+		Parent:        parent,
 		ID:            p.ID,
 		Title:         p.Title,
 		Slug:          p.Slug,
@@ -193,12 +207,21 @@ func (s *Server) postDetail(ctx context.Context, p domain.Post) (postDetailRespo
 // taxonomy, the term IDs currently assigned to postID resolved into
 // {id,name,slug} summaries. A post with no terms in a taxonomy still gets an
 // empty (non-nil) slice entry so clients don't need a presence check.
-func (s *Server) resolvePostTerms(ctx context.Context, postID int64) (map[string][]termSummary, error) {
-	out := make(map[string][]termSummary, len(adminKnownTaxonomies))
+//
+// For a registered custom post type the map lists that type's attached
+// taxonomies instead (Req 12.4, 12.6); built-ins keep category/post_tag.
+func (s *Server) resolvePostTerms(ctx context.Context, postID int64, typ string) (map[string][]termSummary, error) {
+	taxonomies := adminKnownTaxonomies
+	if typ != "post" && typ != "page" && s.registry != nil {
+		if pt, ok := s.registry.PostType(typ); ok {
+			taxonomies = pt.Taxonomies
+		}
+	}
+	out := make(map[string][]termSummary, len(taxonomies))
 	if s.postTermsRead == nil || s.termWrite == nil {
 		return out, nil
 	}
-	for _, taxonomy := range adminKnownTaxonomies {
+	for _, taxonomy := range taxonomies {
 		ids, err := s.postTermsRead.TermsForPost(ctx, postID, taxonomy)
 		if err != nil {
 			return nil, err
@@ -261,6 +284,9 @@ func (s *Server) adminPostCreate(w http.ResponseWriter, r *http.Request) error {
 		if errors.Is(err, content.ErrSlugInvalid) {
 			return badRequestError{msg: "invalid slug"}
 		}
+		if errors.Is(err, content.ErrPostParentInvalid) || errors.Is(err, content.ErrPostParentCycle) {
+			return badRequestError{msg: "invalid parent"}
+		}
 		return err
 	}
 	partial := s.applyTermIDs(r.Context(), principal, id, body.TermIDs)
@@ -316,6 +342,9 @@ func (s *Server) adminPostUpdate(w http.ResponseWriter, r *http.Request) error {
 		}
 		if errors.Is(err, content.ErrSlugInvalid) {
 			return badRequestError{msg: "invalid slug"}
+		}
+		if errors.Is(err, content.ErrPostParentInvalid) || errors.Is(err, content.ErrPostParentCycle) {
+			return badRequestError{msg: "invalid parent"}
 		}
 		return err
 	}

@@ -298,6 +298,24 @@ func (s *PageService) AncestryFor(ctx context.Context, id int64) ([]string, erro
 	return h.Ancestry(id), nil
 }
 
+// isAncestorOrSelf reports whether ancestor is id or sits above it, walking
+// post_parent upward with a visited set so a stored cycle terminates.
+func (h *PageHierarchy) isAncestorOrSelf(ancestor, id int64) bool {
+	visited := map[int64]bool{}
+	for id != 0 && !visited[id] {
+		if id == ancestor {
+			return true
+		}
+		visited[id] = true
+		n, ok := h.byID[id]
+		if !ok {
+			return false
+		}
+		id = n.ParentID
+	}
+	return false
+}
+
 // loadPostNodes reads every row of postType (all statuses) through the keyset
 // port, pageHierarchyPageSize at a time.
 func loadPostNodes(ctx context.Context, r domain.PostNodeReader, postType string) ([]domain.PostNode, error) {

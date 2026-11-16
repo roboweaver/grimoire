@@ -119,7 +119,9 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	// (Req 9.3, 11.1).
 	userWrite := content.NewUserService(repos.Users, repos.UserMeta, cfg.Database.TablePrefix, content.WithUserContentPolicy(contentPolicy))
 	termWrite := content.NewTermWriteService(termRW, content.WithTermRegistry(deps.Registry), content.WithTermContentPolicy(contentPolicy))
-	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter)
+	postTermsWrite := content.NewPostTermsWriteService(repos.PostWriter, repos.PostTermsWriter,
+		content.WithPostTermsRegistry(deps.Registry),
+		content.WithPostTermsReader(repos.TermReader))
 	// navMenuWrite backs the admin-API menu write surface (POST/PUT/DELETE on
 	// /admin/api/menus and /menus/{id}/items). The factory's repos.NavMenus is a
 	// concrete *wprepo.NavMenuRepo, which implements BOTH domain.NavMenuRepository

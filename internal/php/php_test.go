@@ -2,6 +2,7 @@ package php
 
 import (
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -137,6 +138,55 @@ func TestRoundTrip(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, v) {
 			t.Fatalf("round-trip %#v -> %q -> %#v", v, s, got)
+		}
+	}
+}
+
+// M19 task 5.1 (Req 8.6, 8.11): Serialize supports []int as a list array.
+func TestSerializeIntSlice(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []int
+		want string
+	}{
+		{"two ids", []int{5, 9}, "a:2:{i:0;i:5;i:1;i:9;}"},
+		{"empty", []int{}, "a:0:{}"},
+		{"single", []int{7}, "a:1:{i:0;i:7;}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Serialize(tt.in)
+			if err != nil {
+				t.Fatalf("Serialize(%v) error: %v", tt.in, err)
+			}
+			if got != tt.want {
+				t.Fatalf("Serialize(%v) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSerializeIntSliceRoundTrip(t *testing.T) {
+	for _, in := range [][]int{{5, 9}, {7}, {4, 9, 12}, {}} {
+		s, err := Serialize(in)
+		if err != nil {
+			t.Fatalf("Serialize(%v) error: %v", in, err)
+		}
+		got, err := Unserialize(s)
+		if err != nil {
+			t.Fatalf("Unserialize(%q) error: %v", s, err)
+		}
+		m, ok := got.(map[string]any)
+		if !ok {
+			t.Fatalf("Unserialize(%q) = %T, want map[string]any", s, got)
+		}
+		if len(m) != len(in) {
+			t.Fatalf("len = %d, want %d", len(m), len(in))
+		}
+		for i, v := range in {
+			if m[strconv.Itoa(i)] != v {
+				t.Fatalf("key %d = %#v, want %d", i, m[strconv.Itoa(i)], v)
+			}
 		}
 	}
 }

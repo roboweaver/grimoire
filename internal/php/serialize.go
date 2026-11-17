@@ -10,9 +10,10 @@ import (
 
 // Serialize encodes a Go value into PHP's serialize() text format.
 //
-// Supported types: nil (and any nil pointer), bool, int, string, and
-// map[string]any / map[string]bool (encoded as a PHP associative array with
-// string keys). Nil encodes as PHP's null (N;), matching how WordPress
+// Supported types: nil (and any nil pointer), bool, int, string, []int
+// (encoded as a PHP list array with integer keys 0..N-1, as WordPress stores
+// sticky_posts), and map[string]any / map[string]bool (encoded as a PHP
+// associative array with string keys). Nil encodes as PHP's null (N;), matching how WordPress
 // stores an Application Password's last_used/last_ip before first use.
 // String lengths are counted in bytes, matching PHP semantics. Map keys are
 // emitted in sorted order so that output is deterministic for identical
@@ -43,6 +44,18 @@ func serializeValue(b *strings.Builder, v any) error {
 		b.WriteByte(';')
 	case string:
 		serializeString(b, val)
+	case []int:
+		b.WriteString("a:")
+		b.WriteString(strconv.Itoa(len(val)))
+		b.WriteString(":{")
+		for i, n := range val {
+			b.WriteString("i:")
+			b.WriteString(strconv.Itoa(i))
+			b.WriteString(";i:")
+			b.WriteString(strconv.Itoa(n))
+			b.WriteByte(';')
+		}
+		b.WriteByte('}')
 	case map[string]any:
 		return serializeMap(b, val)
 	case map[string]bool:

@@ -96,9 +96,9 @@ type RESTPost struct {
 // rather than present-but-empty (Req 2.2).
 type RESTPage struct {
 	restItemCommon
-	// Parent is the page's post_parent id (M18 Req 11.1). It is omitted for a
-	// top-level page so the pre-M18 shape of existing pages is unchanged.
-	Parent int64 `json:"parent,omitempty"`
+	// Parent is the page's post_parent id. It is always present, as in
+	// WordPress, and is 0 for a top-level page (M19 Req 6.1, 6.2).
+	Parent int64 `json:"parent"`
 }
 
 // RESTComment is the WordPress REST shape for a wp/v2/comments item

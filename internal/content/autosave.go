@@ -6,6 +6,7 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/registry"
 )
 
 // AutosaveFields is the subset of a post's editable content an autosave
@@ -23,11 +24,25 @@ type AutosaveFields struct {
 type AutosaveService struct {
 	revisions domain.RevisionWriter
 	posts     domain.PostWriter
+	reg       *registry.Registry
+}
+
+// AutosaveOption configures optional AutosaveService collaborators.
+type AutosaveOption func(*AutosaveService)
+
+// WithAutosaveRegistry supplies the registry used to decide which parent
+// types are writable and which capability family governs them.
+func WithAutosaveRegistry(reg *registry.Registry) AutosaveOption {
+	return func(s *AutosaveService) { s.reg = reg }
 }
 
 // NewAutosaveService constructs an AutosaveService.
-func NewAutosaveService(revisions domain.RevisionWriter, posts domain.PostWriter) *AutosaveService {
-	return &AutosaveService{revisions: revisions, posts: posts}
+func NewAutosaveService(revisions domain.RevisionWriter, posts domain.PostWriter, opts ...AutosaveOption) *AutosaveService {
+	s := &AutosaveService{revisions: revisions, posts: posts}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // authorizeParent loads the parent post by parentID and verifies actor may
@@ -42,7 +57,11 @@ func (s *AutosaveService) authorizeParent(ctx context.Context, actor auth.Princi
 		}
 		return domain.Post{}, err
 	}
-	if !auth.CanEditPost(actor, parent.Type, parent.Status, parent.Author) {
+	if !WritableType(s.reg, parent.Type) {
+		return domain.Post{}, domain.ErrNotFound
+	}
+	suffix, _, _ := CapabilitySuffixFor(s.reg, parent.Type)
+	if !auth.CanEditPostSuffix(actor, suffix, parent.Status, parent.Author) {
 		return domain.Post{}, domain.ErrNotFound
 	}
 	return parent, nil

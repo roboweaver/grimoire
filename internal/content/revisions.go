@@ -6,6 +6,7 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/registry"
 )
 
 // RevisionWriteService owns revision-snapshot creation and pruning, plus the
@@ -18,14 +19,28 @@ type RevisionWriteService struct {
 	revisions  domain.RevisionWriter
 	posts      domain.PostWriter
 	maxPerPost int // Requirement 5.1; 0 disables, negative/unset = unlimited
+	reg        *registry.Registry
+}
+
+// RevisionOption configures optional RevisionWriteService collaborators.
+type RevisionOption func(*RevisionWriteService)
+
+// WithRevisionRegistry supplies the registry used to decide which parent
+// types are writable and which capability family governs them.
+func WithRevisionRegistry(reg *registry.Registry) RevisionOption {
+	return func(s *RevisionWriteService) { s.reg = reg }
 }
 
 // NewRevisionWriteService constructs a RevisionWriteService. maxPerPost is
 // the retention policy (Req 5): 0 disables revisioning entirely, a positive
 // value caps the number of retained (non-autosave) revisions per post, and a
 // negative/unset value means unlimited retention.
-func NewRevisionWriteService(revisions domain.RevisionWriter, posts domain.PostWriter, maxPerPost int) *RevisionWriteService {
-	return &RevisionWriteService{revisions: revisions, posts: posts, maxPerPost: maxPerPost}
+func NewRevisionWriteService(revisions domain.RevisionWriter, posts domain.PostWriter, maxPerPost int, opts ...RevisionOption) *RevisionWriteService {
+	s := &RevisionWriteService{revisions: revisions, posts: posts, maxPerPost: maxPerPost}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // Snapshot records cur (the post's state immediately before an update is
@@ -64,7 +79,11 @@ func (s *RevisionWriteService) authorizeParent(ctx context.Context, actor auth.P
 		}
 		return domain.Post{}, err
 	}
-	if !auth.CanEditPost(actor, parent.Type, parent.Status, parent.Author) {
+	if !WritableType(s.reg, parent.Type) {
+		return domain.Post{}, domain.ErrNotFound
+	}
+	suffix, _, _ := CapabilitySuffixFor(s.reg, parent.Type)
+	if !auth.CanEditPostSuffix(actor, suffix, parent.Status, parent.Author) {
 		return domain.Post{}, domain.ErrNotFound
 	}
 	return parent, nil

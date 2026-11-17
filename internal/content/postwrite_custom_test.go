@@ -283,16 +283,16 @@ func TestPostWriteCustom_CapabilityTypePostDecidesLikePost(t *testing.T) {
 	checkPwcDecision(t, f2, err, false)
 }
 
-// 7.4: a stored type that is not registered keeps the legacy *_posts suffix.
-func TestPostWriteCustom_UnregisteredStoredTypeKeepsLegacySuffix(t *testing.T) {
+// 7.4 (M17), superseded by M18 Req 1.1: a stored type that is not registered
+// is unwritable. Neither the legacy *_posts family nor a family derived from
+// the type name authorizes an update.
+func TestPostWriteCustom_UnregisteredStoredTypeUnwritable(t *testing.T) {
 	row := domain.Post{ID: 10, Type: "shop_order", Slug: "o", Title: "O", Status: "draft", Author: 5}
 
 	f := newPwcFake(row)
 	err := pwcService(t, f).Update(context.Background(), pwcActor(5, "edit_posts"),
 		domain.Post{ID: 10, Title: "O2", Slug: "o"}, time.Time{})
-	if err != nil {
-		t.Fatalf("edit_posts holder updating unregistered type: %v", err)
-	}
+	checkPwcDecision(t, f, err, false)
 
 	f2 := newPwcFake(row)
 	err = pwcService(t, f2).Update(context.Background(), pwcActor(5, "edit_shop_orders"),

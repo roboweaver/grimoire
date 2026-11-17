@@ -322,7 +322,8 @@ func TestPostTermsCustom_BuiltinAndUnregisteredRowsUnchanged(t *testing.T) {
 		{"post", domain.Post{ID: 20, Type: "post", Status: "draft", Author: 5}, []string{"edit_posts"}},
 		{"empty type is post", domain.Post{ID: 21, Type: "", Status: "draft", Author: 5}, []string{"edit_posts"}},
 		{"page", domain.Post{ID: 22, Type: "page", Status: "draft", Author: 5}, []string{"edit_pages"}},
-		{"unregistered shop_order", domain.Post{ID: 23, Type: "shop_order", Status: "draft", Author: 5}, []string{"edit_posts"}},
+		// M18 Req 2.1 supersedes M17 here: an unregistered stored type is
+		// unwritable and SetPostTerms refuses it (see postterms_gate_test.go).
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -26,6 +26,20 @@ const (
 	miI5  int64 = 9334 // taxonomy/category/P in M1: wrong type, kept
 	miI6  int64 = 9335 // custom/custom/0 in M1: kept
 	miX   int64 = 9340 // plain post carrying _menu_item_object_id = P: kept
+	// M20 rows (re-parenting). Ids chosen so one deleted chain has its child
+	// at a lower id than its parent (I17 < I18) and one has the child above
+	// the parent (I13 > I1).
+	miI7  int64 = 9350 // page Q item in M1, top level: kept, becomes I1's parent
+	miI8  int64 = 9351 // custom item in M1, child of I3: kept, unchanged
+	miI9  int64 = 9352 // page Q item in M2, child of I2 (top-level deleted): kept
+	miI13 int64 = 9353 // object P item in M1, child of I1, id above I1: deleted
+	miI14 int64 = 9354 // custom item in M1, child of I13: kept
+	miI16 int64 = 9356 // custom item in M1, child of I15: kept
+	miI20 int64 = 9357 // custom item in M1, top level: kept
+	miI17 int64 = 9360 // object P item in M1, child of I18, id below I18: deleted
+	miI18 int64 = 9361 // object P item in M1, child of I20: deleted
+	miI19 int64 = 9362 // custom item in M1, child of I17: kept
+	miI15 int64 = 9399 // object P item in M1, its own parent, id above all: deleted
 )
 
 // RunPostMenuItemPurgerContract covers PostMenuItemPurger.PurgeMenuItemsOf: the
@@ -93,12 +107,13 @@ func RunPostMenuItemPurgerContract(t *testing.T, newRepos NewReposWithPrefixFunc
 		if n := miPostRows(ctx, t, db, vendor, prefix, miX); n != 1 {
 			t.Errorf("non-menu post X rows = %d, want 1", n)
 		}
-		if n := miMetaRows(ctx, t, db, vendor, prefix, miX); n != 1 {
-			t.Errorf("non-menu post X postmeta rows = %d, want 1", n)
+		if n := miMetaRows(ctx, t, db, vendor, prefix, miX); n != 2 {
+			t.Errorf("non-menu post X postmeta rows = %d, want 2", n)
 		}
-		// Req 10.6: a child's parent pointer is not rewritten.
-		if got := miMetaValue(ctx, t, db, vendor, prefix, miI3, "_menu_item_menu_item_parent"); got != strconv.FormatInt(miI1, 10) {
-			t.Errorf("I3 _menu_item_menu_item_parent = %q, want %d (unchanged)", got, miI1)
+		// M20: the child of a deleted item takes the deleted item's menu parent
+		// (replaces the M19 Req 10.6 assertion that I3's parent stayed I1).
+		if got := miMetaValue(ctx, t, db, vendor, prefix, miI3, "_menu_item_menu_item_parent"); got != strconv.FormatInt(miI7, 10) {
+			t.Errorf("I3 _menu_item_menu_item_parent = %q, want %d (I1's parent)", got, miI7)
 		}
 		// Req 9.4, 10.5: the pages and the menu terms survive.
 		for name, id := range map[string]int64{"P": miP, "Q": miQ} {
@@ -118,10 +133,48 @@ func RunPostMenuItemPurgerContract(t *testing.T, newRepos NewReposWithPrefixFunc
 		}
 	})
 
+	t.Run("re-parents children of deleted items to the nearest surviving ancestor", func(t *testing.T) {
+		db, vendor, prefix, purge, cleanup := setup(t)
+		defer cleanup()
+		if err := purge(miP, "page"); err != nil {
+			t.Fatalf("PurgeMenuItemsOf: %v", err)
+		}
+		dec := func(n int64) string { return strconv.FormatInt(n, 10) }
+		for _, c := range []struct {
+			name string
+			id   int64
+			want string
+		}{
+			{"I3 (child of I1)", miI3, dec(miI7)},
+			{"I8 (grandchild, unchanged)", miI8, dec(miI3)},
+			{"I9 (child of top-level I2)", miI9, "0"},
+			{"I14 (child of I13, parent-first chain)", miI14, dec(miI7)},
+			{"I16 (child of self-parented I15)", miI16, "0"},
+			{"I19 (child of I17, child-first chain)", miI19, dec(miI20)},
+			{"I7 (top level, unchanged)", miI7, "0"},
+			{"I20 (top level, unchanged)", miI20, "0"},
+		} {
+			if got := miMetaValue(ctx, t, db, vendor, prefix, c.id, "_menu_item_menu_item_parent"); got != c.want {
+				t.Errorf("%s _menu_item_menu_item_parent = %q, want %q", c.name, got, c.want)
+			}
+		}
+		for name, id := range map[string]int64{"I13": miI13, "I15": miI15, "I17": miI17, "I18": miI18} {
+			if n := miPostRows(ctx, t, db, vendor, prefix, id); n != 0 {
+				t.Errorf("%s post rows = %d, want 0", name, n)
+			}
+			if n := miMetaRows(ctx, t, db, vendor, prefix, id); n != 0 {
+				t.Errorf("%s postmeta rows = %d, want 0", name, n)
+			}
+		}
+		// X is not a menu item: its stray parent key keeps its value.
+		if got := miMetaValue(ctx, t, db, vendor, prefix, miX, "_menu_item_menu_item_parent"); got != dec(miI1) {
+			t.Errorf("X _menu_item_menu_item_parent = %q, want %d (unchanged)", got, miI1)
+		}
+	})
 	t.Run("recomputes the count of each affected menu from its relationships", func(t *testing.T) {
 		db, vendor, prefix, purge, cleanup := setup(t)
 		defer cleanup()
-		// Seeded counts are stale on purpose (M1 3, M2 1): a recount, not a
+		// Seeded counts are stale on purpose (M1 3, M2 5): a recount, not a
 		// decrement, is what makes them match the relationships.
 		if got := miCount(ctx, t, db, vendor, prefix, miTT1); got != 3 {
 			t.Fatalf("seed: M1 count = %d, want 3", got)
@@ -129,16 +182,20 @@ func RunPostMenuItemPurgerContract(t *testing.T, newRepos NewReposWithPrefixFunc
 		if err := purge(miP, "page"); err != nil {
 			t.Fatalf("PurgeMenuItemsOf: %v", err)
 		}
-		// M1 keeps I3, I4, I5 and I6; M2 keeps nothing.
+		// M1 keeps I3-I8, I14, I16, I19 and I20 (ten items); M2 keeps I9.
 		wantM1 := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`term_relationships WHERE term_taxonomy_id = ?`, miTT1)
-		if wantM1 != 4 {
-			t.Fatalf("M1 relationships after purge = %d, want 4", wantM1)
+		if wantM1 != 10 {
+			t.Fatalf("M1 relationships after purge = %d, want 10", wantM1)
 		}
 		if got := miCount(ctx, t, db, vendor, prefix, miTT1); got != wantM1 {
 			t.Errorf("M1 count = %d, want %d (recounted)", got, wantM1)
 		}
-		if got := miCount(ctx, t, db, vendor, prefix, miTT2); got != 0 {
-			t.Errorf("M2 count = %d, want 0", got)
+		wantM2 := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`term_relationships WHERE term_taxonomy_id = ?`, miTT2)
+		if wantM2 != 1 {
+			t.Fatalf("M2 relationships after purge = %d, want 1", wantM2)
+		}
+		if got := miCount(ctx, t, db, vendor, prefix, miTT2); got != wantM2 {
+			t.Errorf("M2 count = %d, want %d (recounted)", got, wantM2)
 		}
 	})
 
@@ -148,6 +205,14 @@ func RunPostMenuItemPurgerContract(t *testing.T, newRepos NewReposWithPrefixFunc
 		if err := purge(miP, "page"); err != nil {
 			t.Fatalf("first PurgeMenuItemsOf: %v", err)
 		}
+		parents := func() string {
+			var out string
+			for _, id := range []int64{miI3, miI7, miI8, miI9, miI14, miI16, miI19, miI20} {
+				out += miMetaValue(ctx, t, db, vendor, prefix, id, "_menu_item_menu_item_parent") + ","
+			}
+			return out
+		}
+		parentsBefore := parents()
 		posts := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`posts`)
 		meta := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`postmeta`)
 		rels := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`term_relationships`)
@@ -169,6 +234,9 @@ func RunPostMenuItemPurgerContract(t *testing.T, newRepos NewReposWithPrefixFunc
 		}
 		if got := miCount(ctx, t, db, vendor, prefix, miTT2); got != c2 {
 			t.Errorf("M2 count after repeat = %d, want %d", got, c2)
+		}
+		if got := parents(); got != parentsBefore {
+			t.Errorf("parents after repeat = %q, want %q", got, parentsBefore)
 		}
 	})
 
@@ -205,7 +273,7 @@ func RunPostMenuItemPurgerContract(t *testing.T, newRepos NewReposWithPrefixFunc
 }
 
 // seedPostMenuItems inserts pages P and Q, nav_menu terms M1 and M2 (stale
-// counts 3 and 1), menu items I1..I6 with their four _menu_item_* meta rows and
+// counts 3 and 5), menu items I1..I20 with their four _menu_item_* meta rows and
 // one relationship each, and a plain post X carrying a stray
 // _menu_item_object_id meta row equal to P.
 func seedPostMenuItems(ctx context.Context, t *testing.T, db *sql.DB, vendor, prefix string) {
@@ -233,7 +301,7 @@ func seedPostMenuItems(ctx context.Context, t *testing.T, db *sql.DB, vendor, pr
 		slug     string
 		count    int
 	}{
-		{miM1, miTT1, "mi-menu-1", 3}, {miM2, miTT2, "mi-menu-2", 1},
+		{miM1, miTT1, "mi-menu-1", 3}, {miM2, miTT2, "mi-menu-2", 5},
 	} {
 		exec(`INSERT INTO `+prefix+`terms (term_id, name, slug) VALUES (?, ?, ?)`, m.term, m.slug, m.slug)
 		exec(`INSERT INTO `+prefix+`term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -248,15 +316,27 @@ func seedPostMenuItems(ctx context.Context, t *testing.T, db *sql.DB, vendor, pr
 		meta(itemID, "_menu_item_menu_item_parent", parent)
 		exec(`INSERT INTO `+prefix+`term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)`, itemID, tt, 0)
 	}
-	item(miI1, "post_type", "page", miP, miTT1, "0")
+	item(miI1, "post_type", "page", miP, miTT1, id(miI7))
 	item(miI2, "post_type", "page", miP, miTT2, "0")
 	item(miI3, "post_type", "page", miQ, miTT1, id(miI1))
 	item(miI4, "post_type", "post", miP, miTT1, "0")
 	item(miI5, "taxonomy", "category", miP, miTT1, "0")
 	item(miI6, "custom", "custom", 0, miTT1, "0")
 
+	item(miI7, "post_type", "page", miQ, miTT1, "0")
+	item(miI8, "custom", "custom", 0, miTT1, id(miI3))
+	item(miI9, "post_type", "page", miQ, miTT2, id(miI2))
+	item(miI13, "post_type", "page", miP, miTT1, id(miI1))
+	item(miI14, "custom", "custom", 0, miTT1, id(miI13))
+	item(miI16, "custom", "custom", 0, miTT1, id(miI15))
+	item(miI20, "custom", "custom", 0, miTT1, "0")
+	item(miI17, "post_type", "page", miP, miTT1, id(miI18))
+	item(miI18, "post_type", "page", miP, miTT1, id(miI20))
+	item(miI19, "custom", "custom", 0, miTT1, id(miI17))
+	item(miI15, "post_type", "page", miP, miTT1, id(miI15))
 	post(miX, "mi-x", "post")
 	meta(miX, "_menu_item_object_id", id(miP))
+	meta(miX, "_menu_item_menu_item_parent", id(miI1))
 }
 
 func miPostRows(ctx context.Context, t *testing.T, db *sql.DB, vendor, prefix string, id int64) int {

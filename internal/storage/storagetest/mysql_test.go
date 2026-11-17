@@ -93,3 +93,14 @@ func TestMySQLPostMenuItemPurgerContract(t *testing.T) {
 		return repos, "mysql", prefix, cleanup
 	})
 }
+
+func TestMySQLNavMenuDeleteItemContract(t *testing.T) {
+	dsn := os.Getenv("GRIMOIRE_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GRIMOIRE_TEST_MYSQL_DSN to run the MySQL contract suite")
+	}
+	RunNavMenuDeleteItemContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, prefix, cleanup := newReposFromDSNWithPrefix(t, "mysql", dsn)
+		return repos, "mysql", prefix, cleanup
+	})
+}

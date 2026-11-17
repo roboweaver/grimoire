@@ -348,11 +348,14 @@ func (r *NavMenuRepo) UpdateItem(ctx context.Context, menuID, itemID int64, patc
 	})
 }
 
-// DeleteItem removes itemID's {prefix}posts row, its _menu_item_* {prefix}postmeta
-// rows, and its {prefix}term_relationships row for menuID's term, in one
-// transaction (Req 2.3, 6.3). The belongs-to-menu guard runs first; no match →
+// DeleteItem removes itemID's {prefix}posts row, its {prefix}postmeta rows and
+// its {prefix}term_relationships rows in one transaction (Req 2.3, 6.3). The
+// item's children are first re-pointed to the item's own menu parent, so no
+// item is left referencing a deleted parent, and the affected term_taxonomy
+// counts are recomputed. The belongs-to-menu guard runs first; no match →
 // domain.ErrNotFound (Req 2.4).
 func (r *NavMenuRepo) DeleteItem(ctx context.Context, menuID, itemID int64) error {
+	vendor := vendorOf(r.db)
 	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		ok, err := r.itemBelongsToMenu(ctx, tx, menuID, itemID)
 		if err != nil {
@@ -361,24 +364,11 @@ func (r *NavMenuRepo) DeleteItem(ctx context.Context, menuID, itemID int64) erro
 		if !ok {
 			return domain.ErrNotFound
 		}
-
-		if _, err := tx.ExecContext(ctx,
-			"DELETE FROM "+r.prefix+"postmeta WHERE post_id = ?", itemID); err != nil {
+		ttIDs, err := deleteMenuItemTx(ctx, tx, r.prefix, vendor, itemID)
+		if err != nil {
 			return err
 		}
-
-		relQ := "DELETE FROM " + r.prefix + "term_relationships WHERE object_id = ? AND term_taxonomy_id IN " +
-			"(SELECT term_taxonomy_id FROM " + r.prefix + "term_taxonomy WHERE term_id = ? AND taxonomy = ?)"
-		if _, err := tx.ExecContext(ctx, relQ, itemID, menuID, "nav_menu"); err != nil {
-			return err
-		}
-
-		pID := rebind.Ident(vendorOf(r.db), "ID")
-		if _, err := tx.ExecContext(ctx,
-			"DELETE FROM "+r.prefix+"posts WHERE "+pID+" = ?", itemID); err != nil {
-			return err
-		}
-		return nil
+		return recountTx(ctx, tx, r.prefix, ttIDs)
 	})
 }
 

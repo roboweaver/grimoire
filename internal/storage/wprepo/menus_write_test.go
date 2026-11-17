@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/roboweaver/grimoire/internal/config"
@@ -513,5 +514,51 @@ func TestNavMenuRepoCreateMenuSlugUniqueness(t *testing.T) {
 	}
 	if second.Slug == "main" {
 		t.Errorf("second menu slug = %q, want a -N suffix (e.g. main-2) on collision", second.Slug)
+	}
+}
+
+// TestNavMenuRepoDeleteItemAtomicOnFailure covers M20 atomicity: the deleted item
+// has a child and the term_taxonomy table is dropped, so the call must return an
+// error and leave every item, postmeta (including the child's parent) and
+// relationship row unchanged. SQLite only: no portable failure injection exists.
+func TestNavMenuRepoDeleteItemAtomicOnFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := newNavMenuRepo(t)
+	menuID, err := repo.CreateMenu(ctx, "AtomicDelete", "atomic-delete")
+	if err != nil {
+		t.Fatalf("CreateMenu: %v", err)
+	}
+	dropID, err := repo.CreateItem(ctx, menuID, domain.NavMenuItemInput{
+		Label: "Drop", URL: "https://example.com/drop", Type: "custom", Object: "custom", Order: 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem drop: %v", err)
+	}
+	childID, err := repo.CreateItem(ctx, menuID, domain.NavMenuItemInput{
+		Label: "Child", URL: "https://example.com/child", Type: "custom", Object: "custom", Order: 2, ParentID: dropID,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem child: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, "DROP TABLE "+repo.prefix+"term_taxonomy"); err != nil {
+		t.Fatalf("drop term_taxonomy: %v", err)
+	}
+	if err := repo.DeleteItem(ctx, menuID, dropID); err == nil {
+		t.Fatal("DeleteItem with term_taxonomy dropped = nil, want an error")
+	}
+	for _, id := range []int64{dropID, childID} {
+		if got := countRows(t, repo, "posts", `"ID" = ?`, id); got != 1 {
+			t.Errorf("item %d post rows = %d, want 1 (rolled back)", id, got)
+		}
+		if got := countRows(t, repo, "postmeta", "post_id = ?", id); got == 0 {
+			t.Errorf("item %d postmeta rows = 0, want unchanged (rolled back)", id)
+		}
+		if got := countRows(t, repo, "term_relationships", "object_id = ?", id); got != 1 {
+			t.Errorf("item %d relationship rows = %d, want 1 (rolled back)", id, got)
+		}
+	}
+	if got := countRows(t, repo, "postmeta",
+		"post_id = ? AND meta_key = ? AND meta_value = ?", childID, "_menu_item_menu_item_parent", strconv.FormatInt(dropID, 10)); got != 1 {
+		t.Errorf("child parent rows naming the deleted item = %d, want 1 (re-parent rolled back)", got)
 	}
 }

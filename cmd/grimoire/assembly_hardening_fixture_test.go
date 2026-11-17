@@ -213,3 +213,16 @@ func seedRawMenuItem(t *testing.T, env customWriteEnv, menuTermID int64, objectT
 	seedRawTermRelationship(t, env, item, menuTermID)
 	return item
 }
+
+// seedRawMenuItemWithParent is seedRawMenuItem with _menu_item_menu_item_parent
+// set to parentItemID (0 keeps the item top level). M20 task 3.1.
+func seedRawMenuItemWithParent(t *testing.T, env customWriteEnv, menuTermID int64, objectType string, objectID, parentItemID int64) int64 {
+	t.Helper()
+	item := seedRawMenuItem(t, env, menuTermID, objectType, objectID)
+	if _, err := env.Repos.DB().ExecContext(context.Background(),
+		"UPDATE "+env.Prefix+"postmeta SET meta_value = ? WHERE post_id = ? AND meta_key = '_menu_item_menu_item_parent'",
+		fmt.Sprint(parentItemID), item); err != nil {
+		t.Fatalf("seedRawMenuItemWithParent: set parent of %d: %v", item, err)
+	}
+	return item
+}

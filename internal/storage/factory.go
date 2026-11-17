@@ -71,6 +71,8 @@ type Set struct {
 	PostNodeReader domain.PostNodeReader
 	// Plan 18 additive port: deletes a post's comments/meta and re-points children.
 	PostDependents domain.PostDependentsPurger
+	// Plan 19 additive port: deletes the nav-menu items that point at a post.
+	PostMenuItems domain.PostMenuItemPurger
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -208,6 +210,7 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			PageReader:     posts,
 			PostNodeReader: posts,
 			PostDependents: posts,
+			PostMenuItems:  posts,
 		},
 		db:    db,
 		bunDB: bunDB,

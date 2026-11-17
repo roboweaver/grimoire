@@ -418,7 +418,7 @@
 
 ## Phase 9 — Storage: the menu-item purger port (`internal/domain`, `internal/storage`, TDD) — PR 3
 
-- [~] 9.1 Write the failing contract tests first. Add
+- [x] 9.1 Write the failing contract tests first. Add
       `internal/storage/storagetest/postmenuitems_contract.go` with
       `RunPostMenuItemPurgerContract(t *testing.T, newRepos NewReposWithPrefixFunc)`
       and register it beside `RunPostDependentsPurgerContract` in
@@ -459,7 +459,7 @@
       finds nothing (Req 11.1). _(Req 9.2, 9.4-9.6, 10.2-10.6, 11.1, 11.2, 11.5, 11.6;
       D9, D10, D12)_
 
-- [~] 9.2 Implement the port, then verify it on all three databases. In
+- [x] 9.2 Implement the port, then verify it on all three databases. In
       `internal/domain/repository.go` add `PostMenuItemPurger` with the doc comment of
       `design.md`. Create `internal/storage/wprepo/postmenuitems.go` with
       `(*PostRepo) PurgeMenuItemsOf` in one `RunInTx`: the matching `SELECT`, a Go-side
@@ -490,7 +490,7 @@
 
 ## Phase 10 — Content: the delete step (`internal/content`, TDD) — PR 3
 
-- [~] 10.1 Write the failing service tests first. Add
+- [x] 10.1 Write the failing service tests first. Add
       `internal/content/menuitems_delete_test.go` over the `PostWriteService` fakes
       with a recording `PostMenuItemPurger`, detacher, option ports, dependents purger
       and `PostWriter`: deleting a `post`, a `page` and a registered-type row calls
@@ -507,7 +507,7 @@
       `WithPostMenuItemPurger` does not exist; once stubbed, no purge call is
       recorded). _(Req 10.1, 10.7, 10.8; D8)_
 
-- [~] 10.2 Implement the delete step. In `internal/content/writeservices.go` add
+- [x] 10.2 Implement the delete step. In `internal/content/writeservices.go` add
       `WithPostMenuItemPurger(p domain.PostMenuItemPurger) PostWriteOption` and the
       call `PurgeMenuItemsOf(ctx, cur.ID, cur.Type)` in `Delete` after the dependents
       purge and before `s.w.Delete`, returning its error. Update the `Delete` doc
@@ -518,7 +518,7 @@
 
 ## Phase 11 — Assembly: wire PR 3 and drive it through `buildHandler` (`cmd/grimoire`, TDD) — PR 3
 
-- [~] 11.1 Write the failing assembly tests first. Add
+- [x] 11.1 Write the failing assembly tests first. Add
       `cmd/grimoire/assembly_menuitem_delete_test.go` over `newCustomWriteHandler`, with
       menus created through `/admin/api/menus` and raw-seeded items through
       `seedRawMenuItem`: a page `P` linked from menu `M1` (twice, two items) and from
@@ -541,7 +541,7 @@
       remain, the `GET` still lists them) because `buildHandler` builds the post
       service without the purger. _(Req 10.1-10.10, 13.1, 13.2; D9, D10)_
 
-- [~] 11.2 Wire the purger. In `cmd/grimoire/assembly.go` add
+- [x] 11.2 Wire the purger. In `cmd/grimoire/assembly.go` add
       `content.WithPostMenuItemPurger(repos.PostMenuItems)` to the `NewPostWriteService`
       call. No other assembly change.
       Files: `cmd/grimoire/assembly.go`
@@ -552,7 +552,7 @@
 
 ## Phase 12 — Documentation and PR 3 gate — PR 3
 
-- [~] 12.1 Update the documents to match PR 3. `docs/compatibility.md`: remove the M18
+- [x] 12.1 Update the documents to match PR 3. `docs/compatibility.md`: remove the M18
       PR 2 known-gap bullet "Nav-menu items that reference a deleted post are not
       removed or updated" and the "There is no trash" bullet's stale company if any
       (keep the trash gap, it is still open); add "M19 (PR 3)" to the M19 section: what
@@ -577,7 +577,7 @@
       Verify: `grep -n "Nav-menu items that reference a deleted post are not" docs/compatibility.md`
       finds nothing; the plans README row reads Implemented. _(Req 15.3-15.6)_
 
-- [~] 12.2 Final gate for PR 3, with explicit cross-vendor verification. Confirm: no new
+- [x] 12.2 Final gate for PR 3, with explicit cross-vendor verification. Confirm: no new
       file under `internal/storage/migrations` (Req 9.7); exactly one interface added to
       `internal/domain/repository.go` and no method added to an existing one
       (`git diff main -- internal/domain/repository.go` reviewed, 9.7); no new capability

@@ -674,3 +674,17 @@ type PostDependentsPurger interface {
 	// the post row need not exist.
 	PurgePostDependents(ctx context.Context, postID, parentID int64, reparentType string) error
 }
+
+// PostMenuItemPurger deletes the nav-menu items that point at a post,
+// mirroring WordPress's _wp_delete_post_menu_item for the parts the existing
+// ports cannot reach. It never deletes the post row itself.
+type PostMenuItemPurger interface {
+	// PurgeMenuItemsOf, in one transaction, deletes every nav_menu_item row whose
+	// _menu_item_type is "post_type", _menu_item_object equals objectType and
+	// _menu_item_object_id equals postID, together with each item's postmeta and
+	// term_relationships rows, then recomputes term_taxonomy.count of every
+	// nav_menu term taxonomy the items belonged to. No matching items is not an
+	// error and the post row need not exist. It changes no other row, including
+	// other menu items' _menu_item_menu_item_parent.
+	PurgeMenuItemsOf(ctx context.Context, postID int64, objectType string) error
+}

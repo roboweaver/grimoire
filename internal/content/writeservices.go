@@ -98,6 +98,9 @@ type PostWriteService struct {
 	// purger removes a deleted post's dependents (comments, meta) and
 	// re-points its children. Optional; nil skips the purge step.
 	purger domain.PostDependentsPurger
+	// menuItems removes the nav-menu items that point at a deleted post.
+	// Optional; nil skips the step.
+	menuItems domain.PostMenuItemPurger
 	// optionsR and optionsW let Delete remove a deleted post's id from the
 	// sticky_posts option. Optional; either nil skips the step.
 	optionsR domain.OptionRepository
@@ -186,6 +189,13 @@ func WithTermDetacher(w domain.PostTermsWriter) PostWriteOption {
 // comments and meta and re-points its children before the row is deleted.
 func WithPostDependentsPurger(p domain.PostDependentsPurger) PostWriteOption {
 	return func(s *PostWriteService) { s.purger = p }
+}
+
+// WithPostMenuItemPurger wires the port that removes the nav-menu items
+// pointing at a deleted post, after the dependents purge and before the row
+// is deleted. A nil purger skips the step.
+func WithPostMenuItemPurger(p domain.PostMenuItemPurger) PostWriteOption {
+	return func(s *PostWriteService) { s.menuItems = p }
 }
 
 // WithStickyOptions wires the option ports PostWriteService.Delete uses to
@@ -629,7 +639,8 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 // The full order is: revisions, term detach (deleteTaxonomies, via the
 // detacher when configured), unstick (a deleted "post" is removed from the
 // sticky_posts option when WithStickyOptions is wired), dependents purge (via the purger when configured,
-// with the row's own parent id and hierarchicalType), then the row delete. The
+// with the row's own parent id and hierarchicalType), menu-item purge (via the
+// menu-item purger when configured, with the stored type), then the row delete. The
 // first failing step returns its error and later steps do not run. Every
 // earlier step is idempotent, so a retry after a failure converges.
 func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p domain.Post) error {
@@ -668,6 +679,11 @@ func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p d
 	}
 	if s.purger != nil {
 		if err := s.purger.PurgePostDependents(ctx, cur.ID, cur.ParentID, s.hierarchicalType(cur.Type)); err != nil {
+			return err
+		}
+	}
+	if s.menuItems != nil {
+		if err := s.menuItems.PurgeMenuItemsOf(ctx, cur.ID, cur.Type); err != nil {
 			return err
 		}
 	}

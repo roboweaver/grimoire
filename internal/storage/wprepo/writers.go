@@ -258,6 +258,7 @@ var (
 	_ domain.PageReader           = (*PostRepo)(nil)
 	_ domain.PostNodeReader       = (*PostRepo)(nil)
 	_ domain.PostDependentsPurger = (*PostRepo)(nil)
+	_ domain.PostMenuItemPurger   = (*PostRepo)(nil)
 	_ domain.TermWriter           = (*TermRepo)(nil)
 	_ domain.TermReader           = (*TermRepo)(nil)
 	_ domain.OptionWriter         = (*OptionRepo)(nil)

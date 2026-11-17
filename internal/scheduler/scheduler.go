@@ -111,7 +111,14 @@ func (s *Scheduler) tick(ctx context.Context) {
 		}
 		return
 	}
+	gate, gated := s.posts.(interface{ WritableType(string) bool })
 	for _, p := range due {
+		if gated && !gate.WritableType(p.Type) {
+			if s.log != nil {
+				s.log.Debug("scheduler: skipping post of unwritable type", "post_id", p.ID, "type", p.Type)
+			}
+			continue
+		}
 		p.Status = "publish"
 		// A zero expectedModified skips the optimistic-concurrency check
 		// PostWriteService.Update otherwise enforces: the scheduler has no

@@ -98,8 +98,10 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	// for Requirement 5.1's "configurable maximum" -- operators wanting a
 	// cap can be served by a future config field without changing this
 	// wiring shape.
-	revisionWrite := content.NewRevisionWriteService(repos.Revisions, repos.PostWriter, -1)
-	autosave := content.NewAutosaveService(repos.Revisions, repos.PostWriter)
+	revisionWrite := content.NewRevisionWriteService(repos.Revisions, repos.PostWriter, -1,
+		content.WithRevisionRegistry(deps.Registry))
+	autosave := content.NewAutosaveService(repos.Revisions, repos.PostWriter,
+		content.WithAutosaveRegistry(deps.Registry))
 	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite), content.WithContentPolicy(contentPolicy),
 		content.WithPostRegistry(deps.Registry),
 		content.WithPostNodeReader(repos.PostNodeReader),

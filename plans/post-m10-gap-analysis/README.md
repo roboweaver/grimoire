@@ -63,11 +63,15 @@ Delivered across PRs #75, #76, #77.
 delete for registered custom post types and taxonomies, with capabilities
 derived from `capability_type`, sanitization, slug and `parent` guards, term
 assignment and delete cleanup (`plans/17-custom-types-write`).
-**Still deferred after M17:** unregistered stored types remain editable with
-post capabilities through the admin API; page `parent` has no write path;
-built-in post delete does not clean up `term_relationships`, counts, postmeta
-or comments; built-in `category`/`post_tag` term names are not sanitized on
-write; delete is permanent, with no trash or child re-parenting.
+**Still deferred after M17:** page `parent` has no write path; built-in post
+delete does not clean up `term_relationships`, counts, postmeta or comments;
+delete is permanent, with no trash or child re-parenting.
+**Shipped in M18 (PR 1, `plans/18-write-hardening`):** stored rows of types not
+registered under `content:` are unwritable (`403` on the admin API, `404` for
+revisions and autosave), the scheduler skips them, revisions and autosave honor
+`capability_type`, and term names of every taxonomy are reduced to plain text on
+write (an unchanged name is stored as is). Still open: unwritable taxonomies on
+term update and delete.
 **M15 follow-up (found while building M12) — fixed in PR #79.** M15's
 `PageService.Resolve` confirmed the leaf with `BySlug(leaf.Slug)`, which was
 ambiguous for same-slug leaves under different parents, and its recovery path

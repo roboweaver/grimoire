@@ -182,6 +182,11 @@ func (s *PostWriteService) registered(typ string) (registry.PostType, bool) {
 	return s.reg.PostType(typ)
 }
 
+// WritableType reports whether this service may modify a stored row of typ.
+func (s *PostWriteService) WritableType(typ string) bool {
+	return WritableType(s.reg, typ)
+}
+
 // suffixFor returns the capability suffix that decides writes of typ: the
 // registered type's capability_type family, else the legacy page/post family.
 func (s *PostWriteService) suffixFor(typ string) string {
@@ -271,6 +276,9 @@ func (s *PostWriteService) Create(ctx context.Context, actor auth.Principal, p d
 	}
 	if p.Type == "" {
 		p.Type = "post"
+	}
+	if !s.WritableType(p.Type) {
+		return 0, ErrForbidden
 	}
 	if p.Date.IsZero() {
 		p.Date = time.Now()
@@ -377,6 +385,9 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	if cur.Type == "" {
 		cur.Type = "post"
 	}
+	if !s.WritableType(cur.Type) {
+		return ErrForbidden
+	}
 	suffix := s.suffixFor(cur.Type)
 	if !auth.CanEditPostSuffix(actor, suffix, cur.Status, cur.Author) {
 		return ErrForbidden
@@ -461,6 +472,9 @@ func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p d
 	if cur.Type == "" {
 		cur.Type = "post"
 	}
+	if !s.WritableType(cur.Type) {
+		return ErrForbidden
+	}
 	if !auth.CanDeletePostSuffix(actor, s.suffixFor(cur.Type), cur.Status, cur.Author) {
 		return ErrForbidden
 	}
@@ -530,7 +544,7 @@ func (s *TermWriteService) hierarchical(name string) bool {
 	return ok && rt.Hierarchical
 }
 
-// cleanName reduces a registered-taxonomy term name to plain text.
+// cleanName reduces a term name to plain text.
 //
 // The tier is fixed (TierB) rather than derived from the actor: a holder of
 // unfiltered_html would otherwise hit the tier-C bypass and store raw markup in
@@ -568,20 +582,22 @@ func (s *TermWriteService) checkSlug(ctx context.Context, t domain.Term, hier bo
 	return nil
 }
 
-// prepareRegistered applies the registered-taxonomy name and slug rules.
-// Built-in taxonomies are never passed through it.
-func (s *TermWriteService) prepareRegistered(ctx context.Context, t domain.Term) (domain.Term, error) {
-	rt, ok := s.registryTaxonomy(t.Taxonomy)
-	if !ok {
-		return t, nil
+// prepare reduces the term name for every taxonomy and then applies the slug
+// rules of registered taxonomies. When stored is non-nil and the caller's name
+// is byte-identical to the stored one, the name is passed through unchanged so
+// an update that does not touch the name never rewrites it.
+func (s *TermWriteService) prepare(ctx context.Context, t domain.Term, stored *domain.Term) (domain.Term, error) {
+	if stored == nil || t.Name != stored.Name {
+		name, err := s.cleanName(t.Name)
+		if err != nil {
+			return t, err
+		}
+		t.Name = name
 	}
-	name, err := s.cleanName(t.Name)
-	if err != nil {
-		return t, err
-	}
-	t.Name = name
-	if err := s.checkSlug(ctx, t, rt.Hierarchical); err != nil {
-		return t, err
+	if rt, ok := s.registryTaxonomy(t.Taxonomy); ok {
+		if err := s.checkSlug(ctx, t, rt.Hierarchical); err != nil {
+			return t, err
+		}
 	}
 	return t, nil
 }
@@ -662,7 +678,7 @@ func (s *TermWriteService) Create(ctx context.Context, actor auth.Principal, t d
 			return 0, ErrTaxonomyUnknown
 		}
 	}
-	t, err := s.prepareRegistered(ctx, t)
+	t, err := s.prepare(ctx, t, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -680,7 +696,15 @@ func (s *TermWriteService) Update(ctx context.Context, actor auth.Principal, t d
 	if !auth.CanManageTerms(actor) {
 		return ErrForbidden // Req 5.3
 	}
-	t, err := s.prepareRegistered(ctx, t)
+	rows, err := s.w.TermsByIDs(ctx, []int64{t.ID})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return domain.ErrNotFound
+	}
+	stored := rows[0]
+	t, err = s.prepare(ctx, t, &stored)
 	if err != nil {
 		return err
 	}

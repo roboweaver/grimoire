@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M12, M17)
+# WordPress Compatibility (M1-M12, M17, M18)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -461,10 +461,15 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     Taxonomy writes use `manage_categories`, as for categories and tags.
   - **Sanitization.** Registered post types use the same tiers as posts: title
     to plain text, content and excerpt by tier B or C depending on
-    `unfiltered_html`. Registered taxonomy term names are reduced to plain text
-    on write, and the response reflects the stored (sanitized) name. Names of
-    built-in `category` and `post_tag` terms are not sanitized at the write
-    boundary (a known divergence, unchanged).
+    `unfiltered_html`. Term names of every taxonomy, built-in `category` and
+    `post_tag` included, are reduced to plain text on write (a fixed tier B, so
+    `unfiltered_html` holders get no bypass), and the response reflects the
+    stored (sanitized) name. A name that reduces to nothing is rejected. On
+    update, a name byte-identical to the stored one is written unchanged, so an
+    update that does not touch the name never rewrites a legacy name such as
+    `News &amp; Events`. A changed name is reduced, and the reduction decodes
+    entities, so `A &amp; B` submitted as a new name is stored as `A & B`
+    (see M18 below).
   - **Slugs.** Post slugs must match `^[a-z0-9][a-z0-9_-]*$`, are derived from
     the title when absent, and get a `-2`, `-3` suffix on collision (among
     siblings for a hierarchical type). Term slugs use the same charset and are
@@ -490,10 +495,40 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     holding only `edit_products` can use REST but not the admin API for that
     type. The publish scheduler also holds the derived capabilities, so a
     scheduled custom post publishes on time.
-  - **Known gaps.** An unregistered stored type (for example an imported
-    `shop_order`) stays editable through the admin API by holders of the post
-    capabilities. A hierarchical post type's `parent` is writable, but page
-    `parent` is not.
+  - **Known gaps.** A hierarchical post type's `parent` is writable, but page
+    `parent` is not (planned for PR 2 of M18).
+
+- **M18 — Write hardening (PR 1):** closes the M17 hole where stored rows of
+  unmanaged types stayed writable. No schema change, no migration, no new
+  capability string.
+  - **Writable-type rule.** A stored row is writable only if its type is
+    `post`, `page` (or an empty type, treated as `post`) or a type registered
+    under `content:` in the configuration. Any other stored type, for example
+    an imported `shop_order`, is unwritable for every caller, administrators
+    included. Reads are unchanged: public and admin reads still follow the
+    registry as before.
+  - **Responses.** Admin-API update, delete and term assignment on an
+    unwritable row answer `403`, including term assignment with an empty
+    `termIds`. Admin-API revision list, show and restore, and autosave read and
+    write, on an unwritable parent answer `404`, and nothing is written.
+    Creating a row of an unmanaged type stays `400`. The REST `/wp-json/wp/v2`
+    write routes are only served for registered types, so an unmanaged type has
+    no REST route and answers `404`.
+  - **Registry removal.** Removing a type from `content:` makes its existing
+    rows unwritable at the next start. The rows and their data are untouched
+    and become writable again when the type is registered again.
+  - **Scheduler.** The publish scheduler skips due `future` rows of an
+    unwritable type, logging at debug level. They stay `future`.
+  - **Revisions and autosave.** Both now decide capability from the parent's
+    registered `capability_type`, as post writes do, instead of the post and
+    page `*_posts` family. A registered `capability_type: product` row is
+    revisable only by a caller holding the product capabilities.
+  - **Term names.** Names of all taxonomies are reduced to plain text at tier B
+    on create and update, with the unchanged-name exemption described under
+    M17 Sanitization. Slug rules still apply to registered taxonomies only.
+  - **Known gap.** Term update and delete are not yet gated on the taxonomy
+    being registered, so a term of an unwritable taxonomy can still be edited
+    by a holder of `manage_categories`. Still open.
 
 ## Public read guarantees
 

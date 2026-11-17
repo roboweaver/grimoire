@@ -193,8 +193,9 @@ func TestTermCustomNameSanitizedForRegisteredOnly(t *testing.T) { // 4.1, 4.2, 4
 		domain.Term{Name: raw, Slug: "cat2", Taxonomy: TaxonomyCategory}); err != nil {
 		t.Fatalf("category create: %v", err)
 	}
-	if w.created.Name != raw {
-		t.Errorf("category name = %q, want untouched %q", w.created.Name, raw)
+	// M18 (Req 5.1): built-in taxonomies reduce the name too.
+	if w.created.Name != "Cat & co" {
+		t.Errorf("category name = %q, want reduced %q", w.created.Name, "Cat & co")
 	}
 }
 
@@ -271,8 +272,9 @@ func TestTermCustomNilRegistryKeepsBuiltinBehavior(t *testing.T) { // 15.3
 		domain.Term{Name: raw, Slug: "a", Taxonomy: TaxonomyCategory}); err != nil {
 		t.Fatalf("category create: %v", err)
 	}
-	if w.created.Name != raw || w.created.Slug != "a" {
-		t.Errorf("created = %+v, want name/slug untouched", w.created)
+	// M18 (Req 5.1): the name is reduced for built-ins; the slug stays untouched.
+	if w.created.Name != "x" || w.created.Slug != "a" {
+		t.Errorf("created = %+v, want reduced name and untouched slug", w.created)
 	}
 	if _, err := svc.Create(ctx, termEditor(),
 		domain.Term{Name: "t2", Slug: "t", Taxonomy: taxonomyPostTag}); err != nil {

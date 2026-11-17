@@ -140,6 +140,9 @@ func (s *PostTermsWriteService) SetPostTerms(ctx context.Context, actor auth.Pri
 	if cur.Type == "" {
 		cur.Type = "post"
 	}
+	if !WritableType(s.reg, cur.Type) {
+		return ErrForbidden
+	}
 	suf, pt, registered := CapabilitySuffixFor(s.reg, cur.Type)
 	if !auth.CanEditPostSuffix(actor, suf, cur.Status, cur.Author) {
 		return ErrForbidden

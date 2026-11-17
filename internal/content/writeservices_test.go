@@ -611,7 +611,8 @@ func TestTermWriteAuthz(t *testing.T) {
 // for the new Update method: same manage_categories gate, same writer-not-
 // called-on-denial guarantee.
 func TestTermWriteUpdateAuthz(t *testing.T) {
-	w := &fakeTermWriter{}
+	// M18: Update reads the stored row, so seed term 7.
+	w := &fakeTermWriter{byIDs: map[int64]domain.Term{7: {ID: 7, Name: "Old", Slug: "old"}}}
 	svc := NewTermWriteService(w)
 	term := domain.Term{ID: 7, Name: "Renamed", Slug: "renamed"}
 

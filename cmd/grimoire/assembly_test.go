@@ -28,8 +28,11 @@ func newAssemblySQLite(t *testing.T) (*storage.Repositories, config.DatabaseConf
 	t.Helper()
 	ctx := context.Background()
 	dbCfg := config.DatabaseConfig{
-		Vendor:      "sqlite",
-		DSN:         filepath.Join(t.TempDir(), "grimoire.db"),
+		Vendor: "sqlite",
+		// busy_timeout matches the e2e testDSN and the shipped config: without
+		// it a background writer (the scheduler) races foreground reads with
+		// SQLITE_BUSY instead of waiting.
+		DSN:         "file:" + filepath.Join(t.TempDir(), "grimoire.db") + "?_pragma=busy_timeout(5000)",
 		TablePrefix: "wp_",
 	}
 	repos, err := storage.New(dbCfg)

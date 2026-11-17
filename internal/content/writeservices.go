@@ -11,6 +11,7 @@ import (
 
 	"github.com/roboweaver/grimoire/internal/auth"
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/php"
 	"github.com/roboweaver/grimoire/internal/registry"
 	"github.com/roboweaver/grimoire/internal/sanitize"
 )
@@ -97,6 +98,10 @@ type PostWriteService struct {
 	// purger removes a deleted post's dependents (comments, meta) and
 	// re-points its children. Optional; nil skips the purge step.
 	purger domain.PostDependentsPurger
+	// optionsR and optionsW let Delete remove a deleted post's id from the
+	// sticky_posts option. Optional; either nil skips the step.
+	optionsR domain.OptionRepository
+	optionsW domain.OptionWriter
 }
 
 // ErrSlugInvalid is returned when a registered-type post slug does not match
@@ -181,6 +186,62 @@ func WithTermDetacher(w domain.PostTermsWriter) PostWriteOption {
 // comments and meta and re-points its children before the row is deleted.
 func WithPostDependentsPurger(p domain.PostDependentsPurger) PostWriteOption {
 	return func(s *PostWriteService) { s.purger = p }
+}
+
+// WithStickyOptions wires the option ports PostWriteService.Delete uses to
+// remove a deleted post's id from sticky_posts. Either nil skips the step.
+func WithStickyOptions(r domain.OptionRepository, w domain.OptionWriter) PostWriteOption {
+	return func(s *PostWriteService) { s.optionsR, s.optionsW = r, w }
+}
+
+// unstickOptionName is the option holding the sticky post ids.
+const unstickOptionName = "sticky_posts"
+
+// unstick removes id from the sticky_posts option. A missing option is left
+// missing, an id that is not listed writes nothing, and a malformed value is
+// left unchanged and ignored (this package has no logger, so it is silent).
+// Read and write errors are returned.
+func (s *PostWriteService) unstick(ctx context.Context, id int64) error {
+	raw, err := s.optionsR.Get(ctx, unstickOptionName)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	v, err := php.Unserialize(raw)
+	if err != nil {
+		return nil
+	}
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	type entry struct{ key, val int }
+	entries := make([]entry, 0, len(m))
+	for k, raw := range m {
+		key, kerr := strconv.Atoi(k)
+		val, isInt := raw.(int)
+		if kerr != nil || !isInt {
+			return nil
+		}
+		entries = append(entries, entry{key, val})
+	}
+	slices.SortFunc(entries, func(a, b entry) int { return a.key - b.key })
+	remaining := make([]int, 0, len(entries))
+	for _, e := range entries {
+		if int64(e.val) != id {
+			remaining = append(remaining, e.val)
+		}
+	}
+	if len(remaining) == len(entries) {
+		return nil
+	}
+	out, err := php.Serialize(remaining)
+	if err != nil {
+		return err
+	}
+	return s.optionsW.Set(ctx, unstickOptionName, out)
 }
 
 // deleteTaxonomies returns the taxonomies whose relationships are detached
@@ -566,7 +627,8 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 // only provide PostWriter unaffected.
 //
 // The full order is: revisions, term detach (deleteTaxonomies, via the
-// detacher when configured), dependents purge (via the purger when configured,
+// detacher when configured), unstick (a deleted "post" is removed from the
+// sticky_posts option when WithStickyOptions is wired), dependents purge (via the purger when configured,
 // with the row's own parent id and hierarchicalType), then the row delete. The
 // first failing step returns its error and later steps do not run. Every
 // earlier step is idempotent, so a retry after a failure converges.
@@ -597,6 +659,11 @@ func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p d
 			if err := s.detacher.SetPostTerms(ctx, cur.ID, tax, nil); err != nil {
 				return err
 			}
+		}
+	}
+	if cur.Type == "post" && s.optionsR != nil && s.optionsW != nil {
+		if err := s.unstick(ctx, cur.ID); err != nil {
+			return err
 		}
 	}
 	if s.purger != nil {

@@ -244,3 +244,65 @@ func TestRESTPagesParentIgnoredOnPosts(t *testing.T) {
 		t.Errorf("post Update got ParentID %d, want 0", spy.lastUpdate.ParentID)
 	}
 }
+
+// M19 Req 6.1 (RED until task 6.2): every REST page response carries the key
+// `parent`, including 0 for a top-level page.
+func ropppWantParent(t *testing.T, obj map[string]any, want int64, where string) {
+	t.Helper()
+	v, ok := obj["parent"]
+	if !ok {
+		t.Fatalf("%s: key parent absent, want %d", where, want)
+	}
+	if f, _ := v.(float64); int64(f) != want {
+		t.Fatalf("%s: parent = %v, want %d", where, v, want)
+	}
+}
+
+func TestRESTPageParentAlwaysPresent(t *testing.T) {
+	h, repos, ap, _ := newRPPPRouter(t)
+	secret := mintAppPassword(t, context.Background(), ap)
+	top := ropppMake(t, repos, "page", "rppk-top", 0)
+	kid := ropppMake(t, repos, "page", "rppk-kid", top)
+
+	rec := doRESTWrite(t, h, http.MethodGet, "/wp-json/wp/v2/pages/"+ropppItoa(top), secret, "", nil)
+	ropppWantCode(t, rec, http.StatusOK, "")
+	ropppWantParent(t, ropppObj(t, rec), 0, "GET /pages/{top}")
+
+	rec = doRESTWrite(t, h, http.MethodGet, "/wp-json/wp/v2/pages/"+ropppItoa(kid), secret, "", nil)
+	ropppWantCode(t, rec, http.StatusOK, "")
+	ropppWantParent(t, ropppObj(t, rec), top, "GET /pages/{kid}")
+
+	rec = doRESTWrite(t, h, http.MethodGet, "/wp-json/wp/v2/pages", secret, "", nil)
+	ropppWantCode(t, rec, http.StatusOK, "")
+	var list []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || len(list) == 0 {
+		t.Fatalf("list body: %v (%s)", err, rec.Body.String())
+	}
+	for _, it := range list {
+		if _, ok := it["parent"]; !ok {
+			t.Fatalf("GET /pages item %v lacks parent", it["id"])
+		}
+	}
+
+	rec = doRESTWrite(t, h, http.MethodPost, "/wp-json/wp/v2/pages", secret,
+		`{"title":"Top","slug":"rppk-new","status":"draft"}`, nil)
+	ropppWantCode(t, rec, http.StatusCreated, "")
+	ropppWantParent(t, ropppObj(t, rec), 0, "POST /pages 201")
+
+	rec = doRESTWrite(t, h, http.MethodPut, "/wp-json/wp/v2/pages/"+ropppItoa(top), secret,
+		`{"title":"Renamed"}`, nil)
+	ropppWantCode(t, rec, http.StatusOK, "")
+	ropppWantParent(t, ropppObj(t, rec), 0, "PUT /pages/{top} 200")
+}
+
+// M19 Req 7.1 pin (passes today, must keep passing): a post item has no parent.
+func TestRESTPostParentPins(t *testing.T) {
+	h, repos, ap, _ := newRPPPRouter(t)
+	secret := mintAppPassword(t, context.Background(), ap)
+	post := ropppMake(t, repos, "post", "rppk-post", 0)
+	rec := doRESTWrite(t, h, http.MethodGet, "/wp-json/wp/v2/posts/"+ropppItoa(post), secret, "", nil)
+	ropppWantCode(t, rec, http.StatusOK, "")
+	if v, ok := ropppObj(t, rec)["parent"]; ok {
+		t.Fatalf("post item carries parent = %v, want key absent", v)
+	}
+}

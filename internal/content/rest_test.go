@@ -859,3 +859,69 @@ func TestRESTMapperPostSiblingFieldsUnchangedByTransform(t *testing.T) {
 		t.Errorf("Content.Protected = false, want true (password set)")
 	}
 }
+
+// M19 Req 6.1, 6.2 (RED until task 6.2): a REST page always carries `parent`,
+// including 0 for a top-level page. The M18 `omitempty` tag drops the 0.
+func restPageParentKey(t *testing.T, parentID int64) (json.RawMessage, bool) {
+	t.Helper()
+	m, _, _, _ := newTestMapper()
+	p := samplePost()
+	p.Type = "page"
+	p.ParentID = parentID
+	page, err := m.Page(context.Background(), p)
+	if err != nil {
+		t.Fatalf("Page: %v", err)
+	}
+	raw, err := json.Marshal(page)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	v, ok := obj["parent"]
+	return v, ok
+}
+
+func TestRESTPageParentTopLevelIsZero(t *testing.T) {
+	v, ok := restPageParentKey(t, 0)
+	if !ok || string(v) != "0" {
+		t.Fatalf("top-level page parent = %s (present=%v), want key present equal to 0", v, ok)
+	}
+}
+
+func TestRESTPageParentNestedIsParentID(t *testing.T) {
+	v, ok := restPageParentKey(t, 17)
+	if !ok || string(v) != "17" {
+		t.Fatalf("nested page parent = %s (present=%v), want 17", v, ok)
+	}
+}
+
+// M19 Req 7.1-7.3 pins: pass on the unmodified tree and must keep passing.
+// A post item has no `parent`; a hierarchical custom type emits it (including
+// 0); a flat custom type omits it.
+func TestRESTPostParentPins(t *testing.T) {
+	m, _, _, _ := newTestMapper()
+	post, err := m.Post(context.Background(), samplePost())
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	raw, _ := json.Marshal(post)
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v, ok := obj["parent"]; ok {
+		t.Fatalf("post item carries parent = %s, want key absent", v)
+	}
+}
+
+func TestRESTCustomParentPins(t *testing.T) {
+	if v, ok := rcparParent(t, "manual", "top", 9, 0); !ok || string(v) != "0" {
+		t.Errorf("hierarchical custom top-level parent = %s (present=%v), want 0", v, ok)
+	}
+	if v, ok := rcparParent(t, "book", "dune", 7, 5); ok {
+		t.Errorf("flat custom type carries parent = %s, want key omitted", v)
+	}
+}

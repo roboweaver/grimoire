@@ -526,8 +526,9 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   storage port (`PostDependentsPurger`).
   - **Delete cleanup.** Deleting a `post`, a `page` or a row of a registered
     type now runs these steps in order, and the first failure stops the
-    sequence: revisions and autosaves, then term detach, then the dependents
-    purge, then the row delete.
+    sequence: revisions and autosaves, then term detach, then (for a `post`
+    only) removal from `sticky_posts`, then the dependents purge, then the row
+    delete.
     - *Terms.* The row's `term_relationships` are detached for `category` and
       `post_tag` (built-in `post` and `page`), for any registered taxonomy
       whose `object_types` names the type, and for a registered type's own
@@ -556,10 +557,6 @@ Type mappings from the WordPress MySQL schema are translated per vendor
       `404` on both paths, and same-slug pages under different parents each
       serve their own body.
   - **Known gaps (PR 2).**
-    - REST page `parent` is omitted from the response when it is `0`
-      (`omitempty`), which keeps the built-in golden files byte-identical.
-      WordPress always sends `parent`, including `0`.
-    - `sticky_posts` is not updated when a post is deleted.
     - Nav-menu items that reference a deleted post are not removed or updated.
     - There is no trash.
     - WordPress hooks and the object cache are not involved.
@@ -598,6 +595,31 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     existing terms unwritable at the next start. The terms and their
     relationships are untouched and become writable again when the taxonomy is
     registered again.
+- **M19 — Term gate and delete parity (PR 2):** REST page `parent` and
+  `sticky_posts` cleanup. No schema change, no migration, no new port, no new
+  capability string.
+  - **REST page `parent`.** Every REST page item (list, get, create and update
+    responses) carries `parent`, including `0` for a top-level page, as
+    WordPress does. Other types are unchanged: `post` items have no `parent`,
+    a registered hierarchical type emits `parent` (including `0`), and a
+    registered flat type omits it. The admin API page detail is unchanged and
+    still omits `parent` when it is `0`. The built-in golden files gained only
+    `"parent": 0` lines on page objects.
+  - **`sticky_posts` on delete.** Deleting a `post` row removes its id from the
+    `sticky_posts` option.
+    - *Scope.* Post rows only. Deleting a page or a registered-type row never
+      reads the option.
+    - *Writes.* The option is written only when the id is present. A missing
+      option is never created. The order of the remaining ids is kept, and an
+      empty list is stored as `a:0:{}`. The list is written as a PHP array of
+      integers (`php.Serialize` now accepts `[]int`).
+    - *Malformed option.* A value that does not parse, is not an array, or holds
+      a non-integer is left unchanged and the delete continues. Nothing is
+      logged: the `content` package has no logger, so this departs from the
+      design, which called for a warning.
+    - *Order and failure.* The step runs after the term detach and before the
+      dependents purge. A read or write error other than "not found" is returned,
+      the purge and row delete do not run, and a retry converges.
 
 ## Public read guarantees
 

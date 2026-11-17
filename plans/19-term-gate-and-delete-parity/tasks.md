@@ -255,7 +255,7 @@
 
 ## Phase 5 — `sticky_posts` on delete (`internal/php`, `internal/content`, TDD) — PR 2
 
-- [~] 5.1 Write the failing tests first. In `internal/php/php_test.go` add a table
+- [x] 5.1 Write the failing tests first. In `internal/php/php_test.go` add a table
       for `Serialize([]int{...})`: `[]int{5, 9}` → `a:2:{i:0;i:5;i:1;i:9;}`,
       `[]int{}` → `a:0:{}`, `[]int{7}` → `a:1:{i:0;i:7;}`, and a round trip
       `Unserialize(Serialize(x))` returning a map with keys `"0".."n-1"` and the same
@@ -279,7 +279,7 @@
       exist; once stubbed, the option still lists the deleted id). _(Req 8.1-8.11;
       D7, D8)_
 
-- [~] 5.2 Implement it. In `internal/php/serialize.go` add `case []int:` writing
+- [x] 5.2 Implement it. In `internal/php/serialize.go` add `case []int:` writing
       `a:N:{i:0;i:v;…}` with integer keys and values, and update the doc comment's
       supported-types list. In `internal/content/writeservices.go` add
       `WithStickyOptions(r domain.OptionRepository, w domain.OptionWriter)
@@ -296,7 +296,7 @@
 
 ## Phase 6 — REST page `parent` always emitted (`internal/content`, `cmd/grimoire`) — PR 2
 
-- [~] 6.1 Write the failing tests and the golden diff check first. In
+- [x] 6.1 Write the failing tests and the golden diff check first. In
       `internal/content/rest_test.go` (or the file holding the `RESTPage` tests) add:
       `RESTMapper.Page` for a top-level page marshals with the key `parent` equal to
       `0`, and for a nested page with its id (Req 6.1, 6.2). In `internal/web` add
@@ -322,7 +322,7 @@
       (nothing diverges from `main` yet) and is run again in 6.2. _(Req 6.1-6.3,
       6.5, 6.6, 7.1-7.3; D5, D6)_
 
-- [~] 6.2 Implement it, then regenerate the goldens in their own commit. **Commit
+- [x] 6.2 Implement it, then regenerate the goldens in their own commit. **Commit
       A (code):** in `internal/content/rest.go` change `Parent int64
       \`json:"parent,omitempty"\`` to `json:"parent"` and replace its doc comment;
       change only the stale `omitempty`-era assertions in existing tests, narrowly,
@@ -345,7 +345,7 @@
 
 ## Phase 7 — Assembly: wire sticky and drive PR 2 through `buildHandler` (`cmd/grimoire`, TDD) — PR 2
 
-- [~] 7.1 Write the failing assembly tests first. Add
+- [x] 7.1 Write the failing assembly tests first. Add
       `cmd/grimoire/assembly_sticky_test.go` over `newCustomWriteHandler`, with the
       `sticky_posts` option seeded through `env.Repos.DB()`
       (`a:2:{i:0;i:<A>;i:1;i:<B>;}`) and two posts `A` and `B`, a page `P`, and a
@@ -368,7 +368,7 @@
       without the option ports; the page assertions fail until task 6.2 lands. _(Req 6.1,
       6.2, 8.1-8.5, 8.8, 8.9, 13.1, 13.2; D7)_
 
-- [~] 7.2 Wire the option ports. In `cmd/grimoire/assembly.go` add
+- [x] 7.2 Wire the option ports. In `cmd/grimoire/assembly.go` add
       `content.WithStickyOptions(repos.Options, repos.OptionWriter)` to the
       `NewPostWriteService` call. No other assembly change.
       Files: `cmd/grimoire/assembly.go`
@@ -381,7 +381,7 @@
 
 ## Phase 8 — Documentation and PR 2 gate — PR 2
 
-- [~] 8.1 Update the documents to match PR 2. `docs/compatibility.md`: remove the
+- [x] 8.1 Update the documents to match PR 2. `docs/compatibility.md`: remove the
       two M18 PR 2 known-gap bullets "REST page `parent` is omitted…" and
       "`sticky_posts` is not updated…"; add "M19 (PR 2)" to the M19 section: REST page
       `parent` is always present (posts have none, hierarchical custom types
@@ -402,7 +402,7 @@
       Verify: `grep -n "sticky_posts. is not updated" docs/compatibility.md` finds
       nothing; the plans README row reads 2 of 3. _(Req 15.2, 15.4-15.6)_
 
-- [~] 8.2 Final gate for PR 2. Confirm: no new file under
+- [x] 8.2 Final gate for PR 2. Confirm: no new file under
       `internal/storage/migrations`; `git diff main -- internal/domain/repository.go`
       empty (Req 12.4, no port); no new capability string; `go.mod` and `go.sum`
       unchanged; `scripts/check-golden-parent.sh` exits `0` against `main` and the

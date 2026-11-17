@@ -120,3 +120,96 @@ func rowSnapshot(t *testing.T, env customWriteEnv, id int64) string {
 
 // postsIDColumn is the quoted primary-key column of the posts table.
 const postsIDColumn = `"ID"`
+
+// M19 additions (task 1.1): raw term and menu-item seeding and a term snapshot.
+
+// seedRawTerm inserts a terms row and a term_taxonomy row (term_taxonomy_id =
+// term_id) for taxonomy with the given parent and returns the term ID. The
+// taxonomy need not be managed, so tests can create nav_menu, product_cat and
+// link_category terms the API cannot.
+func seedRawTerm(t *testing.T, env customWriteEnv, name, slug, taxonomy string, parent int64) int64 {
+	t.Helper()
+	ctx := context.Background()
+	res, err := env.Repos.DB().ExecContext(ctx,
+		"INSERT INTO "+env.Prefix+"terms (name, slug) VALUES (?, ?)", name, slug)
+	if err != nil {
+		t.Fatalf("seedRawTerm %q: %v", name, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("seedRawTerm %q id: %v", name, err)
+	}
+	if _, err := env.Repos.DB().ExecContext(ctx,
+		"INSERT INTO "+env.Prefix+"term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)",
+		id, id, taxonomy, "", parent, 0); err != nil {
+		t.Fatalf("seedRawTerm %q taxonomy: %v", name, err)
+	}
+	return id
+}
+
+// termSnapshot returns the terms, term_taxonomy and term_relationships rows of
+// term termID as one comparable string, or "<missing>" parts for absent rows.
+func termSnapshot(t *testing.T, env customWriteEnv, termID int64) string {
+	t.Helper()
+	var b strings.Builder
+	for _, q := range []struct{ label, query string }{
+		{"terms", "SELECT * FROM " + env.Prefix + "terms WHERE term_id = ? ORDER BY term_id"},
+		{"term_taxonomy", "SELECT * FROM " + env.Prefix + "term_taxonomy WHERE term_id = ? ORDER BY term_taxonomy_id"},
+		{"term_relationships", "SELECT * FROM " + env.Prefix + "term_relationships WHERE term_taxonomy_id IN " +
+			"(SELECT term_taxonomy_id FROM " + env.Prefix + "term_taxonomy WHERE term_id = ?) ORDER BY object_id, term_taxonomy_id"},
+	} {
+		fmt.Fprintf(&b, "[%s]", q.label)
+		rows, err := env.Repos.DB().QueryContext(context.Background(), q.query, termID)
+		if err != nil {
+			t.Fatalf("termSnapshot %s: %v", q.label, err)
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			t.Fatalf("termSnapshot %s columns: %v", q.label, err)
+		}
+		for rows.Next() {
+			vals := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				rows.Close()
+				t.Fatalf("termSnapshot %s scan: %v", q.label, err)
+			}
+			for i, c := range cols {
+				v := vals[i]
+				if bs, ok := v.([]byte); ok {
+					v = string(bs)
+				}
+				fmt.Fprintf(&b, "%s=%v;", c, v)
+			}
+			b.WriteString("|")
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			t.Fatalf("termSnapshot %s rows: %v", q.label, err)
+		}
+		rows.Close()
+	}
+	return b.String()
+}
+
+// seedRawMenuItem inserts a nav_menu_item post with the _menu_item_* postmeta
+// pointing at (objectType, objectID), links it to menuTermID, and returns the
+// item's post ID. It is used from PR 3.
+func seedRawMenuItem(t *testing.T, env customWriteEnv, menuTermID int64, objectType string, objectID int64) int64 {
+	t.Helper()
+	item := seedRawPost(t, env, "nav_menu_item", "publish", 0)
+	kind := "post_type"
+	if objectType == "category" || objectType == "post_tag" {
+		kind = "taxonomy"
+	}
+	seedRawMeta(t, env, item, "_menu_item_type", kind)
+	seedRawMeta(t, env, item, "_menu_item_object", objectType)
+	seedRawMeta(t, env, item, "_menu_item_object_id", fmt.Sprint(objectID))
+	seedRawMeta(t, env, item, "_menu_item_menu_item_parent", "0")
+	seedRawTermRelationship(t, env, item, menuTermID)
+	return item
+}

@@ -93,6 +93,11 @@ func (s *PostTermsWriteService) checkTerms(ctx context.Context, pt registry.Post
 	if s.terms == nil {
 		return errors.New("content: term ids cannot be validated without a term reader")
 	}
+	return s.checkMembership(ctx, taxonomy, ids)
+}
+
+// checkMembership verifies every id is a term of taxonomy.
+func (s *PostTermsWriteService) checkMembership(ctx context.Context, taxonomy string, ids []int64) error {
 	found, err := s.terms.TermsByIDs(ctx, ids)
 	if err != nil {
 		return err
@@ -147,8 +152,15 @@ func (s *PostTermsWriteService) SetPostTerms(ctx context.Context, actor auth.Pri
 	if !auth.CanEditPostSuffix(actor, suf, cur.Status, cur.Author) {
 		return ErrForbidden
 	}
+	if !ManagedTaxonomy(s.reg, taxonomy) {
+		return ErrTaxonomyUnknown
+	}
 	if registered {
 		if err := s.checkTerms(ctx, pt, taxonomy, termIDs); err != nil {
+			return err
+		}
+	} else if len(termIDs) > 0 && s.terms != nil {
+		if err := s.checkMembership(ctx, taxonomy, termIDs); err != nil {
 			return err
 		}
 	}

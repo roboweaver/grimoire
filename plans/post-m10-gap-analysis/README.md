@@ -68,8 +68,12 @@ assignment and delete cleanup (`plans/17-custom-types-write`).
 registered under `content:` are unwritable (`403` on the admin API, `404` for
 revisions and autosave), the scheduler skips them, revisions and autosave honor
 `capability_type`, and term names of every taxonomy are reduced to plain text on
-write (an unchanged name is stored as is). Still open: unwritable taxonomies on
-term update and delete.
+write (an unchanged name is stored as is).
+**Shipped in M19 (PR 1, `plans/19-term-gate-and-delete-parity`):** term update and
+delete are gated on the stored taxonomy being managed (`category`, `post_tag` or
+registered), so an unmanaged taxonomy such as `nav_menu` or `product_cat` answers
+`403` on the admin API; create stays `400`, name-addressed assignment is reported
+in `partial`, and assignment to the built-in taxonomies now checks term membership.
 **Shipped in M18 (PR 2, `plans/18-write-hardening`):** deleting a post or page
 detaches its terms (counts recounted), deletes its comments, commentmeta and
 postmeta, and re-points child pages and attachments to the deleted row's parent.

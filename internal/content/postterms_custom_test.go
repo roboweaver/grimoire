@@ -163,8 +163,14 @@ func TestPostTermsCustom_UnattachedTaxonomyRejected(t *testing.T) {
 			f := newPtcFake(tc.post)
 			err := ptcService(t, f).SetPostTerms(context.Background(),
 				ptcActor(5, append(append([]string{}, ptcProdAuthor...), "edit_posts")...), tc.post.ID, tc.tax, tc.ids)
-			if !errors.Is(err, ErrTaxonomyNotAttached) {
-				t.Fatalf("err = %v, want ErrTaxonomyNotAttached", err)
+			// M19 Req 2.2: an unmanaged name is refused by the taxonomy gate
+			// before the attachment check, with ErrTaxonomyUnknown (also 400).
+			want := ErrTaxonomyNotAttached
+			if tc.tax == "nosuch" {
+				want = ErrTaxonomyUnknown
+			}
+			if !errors.Is(err, want) {
+				t.Fatalf("err = %v, want %v", err, want)
 			}
 			if len(f.sets) != 0 {
 				t.Fatalf("wrote %+v, want nothing", f.sets)
@@ -327,19 +333,21 @@ func TestPostTermsCustom_BuiltinAndUnregisteredRowsUnchanged(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// A taxonomy attached to nothing, and ids that are not its terms,
-			// pass straight through: no attachment or membership check.
+			// A managed taxonomy attached to nothing passes straight through:
+			// no attachment check on built-in rows. M19 Req 2.4 adds a
+			// membership check when a term reader is configured, so the ids
+			// are terms of genre (foreign ids are covered in termgate_test.go).
 			f := newPtcFake(tc.post)
-			err := ptcService(t, f).SetPostTerms(context.Background(), ptcActor(5, tc.caps...), tc.post.ID, "genre", []int64{3, 99})
+			err := ptcService(t, f).SetPostTerms(context.Background(), ptcActor(5, tc.caps...), tc.post.ID, "genre", []int64{1, 2})
 			if err != nil {
 				t.Fatalf("err = %v, want nil", err)
 			}
-			if len(f.sets) != 1 || !reflect.DeepEqual(f.sets[0].ids, []int64{3, 99}) {
+			if len(f.sets) != 1 || !reflect.DeepEqual(f.sets[0].ids, []int64{1, 2}) {
 				t.Fatalf("sets = %+v, want the ids written verbatim", f.sets)
 			}
 			for _, c := range f.log {
-				if c == "terms" || c == "list" {
-					t.Fatalf("term reader consulted for built-in/unregistered row: %v", f.log)
+				if c == "list" {
+					t.Fatalf("taxonomy listed for built-in row: %v", f.log)
 				}
 			}
 		})

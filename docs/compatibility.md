@@ -527,8 +527,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   - **Delete cleanup.** Deleting a `post`, a `page` or a row of a registered
     type now runs these steps in order, and the first failure stops the
     sequence: revisions and autosaves, then term detach, then (for a `post`
-    only) removal from `sticky_posts`, then the dependents purge, then the row
-    delete.
+    only) removal from `sticky_posts`, then the dependents purge, then the
+    nav-menu item purge (M19 PR 3), then the row delete.
     - *Terms.* The row's `term_relationships` are detached for `category` and
       `post_tag` (built-in `post` and `page`), for any registered taxonomy
       whose `object_types` names the type, and for a registered type's own
@@ -557,7 +557,6 @@ Type mappings from the WordPress MySQL schema are translated per vendor
       `404` on both paths, and same-slug pages under different parents each
       serve their own body.
   - **Known gaps (PR 2).**
-    - Nav-menu items that reference a deleted post are not removed or updated.
     - There is no trash.
     - WordPress hooks and the object cache are not involved.
 
@@ -621,6 +620,38 @@ Type mappings from the WordPress MySQL schema are translated per vendor
       dependents purge. A read or write error other than "not found" is returned,
       the purge and row delete do not run, and a retry converges.
 
+- **M19 — Term gate and delete parity (PR 3):** nav-menu item cleanup on
+  delete. No schema change, no migration, no capability string. One additive
+  storage port (`PostMenuItemPurger`, implemented by `PostRepo`).
+  - **What is deleted.** Deleting a `post`, a `page` or a row of a registered
+    type deletes the `nav_menu_item` rows that point at it, with each item's
+    `postmeta` and its `term_relationships`.
+  - **What matches.** An item matches when its row type is `nav_menu_item`,
+    `_menu_item_type` is `post_type`, `_menu_item_object` equals the deleted
+    row's type and `_menu_item_object_id` equals its id. Items for taxonomy
+    terms, custom links, other objects or other types are kept, as are the
+    menu terms themselves and every other post.
+  - **Menu count.** For each `nav_menu` term taxonomy the deleted items
+    belonged to, `term_taxonomy.count` is set to the true number of
+    relationships. WordPress counts only published and draft items; grimoire
+    creates items as `publish`, so the two agree for items grimoire wrote. For
+    imported items in other statuses the count can differ from WordPress until
+    WordPress recomputes it on the next menu edit.
+  - **Order.** The purge runs after the dependents purge and before the row
+    delete. It is one transaction, a read or write error stops the sequence
+    before the row delete, and a retry converges (a second purge finds
+    nothing and changes nothing).
+  - **Verified on** SQLite, MySQL 8.0 and PostgreSQL 16 by one shared contract
+    (`RunPostMenuItemPurgerContract`). MySQL and PostgreSQL run when the
+    `GRIMOIRE_TEST_*` DSNs are set, as CI does.
+  - **Known gaps (PR 3).**
+    - Child menu items keep a dangling `_menu_item_menu_item_parent` that points
+      at a deleted item. The menu editor's item delete does the same.
+    - `NavMenuRepo.DeleteItem` does not recount the menu's `count`.
+    - Deleting a media item does not clean menu items.
+    - Relationships in unmanaged taxonomies stay on a deleted post.
+    - There is no trash and no restore.
+    - Term-side post meta, WordPress hooks and the object cache are not involved.
 ## Public read guarantees
 
 - The **public** rendering path (unauthenticated `GET` routes) filters to

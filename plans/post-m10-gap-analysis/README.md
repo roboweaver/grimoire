@@ -78,12 +78,20 @@ in `partial`, and assignment to the built-in taxonomies now checks term membersh
 detaches its terms (counts recounted), deletes its comments, commentmeta and
 postmeta, and re-points child pages and attachments to the deleted row's parent.
 Page `parent` is writable over REST and the admin API with a cycle and type
-guard, and a page's slug is suffixed on a parent change. Honest gaps: nav-menu
-items that reference a deleted post, and trash, remain unhandled.
+guard, and a page's slug is suffixed on a parent change. Honest gap: trash remains
+unhandled (nav-menu items were closed in M19 PR 3).
 **Shipped in M19 (PR 2, `plans/19-term-gate-and-delete-parity`):** REST page items
 always carry `parent`, including `0`. Deleting a post removes its id from
 `sticky_posts` (post rows only; a malformed option is left alone and, because the
 `content` package has no logger, nothing is logged).
+**Shipped in M19 (PR 3, `plans/19-term-gate-and-delete-parity`):** deleting a post,
+page or registered-type row deletes the nav-menu items that point at it (type
+`post_type`, object equal to the deleted type, object id equal to the id) with their
+postmeta and relationships, and recomputes the menu term counts from the true
+relationship count. Child menu items are not re-parented, as in the menu editor's
+delete, and WordPress counts only published and draft items, so a count for imported
+items in other statuses can differ until WordPress recomputes it. The remaining open
+gap after M19 is trash.
 **M15 follow-up (found while building M12) — fixed in PR #79.** M15's
 `PageService.Resolve` confirmed the leaf with `BySlug(leaf.Slug)`, which was
 ambiguous for same-slug leaves under different parents, and its recovery path

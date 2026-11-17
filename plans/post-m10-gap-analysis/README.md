@@ -91,14 +91,25 @@ postmeta and relationships, and recomputes the menu term counts from the true
 relationship count. WordPress counts only published and draft items, so a count for
 imported items in other statuses can differ until WordPress recomputes it. Child menu
 items were left pointing at the deleted id; M20 PR 1 closed that. The remaining open
-gap after M19 is trash.
+gap after M19 was trash, which remains open.
 **Shipped in M20 (PR 1, `plans/20-delete-gap-closure`):** children of a deleted menu
 item are re-pointed to the item's own menu parent (nearest surviving ancestor for
 chains, `0` for a top-level item), in both the post-delete purge and the menu editor
 delete, and `NavMenuRepo.DeleteItem` now recounts the menu. WordPress core does not do
 this on the server (only its editor JavaScript does); grimoire does because its tree
-builder hides orphans. Still open: media delete cleanup, unmanaged-taxonomy
-relationships, trash.
+builder hides orphans. Media delete cleanup and unmanaged-taxonomy relationships
+were open after PR 1 and closed in PR 2.
+**Shipped in M20 (PR 2, `plans/20-delete-gap-closure`):** deleting a post, page or
+registered-type row removes its relationships in every taxonomy except
+`link_category` (whose object ids are link ids), recounting each affected term;
+residual risk is a plugin taxonomy of non-post objects with a colliding id. Deleting
+a media item now removes its menu items (children re-parented as in PR 1), comments
+and commentmeta, `_thumbnail_id` references on other posts and relationships, plus
+orphan `term_relationships` rows with no `term_taxonomy`, and the row delete is
+guarded by `post_type = 'attachment'` (any other id is not found). WordPress itself
+removes relationships only for taxonomies registered for the object type. Still open:
+trash and restore, theme mods (`custom_logo`, `header_image`), intermediate image
+sizes, re-pointing child attachments, hooks and the object cache.
 **M15 follow-up (found while building M12) — fixed in PR #79.** M15's
 `PageService.Resolve` confirmed the leaf with `BySlug(leaf.Slug)`, which was
 ambiguous for same-slug leaves under different parents, and its recovery path

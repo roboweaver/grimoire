@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/roboweaver/grimoire/internal/domain"
@@ -251,24 +252,67 @@ func upsertPostMeta(ctx context.Context, tx bun.Tx, prefix string, postID int64,
 	return err
 }
 
-// Delete hard-deletes an attachment's {prefix}term_relationships rows, its
-// {prefix}postmeta rows, and finally its {prefix}posts row, in one transaction,
-// deepest-dependency-first so no orphan survives a partial failure (Req 4.1).
-// It returns domain.ErrNotFound when the posts delete affected no row (Req 4.4),
-// matching PostWriter.Delete. It does NOT touch the on-disk file.
+// Delete hard-deletes an attachment and everything that points at it, in one
+// transaction, deepest-dependency-first so no orphan survives a partial failure
+// (Req 4.1). In order it removes: nav_menu_item rows whose object is this
+// attachment (with a term_taxonomy recount), the _thumbnail_id postmeta rows on
+// other posts that reference it, its comments and their commentmeta, its
+// term_relationships (excluding domain.NonPostObjectTaxonomies, with a recount),
+// its postmeta, and finally its posts row. The posts delete is guarded by
+// post_type = 'attachment': it returns domain.ErrNotFound when no attachment row
+// matches (including a non-attachment id) and rolls everything back (Req 4.4).
+// It does NOT touch the on-disk file or the post_parent of child attachments.
 func (r *MediaRepo) Delete(ctx context.Context, id int64) error {
+	vendor := vendorOf(r.db)
+	comments := bun.Ident(r.prefix + "comments")
+	commentmeta := bun.Ident(r.prefix + "commentmeta")
 	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		items, err := matchMenuItemsTx(ctx, tx, r.prefix, vendor, id, "attachment")
+		if err != nil {
+			return err
+		}
+		var ttIDs []int64
+		for _, item := range sortedUniqueInt64(items) {
+			tts, err := deleteMenuItemTx(ctx, tx, r.prefix, vendor, item)
+			if err != nil {
+				return err
+			}
+			ttIDs = append(ttIDs, tts...)
+		}
+		if err := recountTx(ctx, tx, r.prefix, ttIDs); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx,
-			"DELETE FROM "+r.prefix+"term_relationships WHERE object_id = ?", id); err != nil {
+			"DELETE FROM "+r.prefix+"postmeta WHERE meta_key = '_thumbnail_id' AND meta_value = ?",
+			strconv.FormatInt(id, 10)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM ? WHERE comment_id IN (SELECT ? FROM ? WHERE ? = ?)",
+			commentmeta, bun.Ident("comment_ID"), comments, bun.Ident("comment_post_ID"), id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM ? WHERE ? = ?", comments, bun.Ident("comment_post_ID"), id); err != nil {
+			return err
+		}
+		if err := purgeRelationshipsTx(ctx, tx, r.prefix, id); err != nil {
+			return err
+		}
+		// Dangling rows (no term_taxonomy row, so purgeRelationshipsTx cannot
+		// classify them) are still orphans of this attachment; nothing to recount.
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM "+r.prefix+"term_relationships WHERE object_id = ? AND term_taxonomy_id NOT IN "+
+				"(SELECT term_taxonomy_id FROM "+r.prefix+"term_taxonomy)", id); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
 			"DELETE FROM "+r.prefix+"postmeta WHERE post_id = ?", id); err != nil {
 			return err
 		}
-		pID := rebind.Ident(vendorOf(r.db), "ID")
+		pID := rebind.Ident(vendor, "ID")
 		res, err := tx.ExecContext(ctx,
-			"DELETE FROM "+r.prefix+"posts WHERE "+pID+" = ?", id)
+			"DELETE FROM "+r.prefix+"posts WHERE "+pID+" = ? AND post_type = 'attachment'", id)
 		if err != nil {
 			return err
 		}

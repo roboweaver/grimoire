@@ -237,12 +237,15 @@ type MediaWriter interface {
 	// it continues to flow through SetParent rather than being folded into this
 	// method (Req 3.5, D2).
 	UpdateMeta(ctx context.Context, id int64, m MediaMeta) error
-	// Delete hard-deletes an attachment: its {prefix}term_relationships rows,
-	// its {prefix}postmeta rows, and finally its {prefix}posts row, in one
-	// transaction (deepest-dependency-first so no orphan survives a partial
-	// failure). It returns ErrNotFound when no attachment has the given ID,
-	// matching the UpdateMeta/SetParent contract and the existing
-	// PostWriter.Delete. It does NOT touch the on-disk file -- that is the
+	// Delete hard-deletes an attachment and its dependents in one transaction
+	// (deepest-dependency-first so no orphan survives a partial failure):
+	// nav_menu_item rows pointing at it, _thumbnail_id postmeta on other posts
+	// that reference it, its comments and commentmeta, its term_relationships
+	// (except NonPostObjectTaxonomies, with term_taxonomy counts recomputed),
+	// its postmeta, and finally its posts row. It returns ErrNotFound, rolling
+	// everything back, when no row with the given ID has post_type
+	// 'attachment' (a post or page ID is never deleted here). It does NOT touch
+	// the on-disk file or the post_parent of child attachments -- the unlink is
 	// content.MediaWriteService's job, because the storage layer has no
 	// knowledge of UploadsDir.
 	Delete(ctx context.Context, id int64) error
@@ -675,6 +678,23 @@ type PostDependentsPurger interface {
 	// Neither update touches post_modified. No dependents is not an error and
 	// the post row need not exist.
 	PurgePostDependents(ctx context.Context, postID, parentID int64, reparentType string) error
+}
+
+// NonPostObjectTaxonomies lists taxonomies whose term_relationships rows name objects that are
+// not posts, so a delete keyed on a post id must not remove them. In WordPress core this is
+// link_category (object ids are wp_links ids).
+var NonPostObjectTaxonomies = []string{"link_category"}
+
+// PostTermRelationshipPurger removes the term relationships of a deleted post that the
+// managed-taxonomy detach does not reach, mirroring wp_delete_object_term_relationships
+// for taxonomies grimoire does not manage. It never deletes the post row itself.
+type PostTermRelationshipPurger interface {
+	// PurgeTermRelationshipsOf, in one transaction, deletes every term_relationships row whose
+	// object_id is postID and whose taxonomy is not in NonPostObjectTaxonomies, then recounts
+	// term_taxonomy.count of every term_taxonomy_id it removed a row from. No relationships is not
+	// an error and the post row need not exist. It never changes terms, term_taxonomy rows other
+	// than their count, or another object's relationships.
+	PurgeTermRelationshipsOf(ctx context.Context, postID int64) error
 }
 
 // PostMenuItemPurger deletes the nav-menu items that point at a post,

@@ -73,6 +73,8 @@ type Set struct {
 	PostDependents domain.PostDependentsPurger
 	// Plan 19 additive port: deletes the nav-menu items that point at a post.
 	PostMenuItems domain.PostMenuItemPurger
+	// Plan 20 additive port: removes a post's term relationships outside the managed taxonomies.
+	PostRelationships domain.PostTermRelationshipPurger
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -207,10 +209,11 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			PostContentBackfill: posts,
 			PostContentUpdater:  posts,
 
-			PageReader:     posts,
-			PostNodeReader: posts,
-			PostDependents: posts,
-			PostMenuItems:  posts,
+			PageReader:        posts,
+			PostNodeReader:    posts,
+			PostDependents:    posts,
+			PostMenuItems:     posts,
+			PostRelationships: posts,
 		},
 		db:    db,
 		bunDB: bunDB,

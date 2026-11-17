@@ -104,3 +104,25 @@ func TestMySQLNavMenuDeleteItemContract(t *testing.T) {
 		return repos, "mysql", prefix, cleanup
 	})
 }
+
+func TestMySQLPostTermRelationshipPurgerContract(t *testing.T) {
+	dsn := os.Getenv("GRIMOIRE_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GRIMOIRE_TEST_MYSQL_DSN to run the MySQL contract suite")
+	}
+	RunPostTermRelationshipPurgerContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, prefix, cleanup := newReposFromDSNWithPrefix(t, "mysql", dsn)
+		return repos, "mysql", prefix, cleanup
+	})
+}
+
+func TestMySQLMediaDeleteContract(t *testing.T) {
+	dsn := os.Getenv("GRIMOIRE_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GRIMOIRE_TEST_MYSQL_DSN to run the MySQL contract suite")
+	}
+	RunMediaDeleteContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, prefix, cleanup := newReposFromDSNWithPrefix(t, "mysql", dsn)
+		return repos, "mysql", prefix, cleanup
+	})
+}

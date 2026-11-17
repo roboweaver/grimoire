@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/roboweaver/grimoire/internal/config"
@@ -125,3 +126,86 @@ func TestMediaRepoDeleteUnknownReturnsNotFound(t *testing.T) {
 		t.Errorf("second Delete(same id) = %v, want domain.ErrNotFound", err)
 	}
 }
+
+// TestMediaRepoDeleteAtomicOnFailure covers Req 12.3 atomicity: with
+// term_taxonomy dropped Delete returns an error, and the menu item, comments,
+// _thumbnail_id row, relationships, postmeta and attachment row, all deleted by
+// statements that run before the failing one, are unchanged.
+func TestMediaRepoDeleteAtomicOnFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := newMediaRepo(t)
+	id := seedAttachment(t, repo, 2, "2024/05/atomic.png")
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := repo.db.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	// Menu item 9001 points at the attachment; post 9002 uses it as thumbnail;
+	// a comment with commentmeta hangs off it.
+	exec(`INSERT INTO wp_posts ("ID", post_type, post_status) VALUES (9001, 'nav_menu_item', 'publish')`)
+	for _, m := range [][2]string{
+		{"_menu_item_type", "post_type"}, {"_menu_item_object", "attachment"},
+		{"_menu_item_object_id", itoa(id)}, {"_menu_item_menu_item_parent", "0"},
+	} {
+		exec(`INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (9001, ?, ?)`, m[0], m[1])
+	}
+	exec(`INSERT INTO wp_posts ("ID", post_type, post_status) VALUES (9002, 'post', 'publish')`)
+	exec(`INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (9002, '_thumbnail_id', ?)`, itoa(id))
+	exec(`INSERT INTO wp_comments ("comment_ID", "comment_post_ID", comment_approved) VALUES (9003, ?, '0')`, id)
+	exec(`INSERT INTO wp_commentmeta (comment_id, meta_key, meta_value) VALUES (9003, 'k', 'v')`)
+	exec(`DROP TABLE wp_term_taxonomy`)
+
+	if err := repo.Delete(ctx, id); err == nil {
+		t.Fatal("Delete with term_taxonomy dropped = nil, want an error")
+	}
+	for _, c := range []struct {
+		name, table, where string
+		args               []any
+		want               int
+	}{
+		{"attachment row", "posts", `"ID" = ?`, []any{id}, 1},
+		{"attachment postmeta", "postmeta", "post_id = ?", []any{id}, 2}, // _wp_attached_file + alt
+		{"attachment relationships", "term_relationships", "object_id = ?", []any{id}, 1},
+		{"menu item row", "posts", `"ID" = 9001`, nil, 1},
+		{"menu item postmeta", "postmeta", "post_id = 9001", nil, 4},
+		{"thumbnail reference", "postmeta", "post_id = 9002 AND meta_key = '_thumbnail_id'", nil, 1},
+		{"comment", "comments", `"comment_ID" = 9003`, nil, 1},
+		{"commentmeta", "commentmeta", "comment_id = 9003", nil, 1},
+	} {
+		if n := mediaCount(t, repo, c.table, c.where, c.args...); n != c.want {
+			t.Errorf("%s rows = %d, want %d (rolled back)", c.name, n, c.want)
+		}
+	}
+}
+
+// TestMediaRepoDeleteNonAttachmentReturnsNotFound covers Req 8.6: a page id is
+// refused with domain.ErrNotFound and its row, meta and comments are unchanged.
+func TestMediaRepoDeleteNonAttachmentReturnsNotFound(t *testing.T) {
+	ctx := context.Background()
+	repo := newMediaRepo(t)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := repo.db.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("exec %q: %v", q, err)
+		}
+	}
+	exec(`INSERT INTO wp_posts ("ID", post_type, post_status) VALUES (9100, 'page', 'publish')`)
+	exec(`INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (9100, 'k', 'v')`)
+	exec(`INSERT INTO wp_comments ("comment_ID", "comment_post_ID", comment_approved) VALUES (9101, 9100, '1')`)
+
+	if err := repo.Delete(ctx, 9100); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Delete(page id) = %v, want domain.ErrNotFound", err)
+	}
+	if n := mediaCount(t, repo, "posts", `"ID" = 9100`); n != 1 {
+		t.Errorf("page rows = %d, want 1", n)
+	}
+	if n := mediaCount(t, repo, "postmeta", "post_id = 9100"); n != 1 {
+		t.Errorf("page postmeta rows = %d, want 1", n)
+	}
+	if n := mediaCount(t, repo, "comments", `"comment_post_ID" = 9100`); n != 1 {
+		t.Errorf("page comments = %d, want 1", n)
+	}
+}
+
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }

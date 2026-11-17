@@ -526,9 +526,10 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   storage port (`PostDependentsPurger`).
   - **Delete cleanup.** Deleting a `post`, a `page` or a row of a registered
     type now runs these steps in order, and the first failure stops the
-    sequence: revisions and autosaves, then term detach, then (for a `post`
-    only) removal from `sticky_posts`, then the dependents purge, then the
-    nav-menu item purge (M19 PR 3), then the row delete.
+    sequence: revisions and autosaves, then term detach, then the
+    remaining-relationship purge (M20 PR 2), then (for a `post` only) removal
+    from `sticky_posts`, then the dependents purge, then the nav-menu item
+    purge (M19 PR 3), then the row delete.
     - *Terms.* The row's `term_relationships` are detached for `category` and
       `post_tag` (built-in `post` and `page`), for any registered taxonomy
       whose `object_types` names the type, and for a registered type's own
@@ -646,9 +647,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     (`RunPostMenuItemPurgerContract`). MySQL and PostgreSQL run when the
     `GRIMOIRE_TEST_*` DSNs are set, as CI does.
   - **Known gaps (PR 3).**
-    - Deleting a media item does not clean menu items.
-    - Relationships in unmanaged taxonomies stay on a deleted post.
-    - There is no trash and no restore.
+    - There is no trash and no restore. (The media-delete menu-item gap and the
+      unmanaged-taxonomy relationship gap listed here were closed in M20 PR 2.)
     - Term-side post meta, WordPress hooks and the object cache are not involved.
 - **M20 — Delete gap closure (PR 1):** child menu items and the menu count on
   delete. No schema change, no migration, no capability string.
@@ -680,11 +680,69 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     server-side because its menu tree builder hides items whose parent does not
     exist, so a dangling child would vanish from the rendered menu instead of
     showing at the top level.
-  - **Known gaps.**
-    - Deleting a media item does not clean menu items.
-    - Relationships in unmanaged taxonomies stay on a deleted post.
+  - **Known gaps.** The media-delete and unmanaged-taxonomy gaps were closed in
+    M20 PR 2 (below). Trash and restore, term-side post meta, WordPress hooks and
+    the object cache remain open.
+- **M20 — Delete gap closure (PR 2):** media delete cleanup and relationship
+  cleanup. No schema change, no migration, no capability string. One additive
+  storage port (`PostTermRelationshipPurger`, implemented by `PostRepo`) and one
+  exported variable (`domain.NonPostObjectTaxonomies`).
+  - **Post, page and registered-type delete: relationships.** The delete now
+    removes the row's `term_relationships` in **every** taxonomy except
+    `link_category`, then recounts `term_taxonomy.count` of each term it removed
+    a row from. This reaches taxonomies grimoire does not manage (for example
+    `product_cat`, `post_format`, or a taxonomy of an imported plugin), which the
+    managed-taxonomy detach does not.
+  - **Why `link_category` is excluded.** The step is a denylist, not an
+    allowlist, because grimoire cannot know which stored taxonomies apply to
+    posts. `link_category` relationships use `wp_links` ids as `object_id`, so
+    deleting a post whose id equals a link id would delete that link's
+    categories. `domain.NonPostObjectTaxonomies` is the only place that names it.
+    - *Residual risk.* A plugin taxonomy whose objects are not posts (and so
+      whose `object_id` is not a post id) is not on the denylist. Deleting a post
+      whose id collides with such an object's id removes that object's
+      relationships. Add the taxonomy to `NonPostObjectTaxonomies` if you run one.
+  - **Media delete.** `MediaRepo.Delete` runs one transaction that removes, in
+    order: menu items pointing at the attachment (type `post_type`, object
+    `attachment`), with their postmeta and relationships, children re-pointed to
+    the item's menu parent (the M20 PR 1 rule) and menu counts recomputed; the
+    `_thumbnail_id` postmeta rows on other posts that reference the attachment;
+    its comments and `commentmeta` (every approval state); its relationships in
+    every taxonomy except `link_category`, with recounts; any `term_relationships`
+    rows of the attachment whose `term_taxonomy` row no longer exists (orphans,
+    nothing to recount); its postmeta; and its `posts` row.
+  - **`post_type` guard.** The row delete is restricted to `post_type =
+    'attachment'`. An id that is a post, a page or unknown answers not found
+    (`404`) and the transaction rolls back, so none of the earlier steps persist.
+  - **Honest note on WordPress.** `wp_delete_attachment` and
+    `wp_delete_object_term_relationships` remove relationships only for the
+    taxonomies **registered** for that object type at that moment. Rows in a
+    taxonomy no plugin registers (for example a deactivated plugin's) stay in
+    WordPress. grimoire removes them, because it has no registry of every stored
+    taxonomy, so its result is a superset of WordPress's.
+  - **Delete sequence (post, page, registered type).** Revisions, managed term
+    detach, remaining-relationship purge, unstick (`post` only), dependents
+    purge, menu-item purge, row delete. The first failure stops the sequence, and
+    every step is idempotent, so a retry converges. With no purger configured the
+    relationship step is skipped.
+  - **Relationship-count rule.** Recounts set `term_taxonomy.count` to the true
+    number of relationships. WordPress counts only published posts for post
+    taxonomies (and published or draft menu items), so counts for imported rows in
+    other statuses can differ until WordPress recomputes them.
+  - **Verified on** SQLite, MySQL 8.0 and PostgreSQL 16 by shared contracts
+    (`RunPostTermRelationshipPurgerContract`, `RunMediaDeleteContract`). MySQL and
+    PostgreSQL run when the `GRIMOIRE_TEST_*` DSNs are set, as CI does.
+  - **Known gaps (M20 PR 2).**
     - There is no trash and no restore.
-    - Term-side post meta, WordPress hooks and the object cache are not involved.
+    - Theme mods that reference the attachment (`custom_logo`, `header_image` and
+      similar) are not cleared.
+    - The intermediate image-size files and the original file on disk are not
+      removed by the repository (the on-disk unlink is outside the transaction).
+    - Child attachments keep their `post_parent` pointing at the deleted
+      attachment; they are not re-pointed.
+    - WordPress hooks and the object cache are not involved.
+    - Published-only term counts (above), plugin taxonomies of non-post objects
+      (above), and the `sticky_posts` read-modify-write limit are unchanged.
 ## Public read guarantees
 
 - The **public** rendering path (unauthenticated `GET` routes) filters to

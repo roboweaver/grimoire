@@ -105,7 +105,8 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite), content.WithContentPolicy(contentPolicy),
 		content.WithPostRegistry(deps.Registry),
 		content.WithPostNodeReader(repos.PostNodeReader),
-		content.WithTermDetacher(repos.PostTermsWriter))
+		content.WithTermDetacher(repos.PostTermsWriter),
+		content.WithPostDependentsPurger(repos.PostDependents))
 	// mediaWrite backs the REST media write surface (POST/PATCH
 	// /wp-json/wp/v2/media). It layers capability-checked create/update over the
 	// existing media read/write service and the Media reader / MediaWriter ports,

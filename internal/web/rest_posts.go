@@ -266,7 +266,7 @@ type restPostWriteRequest struct {
 	Status        *string `json:"status"`
 	Date          *string `json:"date"`
 	CommentStatus *string `json:"comment_status"`
-	// Parent is honoured only for a registered custom type; nil leaves the
+	// Parent is honoured only for a page or a registered custom type; nil leaves the
 	// stored parent untouched, 0 makes the item top-level.
 	Parent *int64 `json:"parent"`
 }
@@ -304,7 +304,7 @@ func (s *Server) parseRESTPostWrite(body restPostWriteRequest, typ string, curre
 	if body.CommentStatus != nil {
 		p.CommentStatus = *body.CommentStatus
 	}
-	if body.Parent != nil && s.isRegisteredPostType(typ) && typ != "post" && typ != "page" {
+	if body.Parent != nil && (typ == "page" || (s.isRegisteredPostType(typ) && typ != "post")) {
 		p.ParentID = *body.Parent
 	}
 	if body.Status != nil {

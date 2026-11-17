@@ -69,6 +69,8 @@ type Set struct {
 	PageReader domain.PageReader // paginated page-graph read
 	// M12 additive post-type-parameterized node read port.
 	PostNodeReader domain.PostNodeReader
+	// Plan 18 additive port: deletes a post's comments/meta and re-points children.
+	PostDependents domain.PostDependentsPurger
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -205,6 +207,7 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 
 			PageReader:     posts,
 			PostNodeReader: posts,
+			PostDependents: posts,
 		},
 		db:    db,
 		bunDB: bunDB,

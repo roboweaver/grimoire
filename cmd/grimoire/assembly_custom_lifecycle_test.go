@@ -427,7 +427,7 @@ func lifecycleRows() []lifecycleRow {
 			l.want(l.do(&l.env.Contrib, http.MethodPost, lcProduct, fmt.Sprintf(`{"title":"X","status":"draft","genre":[%d]}`, g)),
 				http.StatusForbidden, "contributor assign")
 		}},
-		{13, "delete semantics: permanent, counts, children untouched", func(t *testing.T, l lifecycleHelper) {
+		{13, "delete semantics: permanent, counts, children re-pointed", func(t *testing.T, l lifecycleHelper) {
 			adm, cu := &l.env.Admin, &l.env.Curator
 			g := l.id(l.do(adm, http.MethodPost, lcGenre, `{"name":"DG"}`))
 			rec := l.do(cu, http.MethodPost, lcProduct, fmt.Sprintf(`{"title":"Del","status":"publish","genre":[%d]}`, g))
@@ -442,7 +442,7 @@ func lifecycleRows() []lifecycleRow {
 				t.Fatalf("count/rels after delete = %d/%d", l.termCount(g), l.rels(pid))
 			}
 			l.want(l.do(cu, http.MethodDelete, fmt.Sprintf("%s/%d", lcProduct, pid), ""), http.StatusNotFound, "delete again")
-			// Children keep post_parent and serve top-level (M15 orphan rule).
+			// Children are re-pointed to the deleted post's own parent (M18 Req 9.1/9.3).
 			root := l.id(l.do(cu, http.MethodPost, lcGuide, `{"title":"Par","status":"publish"}`))
 			kid := l.id(l.do(cu, http.MethodPost, lcGuide, fmt.Sprintf(`{"title":"Chi","status":"publish","parent":%d}`, root)))
 			l.want(l.do(cu, http.MethodDelete, fmt.Sprintf("%s/%d", lcGuide, root), ""), http.StatusOK, "delete parent")
@@ -451,8 +451,8 @@ func lifecycleRows() []lifecycleRow {
 				"SELECT post_parent FROM "+l.env.Prefix+"posts WHERE ID = ?", kid).Scan(&parent); err != nil {
 				t.Fatalf("read post_parent: %v", err)
 			}
-			if parent != root {
-				t.Fatalf("child post_parent = %d, want unchanged %d", parent, root)
+			if parent != 0 {
+				t.Fatalf("child post_parent = %d, want 0 (re-pointed to deleted post's parent)", parent)
 			}
 		}},
 		{14, "public and non-public types, nested path change", func(t *testing.T, l lifecycleHelper) {

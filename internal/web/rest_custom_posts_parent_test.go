@@ -152,8 +152,9 @@ func TestRESTCustomParentCycleAndAbsent(t *testing.T) {
 	}
 }
 
-// Req 11.9: `parent` on /posts and /pages bodies is ignored; stored parent kept.
-func TestRESTCustomParentIgnoredOnPostsAndPages(t *testing.T) {
+// Req 11.9: `parent` on /posts bodies is ignored; stored parent kept. (/pages
+// honours parent since the write-hardening milestone; see rest_pages_parent_test.go.)
+func TestRESTCustomParentIgnoredOnPosts(t *testing.T) {
 	e := newRCPWEnv(t)
 	h := e.handler(t, true, rcppCaps)
 	ctx := context.Background()
@@ -169,8 +170,6 @@ func TestRESTCustomParentIgnoredOnPostsAndPages(t *testing.T) {
 		}
 		return id
 	}
-	pageParent := mk("page", "pp-parent", 0)
-	page := mk("page", "pp-child", pageParent)
 	post := mk("post", "pp-post", e.guideID)
 
 	for _, c := range []struct {
@@ -178,7 +177,6 @@ func TestRESTCustomParentIgnoredOnPostsAndPages(t *testing.T) {
 		id   int64
 		want int64
 	}{
-		{"/wp-json/wp/v2/pages/" + strconv.FormatInt(page, 10), page, pageParent},
 		{"/wp-json/wp/v2/posts/" + strconv.FormatInt(post, 10), post, e.guideID},
 	} {
 		for _, body := range []string{`{"parent":0}`, `{"parent":999999}`} {

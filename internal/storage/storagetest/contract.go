@@ -400,6 +400,7 @@ func RunContract(t *testing.T, newRepos NewReposFunc) {
 	runPostContentBackfillContract(t, newRepos)
 	runPageReaderContract(t, newRepos)
 	runPostNodeReaderContract(t, newRepos)
+	runPostDependentsPurgerContract(t, newRepos)
 	runCustomTypeReadsContract(t, newRepos)
 }
 

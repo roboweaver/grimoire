@@ -344,7 +344,7 @@
 
 ## Phase 9 — Storage: the post-dependents port (`internal/domain`, `internal/storage`, TDD) — PR 2
 
-- [~] 9.1 Write the failing contract tests first. Add
+- [x] 9.1 Write the failing contract tests first. Add
       `internal/storage/storagetest/postdependents_contract.go` with
       `runPostDependentsPurgerContract(t, newRepos)` and register it in
       `contract.go` beside `runPostNodeReaderContract`. Seed through raw SQL
@@ -376,7 +376,7 @@
       (compile: `repos.PostDependents` and the port do not exist). _(Req 8.1-8.6,
       9.1-9.6, 10.3-10.7; D7, D12)_
 
-- [~] 9.2 Implement the port. In `internal/domain/repository.go` add
+- [x] 9.2 Implement the port. In `internal/domain/repository.go` add
       `PostDependentsPurger` as in `design.md` with its doc comment. Create
       `internal/storage/wprepo/postdependents.go` with `(*PostRepo)
       PurgePostDependents` in one `RunInTx` using raw statements in the style of
@@ -399,7 +399,7 @@
 
 ## Phase 10 — Content: the delete sequence (`internal/content`, TDD) — PR 2
 
-- [~] 10.1 Write the failing service tests first. Add
+- [x] 10.1 Write the failing service tests first. Add
       `internal/content/postdelete_cascade_test.go` over a call-recording
       `PostWriter` that also implements `RevisionWriter`, a recording
       `PostTermsWriter` (detacher) and a recording `PostDependentsPurger`, all
@@ -421,7 +421,7 @@
       `WithPostDependentsPurger` does not exist; once stubbed, a `post` delete logs
       no term detach). _(Req 7.1-7.6, 9.1, 9.3, 10.1, 10.2, 10.8)_
 
-- [~] 10.2 Implement the delete sequence. In `internal/content/writeservices.go`
+- [x] 10.2 Implement the delete sequence. In `internal/content/writeservices.go`
       add `WithPostDependentsPurger(domain.PostDependentsPurger) PostWriteOption`,
       the `purger` field, `deleteTaxonomies(typ)` and `hierarchicalType(typ)`, and
       rewrite the tail of `Delete`: revisions (existing), then every taxonomy of
@@ -436,7 +436,7 @@
 
 ## Phase 11 — Content: the page parent guard (`internal/content`, TDD) — PR 2
 
-- [~] 11.1 Write the failing service tests first. Add
+- [x] 11.1 Write the failing service tests first. Add
       `internal/content/pageparent_test.go` over an in-memory `PostWriter` plus
       `PostNodeReader` fake seeded with pages `A` (top), `B` (parent `A`), `C`
       (parent `B`), `D` (top, slug `x`), `E` (parent `A`, slug `x`), a post `P` and
@@ -460,7 +460,7 @@
       change is silently ignored, so every rejection case writes. _(Req 13.1-13.9;
       D8, D9)_
 
-- [~] 11.2 Implement the guard. In `internal/content/writeservices.go` add
+- [x] 11.2 Implement the guard. In `internal/content/writeservices.go` add
       `parentRules(typ)` (synthetic `registry.PostType{Name: "page",
       Hierarchical: true}` for `page`, else `registered`) and use it in `Create`
       and `Update` for the parent step only; add the uniqueness-only slug step
@@ -475,7 +475,7 @@
 
 ## Phase 12 — Web: page parent on REST and the admin API (`internal/web`, TDD) — PR 2
 
-- [~] 12.1 Write the failing handler tests first. Add
+- [x] 12.1 Write the failing handler tests first. Add
       `internal/web/rest_pages_parent_test.go` and
       `internal/web/adminapi_pages_parent_test.go` over real chi routers with the
       existing fake post services. REST: `POST /wp-json/wp/v2/pages` with `parent`
@@ -496,7 +496,7 @@
       receives the stored parent, not the requested one, on every page case.
       _(Req 11.1-11.7, 12.1-12.5)_
 
-- [~] 12.2 Implement the handler changes. In `internal/web/rest_posts.go`
+- [x] 12.2 Implement the handler changes. In `internal/web/rest_posts.go`
       `parseRESTPostWrite` replace the registered-only parent test with
       `typ == "page" || (s.isRegisteredPostType(typ) && typ != "post")`. In
       `internal/web/adminapi_posts.go` `parsePostWrite` compute the effective type
@@ -510,7 +510,7 @@
 
 ## Phase 13 — Assembly: wire PR 2 and drive it through `buildHandler` (`cmd/grimoire`, TDD) — PR 2
 
-- [~] 13.1 Write the failing assembly tests first. Add
+- [x] 13.1 Write the failing assembly tests first. Add
       `cmd/grimoire/assembly_hardening_delete_test.go` and
       `assembly_hardening_pageparent_test.go`. **Delete:** seed a published post
       with two category/tag assignments, three postmeta rows, comments in four
@@ -543,7 +543,7 @@
       purger; the page-parent test passes or fails per Phases 11-12 (the node
       reader is already wired). _(Req 7-14, 17.2, 17.3; D6, D8)_
 
-- [~] 13.2 Wire the purger. In `cmd/grimoire/assembly.go` add
+- [x] 13.2 Wire the purger. In `cmd/grimoire/assembly.go` add
       `content.WithPostDependentsPurger(repos.PostDependents)` to the
       `NewPostWriteService` call. No other assembly change: `WithTermDetacher` and
       `WithPostNodeReader` are already present.
@@ -557,7 +557,7 @@
 
 ## Phase 14 — Documentation for PR 2 (docs only) — PR 2
 
-- [~] 14.1 Update the documents to match PR 2. `docs/compatibility.md`: in the M17
+- [x] 14.1 Update the documents to match PR 2. `docs/compatibility.md`: in the M17
       section remove "Page `parent` writes are not part of this milestone", the
       sentence "built-in post and page deletion keeps its current behavior (no term
       cleanup, postmeta or comments left behind)" and the remaining clause of
@@ -587,7 +587,7 @@
 
 ## Phase 15 — PR 2 final gate
 
-- [~] 15.1 Final gate for PR 2. Confirm: no new file under
+- [x] 15.1 Final gate for PR 2. Confirm: no new file under
       `internal/storage/migrations` (Req 16.1); exactly one interface added to
       `internal/domain/repository.go` and no method added to an existing one
       (`git diff main -- internal/domain/repository.go` reviewed, 16.3); no new

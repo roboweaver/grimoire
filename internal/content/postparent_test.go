@@ -253,15 +253,14 @@ func TestPostParent_ForbiddenBeforeCycle(t *testing.T) {
 	}
 }
 
-// 11.9: post and page updates never change ParentID.
+// 11.9: post updates never change ParentID. (The page case moved to
+// pageparent_test.go in plan 18 task 11.2: a page's parent is now guarded.)
 func TestPostParent_BuiltinUpdatesKeepParent(t *testing.T) {
 	cases := []struct {
 		typ  string
 		caps []string
 	}{
 		{"post", pwcPostsOnly},
-		{"page", []string{"edit_pages", "publish_pages", "edit_others_pages",
-			"edit_published_pages", "delete_pages"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.typ, func(t *testing.T) {

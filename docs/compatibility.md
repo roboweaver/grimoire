@@ -479,24 +479,19 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   - **Parent.** A hierarchical post type accepts `parent` (REST and admin API; a
     non-hierarchical type rejects a non-zero parent), validated to exist, be of the same type, and not be the post or one of its
     descendants. A hierarchical taxonomy accepts term `parent` with the M13
-    cycle prevention. Page `parent` writes are not part of this milestone.
+    cycle prevention. Page `parent` writes arrived in M18 PR 2 (below).
   - **Term assignment.** REST post bodies for a registered type may carry
     arrays of term ids keyed by the taxonomy's `rest_base`; the admin API uses
     the `termIds` map keyed by taxonomy name. A taxonomy not attached to the
     type, or a term belonging to another taxonomy, is rejected (`400` on REST,
     a `partial` entry on the admin API).
-  - **Delete.** `DELETE` is a permanent delete, with no trash and no
-    re-parenting of children. For registered types the post's
-    `term_relationships` are detached first so term counts stay correct;
-    built-in post and page deletion keeps its current behavior (no term
-    cleanup, postmeta or comments left behind).
+  - **Delete.** `DELETE` is a permanent delete with no trash. The cleanup
+    performed on delete is described under M18 PR 2 below.
   - **Other behavior.** `public: false` types are writable: `public` governs
     the public route only. The admin API keeps the `edit_posts` floor, so a role
     holding only `edit_products` can use REST but not the admin API for that
     type. The publish scheduler also holds the derived capabilities, so a
     scheduled custom post publishes on time.
-  - **Known gaps.** A hierarchical post type's `parent` is writable, but page
-    `parent` is not (planned for PR 2 of M18).
 
 - **M18 — Write hardening (PR 1):** closes the M17 hole where stored rows of
   unmanaged types stayed writable. No schema change, no migration, no new
@@ -529,6 +524,48 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   - **Known gap.** Term update and delete are not yet gated on the taxonomy
     being registered, so a term of an unwritable taxonomy can still be edited
     by a holder of `manage_categories`. Still open.
+- **M18 — Write hardening (PR 2):** delete cleanup and page `parent` writes.
+  No schema change, no migration, no new capability string. One additive
+  storage port (`PostDependentsPurger`).
+  - **Delete cleanup.** Deleting a `post`, a `page` or a row of a registered
+    type now runs these steps in order, and the first failure stops the
+    sequence: revisions and autosaves, then term detach, then the dependents
+    purge, then the row delete.
+    - *Terms.* The row's `term_relationships` are detached for `category` and
+      `post_tag` (built-in `post` and `page`), for any registered taxonomy
+      whose `object_types` names the type, and for a registered type's own
+      `taxonomies`. Term counts are recounted by the detach.
+    - *Removed.* The row's `comments`, their `commentmeta`, and its `postmeta`.
+      Other posts' rows are untouched.
+    - *Re-pointed.* Child pages (and children of a registered hierarchical
+      type) and attachments get the deleted row's own `post_parent`, so a
+      child of a top-level page becomes top-level. Children of other types
+      keep their `post_parent`. `post_modified` is not changed.
+    - *Atomicity and retries.* The purge is one transaction. Every step before
+      the final delete is idempotent, so a retry after a failure converges.
+    - Delete stays permanent: there is no trash.
+  - **Page `parent`.** `parent` is writable on pages over REST
+    (`/wp-json/wp/v2/pages`) and the admin API. An admin update body without
+    `type` is treated as the stored row's type. `post` rows ignore `parent`.
+    - *Guard.* A parent that is the page itself or one of its descendants is
+      rejected (cycle), as is a parent that does not exist or is not a page.
+      Both answer `400` and leave the row unchanged. `parent: 0` makes the page
+      top-level. An update that does not change the parent skips the check.
+    - *Slug.* When a page is created under a parent or moved to a new parent,
+      a slug already used by a sibling gets a `-2`, `-3` suffix. An update that
+      does not change the parent keeps the caller's slug.
+    - *URLs.* The page's `link` is its nested path (`/a/b/`). A published page
+      requested at its old path answers `301` to the new one, a draft answers
+      `404` on both paths, and same-slug pages under different parents each
+      serve their own body.
+  - **Known gaps (PR 2).**
+    - REST page `parent` is omitted from the response when it is `0`
+      (`omitempty`), which keeps the built-in golden files byte-identical.
+      WordPress always sends `parent`, including `0`.
+    - `sticky_posts` is not updated when a post is deleted.
+    - Nav-menu items that reference a deleted post are not removed or updated.
+    - There is no trash.
+    - WordPress hooks and the object cache are not involved.
 
 ## Public read guarantees
 

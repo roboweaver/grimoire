@@ -116,3 +116,10 @@ func TestSQLitePostMenuItemPurgerContract(t *testing.T) {
 		return repos, "sqlite", "wp_", cleanup
 	})
 }
+
+func TestSQLiteNavMenuDeleteItemContract(t *testing.T) {
+	RunNavMenuDeleteItemContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}

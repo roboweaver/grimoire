@@ -294,9 +294,11 @@ type NavMenuWriter interface {
 	// Returns domain.ErrNotFound when itemID is not an item of menuID (Req 2.4).
 	UpdateItem(ctx context.Context, menuID, itemID int64, patch NavMenuItemPatch) error
 
-	// DeleteItem removes itemID's {prefix}posts row, its _menu_item_* postmeta,
-	// and its term_relationships row for menuID's term (Req 2.3, 6.3). Returns
-	// domain.ErrNotFound when itemID is not an item of menuID (Req 2.4).
+	// DeleteItem removes itemID's {prefix}posts row, its postmeta and its
+	// term_relationships rows (Req 2.3, 6.3). Children of itemID are
+	// re-parented to itemID's own menu parent (top level when it had none) and
+	// the affected term counts are recomputed. Returns domain.ErrNotFound when
+	// itemID is not an item of menuID (Req 2.4).
 	DeleteItem(ctx context.Context, menuID, itemID int64) error
 
 	// ItemBelongsToMenu reports whether itemID is a nav_menu_item linked to
@@ -684,7 +686,8 @@ type PostMenuItemPurger interface {
 	// _menu_item_object_id equals postID, together with each item's postmeta and
 	// term_relationships rows, then recomputes term_taxonomy.count of every
 	// nav_menu term taxonomy the items belonged to. No matching items is not an
-	// error and the post row need not exist. It changes no other row, including
-	// other menu items' _menu_item_menu_item_parent.
+	// error and the post row need not exist. Children of a deleted item get the
+	// deleted item's menu parent (0 when it had none, or when that parent is
+	// itself deleted, the nearest surviving ancestor); nothing else changes.
 	PurgeMenuItemsOf(ctx context.Context, postID int64, objectType string) error
 }

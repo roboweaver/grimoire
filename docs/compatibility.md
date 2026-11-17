@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M12, M17-M19)
+# WordPress Compatibility (M1-M12, M17-M20)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -625,7 +625,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   storage port (`PostMenuItemPurger`, implemented by `PostRepo`).
   - **What is deleted.** Deleting a `post`, a `page` or a row of a registered
     type deletes the `nav_menu_item` rows that point at it, with each item's
-    `postmeta` and its `term_relationships`.
+    `postmeta` and its `term_relationships`. Children of a deleted item are
+    re-pointed to the item's own menu parent (M20 PR 1, below).
   - **What matches.** An item matches when its row type is `nav_menu_item`,
     `_menu_item_type` is `post_type`, `_menu_item_object` equals the deleted
     row's type and `_menu_item_object_id` equals its id. Items for taxonomy
@@ -645,9 +646,41 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     (`RunPostMenuItemPurgerContract`). MySQL and PostgreSQL run when the
     `GRIMOIRE_TEST_*` DSNs are set, as CI does.
   - **Known gaps (PR 3).**
-    - Child menu items keep a dangling `_menu_item_menu_item_parent` that points
-      at a deleted item. The menu editor's item delete does the same.
-    - `NavMenuRepo.DeleteItem` does not recount the menu's `count`.
+    - Deleting a media item does not clean menu items.
+    - Relationships in unmanaged taxonomies stay on a deleted post.
+    - There is no trash and no restore.
+    - Term-side post meta, WordPress hooks and the object cache are not involved.
+- **M20 — Delete gap closure (PR 1):** child menu items and the menu count on
+  delete. No schema change, no migration, no capability string.
+  - **Children are re-pointed.** When a menu item is deleted, every
+    `nav_menu_item` whose `_menu_item_menu_item_parent` equals the deleted id
+    gets the deleted item's own menu parent. A child of a top-level item
+    becomes top-level (`0`). A deleted item whose own parent value is absent,
+    non-numeric, negative or its own id counts as top-level.
+  - **Both paths.** The same helper runs when a page, post or registered-type
+    row is deleted (the M19 PR 3 purge) and when the menu editor deletes an
+    item (`NavMenuRepo.DeleteItem`).
+  - **Chains.** Items are handled one at a time, in ascending id order. Each
+    deletion re-points that item's children first, and the next deletion reads
+    the parent value as already updated. When a whole chain (A, then B under A,
+    then C under B) is deleted, a surviving child ends up under the nearest
+    surviving ancestor, or at top level if none survives.
+  - **Menu count.** `NavMenuRepo.DeleteItem` now recounts `term_taxonomy.count`
+    of the menus the item belonged to, using the same relationship-count rule
+    as the purge (true number of relationships; WordPress counts only published
+    and draft items, so counts for imported items in other statuses can differ
+    until WordPress recomputes them).
+  - **Transaction and retries.** The re-point, the item delete and the recount
+    share one transaction, so a failure leaves nothing half done. A repeat
+    finds no matching children or items and changes nothing.
+  - **Why grimoire does this.** WordPress core does **not** re-parent children
+    on the server: deleting a menu item with `wp_delete_post` leaves the
+    children's parent meta pointing at the deleted id. Only the nav-menus
+    editor's JavaScript re-parents them, before saving. grimoire does it
+    server-side because its menu tree builder hides items whose parent does not
+    exist, so a dangling child would vanish from the rendered menu instead of
+    showing at the top level.
+  - **Known gaps.**
     - Deleting a media item does not clean menu items.
     - Relationships in unmanaged taxonomies stay on a deleted post.
     - There is no trash and no restore.

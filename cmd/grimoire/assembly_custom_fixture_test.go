@@ -106,6 +106,14 @@ func capsFor(suffixes ...string) []string {
 // withRegistry selects the five-entry registry or none.
 func newCustomWriteHandler(t *testing.T, withRegistry bool) customWriteEnv {
 	t.Helper()
+	return newCustomWriteHandlerWith(t, withRegistry, nil)
+}
+
+// newCustomWriteHandlerWith is newCustomWriteHandler with a hook that may
+// replace ports on the repositories before the handler is built (M18 task 13.1
+// swaps in a failing purger). A nil hook changes nothing.
+func newCustomWriteHandlerWith(t *testing.T, withRegistry bool, mutate func(*storage.Repositories)) customWriteEnv {
+	t.Helper()
 	ctx := context.Background()
 	repos, dbCfg := newAssemblySQLite(t)
 	users := content.NewUserService(repos.Users, repos.UserMeta, dbCfg.TablePrefix)
@@ -128,6 +136,9 @@ func newCustomWriteHandler(t *testing.T, withRegistry bool) customWriteEnv {
 	var reg *registry.Registry
 	if withRegistry {
 		reg = customWriteRegistry(t)
+	}
+	if mutate != nil {
+		mutate(repos)
 	}
 	handler, sm := assemblyHandler(t, repos, dbCfg, reg)
 	login := func(name string) customWriteActor {

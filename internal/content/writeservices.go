@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -93,6 +94,9 @@ type PostWriteService struct {
 	reg      *registry.Registry
 	nodes    domain.PostNodeReader
 	detacher domain.PostTermsWriter
+	// purger removes a deleted post's dependents (comments, meta) and
+	// re-points its children. Optional; nil skips the purge step.
+	purger domain.PostDependentsPurger
 }
 
 // ErrSlugInvalid is returned when a registered-type post slug does not match
@@ -173,6 +177,55 @@ func WithTermDetacher(w domain.PostTermsWriter) PostWriteOption {
 	return func(s *PostWriteService) { s.detacher = w }
 }
 
+// WithPostDependentsPurger wires the port that removes a deleted post's
+// comments and meta and re-points its children before the row is deleted.
+func WithPostDependentsPurger(p domain.PostDependentsPurger) PostWriteOption {
+	return func(s *PostWriteService) { s.purger = p }
+}
+
+// deleteTaxonomies returns the taxonomies whose relationships are detached
+// when a row of typ is deleted, without duplicates. Built-in post and page
+// get category and post_tag, then every registered taxonomy whose ObjectTypes
+// names typ. A registered type gets its effective Taxonomies.
+func (s *PostWriteService) deleteTaxonomies(typ string) []string {
+	var out []string
+	add := func(n string) {
+		if !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	if pt, ok := s.registered(typ); ok {
+		for _, n := range pt.Taxonomies {
+			add(n)
+		}
+		return out
+	}
+	if typ == "post" || typ == "page" {
+		add("category")
+		add("post_tag")
+		if s.reg != nil {
+			for _, t := range s.reg.Taxonomies() {
+				if slices.Contains(t.ObjectTypes, typ) {
+					add(t.Name)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// hierarchicalType returns the type whose children are re-parented when a row
+// of typ is deleted: "page", a registered hierarchical type, else "".
+func (s *PostWriteService) hierarchicalType(typ string) string {
+	if typ == "page" {
+		return "page"
+	}
+	if pt, ok := s.registered(typ); ok && pt.Hierarchical {
+		return typ
+	}
+	return ""
+}
+
 // registered returns the registry entry for typ. Built-in types are never
 // registered (the registry reserves their names).
 func (s *PostWriteService) registered(typ string) (registry.PostType, bool) {
@@ -180,6 +233,35 @@ func (s *PostWriteService) registered(typ string) (registry.PostType, bool) {
 		return registry.PostType{}, false
 	}
 	return s.reg.PostType(typ)
+}
+
+// parentRules returns the parent rules for typ: a synthetic hierarchical type
+// for the built-in page, else the registered type. Used only for the parent
+// step; slug charset and detach branches keep using registered, so page never
+// enters the charset path.
+func (s *PostWriteService) parentRules(typ string) (registry.PostType, bool) {
+	if typ == "page" {
+		return registry.PostType{Name: "page", Hierarchical: true}, true
+	}
+	return s.registered(typ)
+}
+
+// uniquePageSlug suffixes slug (-2, -3, ...) until it is free among the
+// siblings under parent. No charset rule applies. selfID excludes the page
+// being updated. Without a node reader the slug is returned unchanged.
+func (s *PostWriteService) uniquePageSlug(ctx context.Context, slug string, parent, selfID int64) (string, error) {
+	if s.nodes == nil {
+		return slug, nil
+	}
+	nodes, err := loadPostNodes(ctx, s.nodes, "page")
+	if err != nil {
+		return "", err
+	}
+	cand := slug
+	for n := 2; slugTaken(nodes, cand, true, parent, selfID); n++ {
+		cand = slug + "-" + strconv.Itoa(n)
+	}
+	return cand, nil
 }
 
 // WritableType reports whether this service may modify a stored row of typ.
@@ -300,9 +382,19 @@ func (s *PostWriteService) Create(ctx context.Context, actor auth.Principal, p d
 	p.Title = clean.Title
 	p.Content = clean.Content
 	p.Excerpt = clean.Excerpt
-	if pt, ok := s.registered(p.Type); ok {
+	if pt, ok := s.parentRules(p.Type); ok {
 		if err := s.validatePostParent(ctx, pt, 0, p.ParentID); err != nil {
 			return 0, err
+		}
+		if p.Type == "page" {
+			if p.ParentID != 0 {
+				slug, err := s.uniquePageSlug(ctx, p.Slug, p.ParentID, 0)
+				if err != nil {
+					return 0, err
+				}
+				p.Slug = slug
+			}
+			return s.w.Create(ctx, p)
 		}
 		slug, err := s.resolveSlug(ctx, pt, p.Slug, p.Title, p.ParentID, 0)
 		if err != nil {
@@ -417,18 +509,29 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 	cur.Content = clean.Content
 	cur.Excerpt = clean.Excerpt
 	cur.Slug = p.Slug
-	if pt, ok := s.registered(cur.Type); ok {
-		if p.ParentID != cur.ParentID {
+	if pt, ok := s.parentRules(cur.Type); ok {
+		moved := p.ParentID != cur.ParentID
+		if moved {
 			if err := s.validatePostParent(ctx, pt, cur.ID, p.ParentID); err != nil {
 				return err
 			}
 			cur.ParentID = p.ParentID
 		}
-		slug, err := s.resolveSlug(ctx, pt, p.Slug, cur.Title, cur.ParentID, cur.ID)
-		if err != nil {
-			return err
+		if cur.Type == "page" {
+			if moved {
+				slug, err := s.uniquePageSlug(ctx, p.Slug, cur.ParentID, cur.ID)
+				if err != nil {
+					return err
+				}
+				cur.Slug = slug
+			}
+		} else {
+			slug, err := s.resolveSlug(ctx, pt, p.Slug, cur.Title, cur.ParentID, cur.ID)
+			if err != nil {
+				return err
+			}
+			cur.Slug = slug
 		}
-		cur.Slug = slug
 	}
 	cur.CommentStatus = p.CommentStatus
 	if !p.Date.IsZero() && !p.Date.Equal(cur.Date) {
@@ -461,6 +564,12 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 // ensures a cleanup failure leaves the parent intact rather than orphaning its
 // revision/autosave rows (Req 1.6). A type assertion keeps pre-M7 callers that
 // only provide PostWriter unaffected.
+//
+// The full order is: revisions, term detach (deleteTaxonomies, via the
+// detacher when configured), dependents purge (via the purger when configured,
+// with the row's own parent id and hierarchicalType), then the row delete. The
+// first failing step returns its error and later steps do not run. Every
+// earlier step is idempotent, so a retry after a failure converges.
 func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p domain.Post) error {
 	cur, err := s.w.ByID(ctx, p.ID)
 	if err != nil {
@@ -483,11 +592,16 @@ func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p d
 			return err
 		}
 	}
-	if pt, ok := s.registered(cur.Type); ok && s.detacher != nil {
-		for _, tax := range pt.Taxonomies {
+	if s.detacher != nil {
+		for _, tax := range s.deleteTaxonomies(cur.Type) {
 			if err := s.detacher.SetPostTerms(ctx, cur.ID, tax, nil); err != nil {
 				return err
 			}
+		}
+	}
+	if s.purger != nil {
+		if err := s.purger.PurgePostDependents(ctx, cur.ID, cur.ParentID, s.hierarchicalType(cur.Type)); err != nil {
+			return err
 		}
 	}
 	return s.w.Delete(ctx, cur.ID)

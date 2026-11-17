@@ -149,7 +149,11 @@ func (s *Server) parsePostWrite(body postWriteRequest, current *domain.Post) (do
 	if current != nil {
 		parent = current.ParentID
 	}
-	if body.Parent != nil && typ != "post" && typ != "page" {
+	effective := typ
+	if current != nil {
+		effective = current.Type
+	}
+	if body.Parent != nil && (effective == "page" || (effective != "post" && s.isRegisteredPostType(effective))) {
 		parent = *body.Parent
 	}
 	return domain.Post{
@@ -183,7 +187,7 @@ func (s *Server) postDetail(ctx context.Context, p domain.Post) (postDetailRespo
 		return postDetailResponse{}, err
 	}
 	var parent int64
-	if p.Type != "post" && p.Type != "page" && s.isRegisteredPostType(p.Type) {
+	if p.Type == "page" || (p.Type != "post" && s.isRegisteredPostType(p.Type)) {
 		parent = p.ParentID
 	}
 	return postDetailResponse{

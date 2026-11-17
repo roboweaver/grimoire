@@ -604,12 +604,13 @@ func TestPostWriteCustom_DetachFailureLeavesRow(t *testing.T) {
 	}
 }
 
-func TestPostWriteCustom_BuiltinDeleteDoesNotDetach(t *testing.T) {
+// Superseded behavior (plan 18, Req 7.1): built-in deletes now detach
+// category and post_tag; this guards that they still delete cleanly.
+func TestPostWriteCustom_BuiltinDeleteDetachesBuiltinTaxonomies(t *testing.T) {
 	f := newPwcFake(
 		domain.Post{ID: 10, Type: "post", Slug: "a", Status: "draft", Author: 5},
 		domain.Post{ID: 11, Type: "page", Slug: "b", Status: "draft", Author: 5},
 	)
-	f.detachErr = errors.New("detacher must not be called for built-ins")
 	svc := pwcService(t, f)
 	actor := pwcActor(5, "delete_posts", "delete_pages")
 	for _, id := range []int64{10, 11} {
@@ -617,9 +618,7 @@ func TestPostWriteCustom_BuiltinDeleteDoesNotDetach(t *testing.T) {
 			t.Fatalf("Delete %d: %v", id, err)
 		}
 	}
-	for _, e := range f.log {
-		if strings.HasPrefix(e, "terms:") {
-			t.Fatalf("built-in delete detached terms: %v", f.log)
-		}
+	if len(f.deletes) != 2 {
+		t.Fatalf("deletes = %v, want both rows", f.deletes)
 	}
 }

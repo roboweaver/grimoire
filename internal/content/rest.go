@@ -96,6 +96,9 @@ type RESTPost struct {
 // rather than present-but-empty (Req 2.2).
 type RESTPage struct {
 	restItemCommon
+	// Parent is the page's post_parent id (M18 Req 11.1). It is omitted for a
+	// top-level page so the pre-M18 shape of existing pages is unchanged.
+	Parent int64 `json:"parent,omitempty"`
 }
 
 // RESTComment is the WordPress REST shape for a wp/v2/comments item
@@ -374,7 +377,7 @@ func (m *RESTMapper) Page(ctx context.Context, p domain.Post) (RESTPage, error) 
 	if err != nil {
 		return RESTPage{}, err
 	}
-	return RESTPage{restItemCommon: m.restCommon(ctx, p, featured)}, nil
+	return RESTPage{restItemCommon: m.restCommon(ctx, p, featured), Parent: p.ParentID}, nil
 }
 
 // RESTCustomPost is the REST shape for an item of a registered custom post

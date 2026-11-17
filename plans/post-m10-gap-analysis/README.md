@@ -63,15 +63,20 @@ Delivered across PRs #75, #76, #77.
 delete for registered custom post types and taxonomies, with capabilities
 derived from `capability_type`, sanitization, slug and `parent` guards, term
 assignment and delete cleanup (`plans/17-custom-types-write`).
-**Still deferred after M17:** page `parent` has no write path; built-in post
-delete does not clean up `term_relationships`, counts, postmeta or comments;
-delete is permanent, with no trash or child re-parenting.
+**Still deferred after M17:** delete is permanent, with no trash.
 **Shipped in M18 (PR 1, `plans/18-write-hardening`):** stored rows of types not
 registered under `content:` are unwritable (`403` on the admin API, `404` for
 revisions and autosave), the scheduler skips them, revisions and autosave honor
 `capability_type`, and term names of every taxonomy are reduced to plain text on
 write (an unchanged name is stored as is). Still open: unwritable taxonomies on
 term update and delete.
+**Shipped in M18 (PR 2, `plans/18-write-hardening`):** deleting a post or page
+detaches its terms (counts recounted), deletes its comments, commentmeta and
+postmeta, and re-points child pages and attachments to the deleted row's parent.
+Page `parent` is writable over REST and the admin API with a cycle and type
+guard, and a page's slug is suffixed on a parent change. Honest gaps: REST page
+`parent` is omitted when `0` (WordPress always sends it); `sticky_posts`,
+nav-menu items that reference a deleted post, and trash remain unhandled.
 **M15 follow-up (found while building M12) — fixed in PR #79.** M15's
 `PageService.Resolve` confirmed the leaf with `BySlug(leaf.Slug)`, which was
 ambiguous for same-slug leaves under different parents, and its recovery path

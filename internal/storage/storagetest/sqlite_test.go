@@ -102,3 +102,10 @@ func TestSQLiteMediaWriteMetaContract(t *testing.T) {
 		return repos, "sqlite", "wp_", cleanup
 	})
 }
+
+func TestSQLitePostDependentsPurgerContract(t *testing.T) {
+	RunPostDependentsPurgerContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}

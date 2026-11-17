@@ -657,3 +657,20 @@ type OptionWriter interface {
 	// Delete removes an option by name, or ErrNotFound.
 	Delete(ctx context.Context, name string) error
 }
+
+// PostDependentsPurger removes the rows that depend on a post and re-points the
+// rows that name it as their parent, mirroring the parts of wp_delete_post that
+// the existing ports cannot reach. It never deletes the post row itself.
+type PostDependentsPurger interface {
+	// PurgePostDependents, in one transaction:
+	//  1. when reparentType != "": UPDATE posts SET post_parent = parentID
+	//     WHERE post_parent = postID AND post_type = reparentType;
+	//  2. UPDATE posts SET post_parent = parentID
+	//     WHERE post_parent = postID AND post_type = 'attachment';
+	//  3. DELETE commentmeta rows of comments with comment_post_ID = postID;
+	//  4. DELETE comments with comment_post_ID = postID (every comment_approved state);
+	//  5. DELETE postmeta with post_id = postID.
+	// Neither update touches post_modified. No dependents is not an error and
+	// the post row need not exist.
+	PurgePostDependents(ctx context.Context, postID, parentID int64, reparentType string) error
+}

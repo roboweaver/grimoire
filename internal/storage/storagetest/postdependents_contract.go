@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"reflect"
-	"strings"
 	"testing"
 
+	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/storage/rebind"
 )
 
@@ -35,46 +35,46 @@ var pdPostCols = []string{
 	"menu_order", "post_modified", "post_modified_gmt", "guid",
 }
 
-// runPostDependentsPurgerContract covers PostDependentsPurger.PurgePostDependents:
+// RunPostDependentsPurgerContract covers PostDependentsPurger.PurgePostDependents:
 // children and attachments are re-pointed to the grandparent (Req 9), the post's
 // comments, commentmeta and postmeta are deleted (Req 8), the post itself and
 // every other post's rows are left alone, and the call is idempotent (Req 10).
 // Atomicity (Req 8.5, 9.5) has no portable failure injection and is covered on
 // SQLite in internal/storage/wprepo/postdependents_test.go.
-func runPostDependentsPurgerContract(t *testing.T, newRepos NewReposFunc) {
+func RunPostDependentsPurgerContract(t *testing.T, newRepos NewReposWithPrefixFunc) {
 	t.Helper()
 	ctx := context.Background()
 
 	// setup builds a fresh backend and seeds the page tree and its dependents.
-	setup := func(t *testing.T) (db *sql.DB, vendor string, purge func(postID, parentID int64, reparentType string) error, cleanup func()) {
+	setup := func(t *testing.T) (db *sql.DB, vendor, prefix string, purge func(postID, parentID int64, reparentType string) error, cleanup func()) {
 		t.Helper()
-		repos, cl := newRepos(t)
+		var repos *storage.Repositories
+		repos, vendor, prefix, cleanup = newRepos(t)
 		db = repos.DB()
-		vendor = detectVendor(ctx, t, db)
-		seedPostDependents(ctx, t, db, vendor)
+		seedPostDependents(ctx, t, db, vendor, prefix)
 		purge = func(postID, parentID int64, reparentType string) error {
 			return repos.PostDependents.PurgePostDependents(ctx, postID, parentID, reparentType)
 		}
-		return db, vendor, purge, cl
+		return db, vendor, prefix, purge, cleanup
 	}
 
 	t.Run("re-points child pages and attachments to the grandparent and leaves other types", func(t *testing.T) {
-		db, vendor, purge, cleanup := setup(t)
+		db, vendor, prefix, purge, cleanup := setup(t)
 		defer cleanup()
-		beforeA := pdSnapshot(ctx, t, db, vendor, pdChildA)
-		beforeB := pdSnapshot(ctx, t, db, vendor, pdChildB)
-		beforeAtt := pdSnapshot(ctx, t, db, vendor, pdAttach)
-		beforePost := pdSnapshot(ctx, t, db, vendor, pdChildPst)
+		beforeA := pdSnapshot(ctx, t, db, vendor, prefix, pdChildA)
+		beforeB := pdSnapshot(ctx, t, db, vendor, prefix, pdChildB)
+		beforeAtt := pdSnapshot(ctx, t, db, vendor, prefix, pdAttach)
+		beforePost := pdSnapshot(ctx, t, db, vendor, prefix, pdChildPst)
 
 		if err := purge(pdP, pdG, "page"); err != nil {
 			t.Fatalf("PurgePostDependents: %v", err)
 		}
 		for name, id := range map[string]int64{"child page A": pdChildA, "child page B": pdChildB, "attachment": pdAttach} {
-			if got := pdParent(ctx, t, db, vendor, id); got != pdG {
+			if got := pdParent(ctx, t, db, vendor, prefix, id); got != pdG {
 				t.Errorf("%s post_parent = %d, want %d (grandparent)", name, got, pdG)
 			}
 		}
-		if got := pdParent(ctx, t, db, vendor, pdChildPst); got != pdP {
+		if got := pdParent(ctx, t, db, vendor, prefix, pdChildPst); got != pdP {
 			t.Errorf("child post of another type post_parent = %d, want %d (unchanged)", got, pdP)
 		}
 		// Req 9.4: every other column, post_modified included, is unchanged.
@@ -82,94 +82,94 @@ func runPostDependentsPurgerContract(t *testing.T, newRepos NewReposFunc) {
 			id     int64
 			before []any
 		}{"child page A": {pdChildA, beforeA}, "child page B": {pdChildB, beforeB}, "attachment": {pdAttach, beforeAtt}, "child post": {pdChildPst, beforePost}} {
-			if after := pdSnapshot(ctx, t, db, vendor, c.id); !reflect.DeepEqual(after, c.before) {
+			if after := pdSnapshot(ctx, t, db, vendor, prefix, c.id); !reflect.DeepEqual(after, c.before) {
 				t.Errorf("%s columns changed:\n before %v\n after  %v", name, c.before, after)
 			}
 		}
-		if got := pdParent(ctx, t, db, vendor, pdQChild); got != pdQ {
+		if got := pdParent(ctx, t, db, vendor, prefix, pdQChild); got != pdQ {
 			t.Errorf("unrelated page's child post_parent = %d, want %d", got, pdQ)
 		}
 	})
 
 	t.Run("deletes the post's comments, commentmeta and postmeta only", func(t *testing.T) {
-		db, vendor, purge, cleanup := setup(t)
+		db, vendor, prefix, purge, cleanup := setup(t)
 		defer cleanup()
-		if n := pdCommentCount(ctx, t, db, vendor, pdP); n != 4 {
+		if n := pdCommentCount(ctx, t, db, vendor, prefix, pdP); n != 4 {
 			t.Fatalf("seed: comments of P = %d, want 4", n)
 		}
 		if err := purge(pdP, pdG, "page"); err != nil {
 			t.Fatalf("PurgePostDependents: %v", err)
 		}
-		if n := pdCommentCount(ctx, t, db, vendor, pdP); n != 0 {
+		if n := pdCommentCount(ctx, t, db, vendor, prefix, pdP); n != 0 {
 			t.Errorf("comments of P = %d, want 0 (every approval state)", n)
 		}
-		if n := pdCommentMetaCount(ctx, t, db, vendor, pdP); n != 0 {
+		if n := pdCommentMetaCount(ctx, t, db, vendor, prefix, pdP); n != 0 {
 			t.Errorf("commentmeta of P's comments = %d, want 0", n)
 		}
-		if n := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM wp_postmeta WHERE post_id = ?`, pdP); n != 0 {
+		if n := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`postmeta WHERE post_id = ?`, pdP); n != 0 {
 			t.Errorf("postmeta of P = %d, want 0", n)
 		}
 		// Q is untouched.
-		if n := pdCommentCount(ctx, t, db, vendor, pdQ); n != 1 {
+		if n := pdCommentCount(ctx, t, db, vendor, prefix, pdQ); n != 1 {
 			t.Errorf("comments of Q = %d, want 1", n)
 		}
-		if n := pdCommentMetaCount(ctx, t, db, vendor, pdQ); n != 1 {
+		if n := pdCommentMetaCount(ctx, t, db, vendor, prefix, pdQ); n != 1 {
 			t.Errorf("commentmeta of Q's comments = %d, want 1", n)
 		}
-		if n := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM wp_postmeta WHERE post_id = ?`, pdQ); n != 1 {
+		if n := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`postmeta WHERE post_id = ?`, pdQ); n != 1 {
 			t.Errorf("postmeta of Q = %d, want 1", n)
 		}
 		// The base fixtures' comments and commentmeta are untouched too.
-		if n := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM wp_commentmeta WHERE comment_id NOT IN (9201, 9202, 9203, 9204)`); n < 1 {
+		if n := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`commentmeta WHERE comment_id NOT IN (9201, 9202, 9203, 9204)`); n < 1 {
 			t.Errorf("commentmeta outside P = %d, want the fixtures' rows to remain", n)
 		}
 	})
 
 	t.Run("the purged post itself still exists", func(t *testing.T) {
-		db, vendor, purge, cleanup := setup(t)
+		db, vendor, prefix, purge, cleanup := setup(t)
 		defer cleanup()
 		if err := purge(pdP, pdG, "page"); err != nil {
 			t.Fatalf("PurgePostDependents: %v", err)
 		}
-		if n := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM wp_posts WHERE `+rebind.Ident(vendor, "ID")+` = ?`, pdP); n != 1 {
+		if n := pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`posts WHERE `+rebind.Ident(vendor, "ID")+` = ?`, pdP); n != 1 {
 			t.Errorf("post P rows = %d, want 1 (the purge never deletes the post)", n)
 		}
 	})
 
 	t.Run("empty reparentType keeps child pages and still re-points attachments", func(t *testing.T) {
-		db, vendor, purge, cleanup := setup(t)
+		db, vendor, prefix, purge, cleanup := setup(t)
 		defer cleanup()
 		if err := purge(pdP, pdG, ""); err != nil {
 			t.Fatalf("PurgePostDependents: %v", err)
 		}
 		for name, id := range map[string]int64{"child page A": pdChildA, "child page B": pdChildB} {
-			if got := pdParent(ctx, t, db, vendor, id); got != pdP {
+			if got := pdParent(ctx, t, db, vendor, prefix, id); got != pdP {
 				t.Errorf("%s post_parent = %d, want %d (kept, no reparent type)", name, got, pdP)
 			}
 		}
-		if got := pdParent(ctx, t, db, vendor, pdAttach); got != pdG {
+		if got := pdParent(ctx, t, db, vendor, prefix, pdAttach); got != pdG {
 			t.Errorf("attachment post_parent = %d, want %d (always re-pointed)", got, pdG)
 		}
-		if n := pdCommentCount(ctx, t, db, vendor, pdP); n != 0 {
+		if n := pdCommentCount(ctx, t, db, vendor, prefix, pdP); n != 0 {
 			t.Errorf("comments of P = %d, want 0 (dependents still purged)", n)
 		}
 	})
 
 	t.Run("parent 0 re-points to the top level", func(t *testing.T) {
-		db, vendor, purge, cleanup := setup(t)
+		db, vendor, prefix, purge, cleanup := setup(t)
 		defer cleanup()
 		if err := purge(pdP, 0, "page"); err != nil {
 			t.Fatalf("PurgePostDependents: %v", err)
 		}
 		for name, id := range map[string]int64{"child page A": pdChildA, "child page B": pdChildB, "attachment": pdAttach} {
-			if got := pdParent(ctx, t, db, vendor, id); got != 0 {
+			if got := pdParent(ctx, t, db, vendor, prefix, id); got != 0 {
 				t.Errorf("%s post_parent = %d, want 0", name, got)
 			}
 		}
 	})
 
 	t.Run("no dependents and nonexistent id both return nil", func(t *testing.T) {
-		_, _, purge, cleanup := setup(t)
+		_, _, _, purge, cleanup := setup(t)
 		defer cleanup()
 		// pdQChild is a leaf page with no children, comments or meta of its own.
 		if err := purge(pdQChild, pdQ, "page"); err != nil {
@@ -181,7 +181,7 @@ func runPostDependentsPurgerContract(t *testing.T, newRepos NewReposFunc) {
 	})
 
 	t.Run("calling the same purge twice succeeds", func(t *testing.T) {
-		db, vendor, purge, cleanup := setup(t)
+		db, vendor, prefix, purge, cleanup := setup(t)
 		defer cleanup()
 		if err := purge(pdP, pdG, "page"); err != nil {
 			t.Fatalf("first PurgePostDependents: %v", err)
@@ -189,31 +189,13 @@ func runPostDependentsPurgerContract(t *testing.T, newRepos NewReposFunc) {
 		if err := purge(pdP, pdG, "page"); err != nil {
 			t.Fatalf("second PurgePostDependents: %v", err)
 		}
-		if got := pdParent(ctx, t, db, vendor, pdChildA); got != pdG {
+		if got := pdParent(ctx, t, db, vendor, prefix, pdChildA); got != pdG {
 			t.Errorf("child page A post_parent after repeat = %d, want %d", got, pdG)
 		}
-		if n := pdCommentCount(ctx, t, db, vendor, pdP); n != 0 {
+		if n := pdCommentCount(ctx, t, db, vendor, prefix, pdP); n != 0 {
 			t.Errorf("comments of P after repeat = %d, want 0", n)
 		}
 	})
-}
-
-// detectVendor identifies the engine behind db. The contract signature carries
-// only a NewReposFunc, and the raw seed SQL needs the vendor for identifier
-// quoting and placeholder style, so it is probed rather than passed in.
-func detectVendor(ctx context.Context, t *testing.T, db *sql.DB) string {
-	t.Helper()
-	var v string
-	if err := db.QueryRowContext(ctx, `SELECT sqlite_version()`).Scan(&v); err == nil {
-		return "sqlite"
-	}
-	if err := db.QueryRowContext(ctx, `SELECT version()`).Scan(&v); err != nil {
-		t.Fatalf("detect vendor: %v", err)
-	}
-	if strings.Contains(strings.ToLower(v), "postgres") {
-		return "postgres"
-	}
-	return "mysql"
 }
 
 // seedPostDependents inserts the page tree and dependents described by the
@@ -221,7 +203,7 @@ func detectVendor(ctx context.Context, t *testing.T, db *sql.DB) string {
 // comments (approved 1, 0, spam, trash) each with commentmeta, and three
 // postmeta rows; plus an unrelated page Q with a child, a comment, a commentmeta
 // row and a postmeta row.
-func seedPostDependents(ctx context.Context, t *testing.T, db *sql.DB, vendor string) {
+func seedPostDependents(ctx context.Context, t *testing.T, db *sql.DB, vendor, prefix string) {
 	t.Helper()
 	exec := func(q string, args ...any) {
 		t.Helper()
@@ -231,8 +213,8 @@ func seedPostDependents(ctx context.Context, t *testing.T, db *sql.DB, vendor st
 	}
 	post := func(id int64, slug, ptype string, parent int64, mime string) {
 		t.Helper()
-		exec(postInsert(vendor, "wp_"), postArgs(id, slug, "T "+slug, ptype, "publish", "2000-01-01 00:00:00", "open", parent, mime, 7)...)
-		exec(`UPDATE wp_posts SET post_modified = ?, post_modified_gmt = ?, guid = ? WHERE `+rebind.Ident(vendor, "ID")+` = ?`,
+		exec(postInsert(vendor, prefix), postArgs(id, slug, "T "+slug, ptype, "publish", "2000-01-01 00:00:00", "open", parent, mime, 7)...)
+		exec(`UPDATE `+prefix+`posts SET post_modified = ?, post_modified_gmt = ?, guid = ? WHERE `+rebind.Ident(vendor, "ID")+` = ?`,
 			pdModified, pdModifiedGMT, "http://example.test/?p="+slug, id)
 	}
 	post(pdG, "pd-g", "page", 0, "")
@@ -246,8 +228,8 @@ func seedPostDependents(ctx context.Context, t *testing.T, db *sql.DB, vendor st
 
 	comment := func(id, postID int64, approved string) {
 		t.Helper()
-		exec(commentInsert(vendor, "wp_"), id, postID, "A", "a@example.test", "", "", "2000-01-01 00:00:00", "2000-01-01 00:00:00", "c", approved, "", 0, 0)
-		exec(`INSERT INTO wp_commentmeta (comment_id, meta_key, meta_value) VALUES (?, ?, ?)`, id, "pd_key", "pd_val")
+		exec(commentInsert(vendor, prefix), id, postID, "A", "a@example.test", "", "", "2000-01-01 00:00:00", "2000-01-01 00:00:00", "c", approved, "", 0, 0)
+		exec(`INSERT INTO `+prefix+`commentmeta (comment_id, meta_key, meta_value) VALUES (?, ?, ?)`, id, "pd_key", "pd_val")
 	}
 	comment(9201, pdP, "1")
 	comment(9202, pdP, "0")
@@ -255,9 +237,9 @@ func seedPostDependents(ctx context.Context, t *testing.T, db *sql.DB, vendor st
 	comment(9204, pdP, "trash")
 	comment(9205, pdQ, "1")
 	for _, k := range []string{"pd_a", "pd_b", "pd_c"} {
-		exec(`INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`, pdP, k, "v")
+		exec(`INSERT INTO `+prefix+`postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`, pdP, k, "v")
 	}
-	exec(`INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`, pdQ, "pd_q", "v")
+	exec(`INSERT INTO `+prefix+`postmeta (post_id, meta_key, meta_value) VALUES (?, ?, ?)`, pdQ, "pd_q", "v")
 }
 
 func pdCount(ctx context.Context, t *testing.T, db *sql.DB, vendor, q string, args ...any) int {
@@ -269,38 +251,38 @@ func pdCount(ctx context.Context, t *testing.T, db *sql.DB, vendor, q string, ar
 	return n
 }
 
-func pdParent(ctx context.Context, t *testing.T, db *sql.DB, vendor string, id int64) int64 {
+func pdParent(ctx context.Context, t *testing.T, db *sql.DB, vendor, prefix string, id int64) int64 {
 	t.Helper()
 	var p int64
-	q := rebind.Rebind(vendor, `SELECT post_parent FROM wp_posts WHERE `+rebind.Ident(vendor, "ID")+` = ?`)
+	q := rebind.Rebind(vendor, `SELECT post_parent FROM `+prefix+`posts WHERE `+rebind.Ident(vendor, "ID")+` = ?`)
 	if err := db.QueryRowContext(ctx, q, id).Scan(&p); err != nil {
 		t.Fatalf("read post_parent of %d: %v", id, err)
 	}
 	return p
 }
 
-func pdCommentCount(ctx context.Context, t *testing.T, db *sql.DB, vendor string, postID int64) int {
+func pdCommentCount(ctx context.Context, t *testing.T, db *sql.DB, vendor, prefix string, postID int64) int {
 	t.Helper()
-	return pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM wp_comments WHERE `+rebind.Ident(vendor, "comment_post_ID")+` = ?`, postID)
+	return pdCount(ctx, t, db, vendor, `SELECT COUNT(*) FROM `+prefix+`comments WHERE `+rebind.Ident(vendor, "comment_post_ID")+` = ?`, postID)
 }
 
-func pdCommentMetaCount(ctx context.Context, t *testing.T, db *sql.DB, vendor string, postID int64) int {
+func pdCommentMetaCount(ctx context.Context, t *testing.T, db *sql.DB, vendor, prefix string, postID int64) int {
 	t.Helper()
 	return pdCount(ctx, t, db, vendor,
-		`SELECT COUNT(*) FROM wp_commentmeta WHERE comment_id IN (SELECT `+rebind.Ident(vendor, "comment_ID")+
-			` FROM wp_comments WHERE `+rebind.Ident(vendor, "comment_post_ID")+` = ?)`, postID)
+		`SELECT COUNT(*) FROM `+prefix+`commentmeta WHERE comment_id IN (SELECT `+rebind.Ident(vendor, "comment_ID")+
+			` FROM `+prefix+`comments WHERE `+rebind.Ident(vendor, "comment_post_ID")+` = ?)`, postID)
 }
 
 // pdSnapshot reads every posts column the purge must not change (all but
 // post_parent) as a comparable slice.
-func pdSnapshot(ctx context.Context, t *testing.T, db *sql.DB, vendor string, id int64) []any {
+func pdSnapshot(ctx context.Context, t *testing.T, db *sql.DB, vendor, prefix string, id int64) []any {
 	t.Helper()
 	vals := make([]any, len(pdPostCols))
 	ptrs := make([]any, len(pdPostCols))
 	for i := range vals {
 		ptrs[i] = &vals[i]
 	}
-	q := rebind.Rebind(vendor, `SELECT `+rebind.IdentList(vendor, pdPostCols)+` FROM wp_posts WHERE `+rebind.Ident(vendor, "ID")+` = ?`)
+	q := rebind.Rebind(vendor, `SELECT `+rebind.IdentList(vendor, pdPostCols)+` FROM `+prefix+`posts WHERE `+rebind.Ident(vendor, "ID")+` = ?`)
 	if err := db.QueryRowContext(ctx, q, id).Scan(ptrs...); err != nil {
 		t.Fatalf("snapshot post %d: %v", id, err)
 	}

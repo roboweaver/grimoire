@@ -787,10 +787,8 @@ func (s *TermWriteService) Create(ctx context.Context, actor auth.Principal, t d
 	if !auth.CanManageTerms(actor) {
 		return 0, ErrForbidden // Req 5.3, fail closed before any read
 	}
-	if t.Taxonomy != TaxonomyCategory && t.Taxonomy != taxonomyPostTag {
-		if _, ok := s.registryTaxonomy(t.Taxonomy); !ok {
-			return 0, ErrTaxonomyUnknown
-		}
+	if !ManagedTaxonomy(s.reg, t.Taxonomy) {
+		return 0, ErrTaxonomyUnknown
 	}
 	t, err := s.prepare(ctx, t, nil)
 	if err != nil {
@@ -818,6 +816,10 @@ func (s *TermWriteService) Update(ctx context.Context, actor auth.Principal, t d
 		return domain.ErrNotFound
 	}
 	stored := rows[0]
+	if !ManagedTaxonomy(s.reg, stored.Taxonomy) {
+		return ErrForbidden
+	}
+	t.Taxonomy = stored.Taxonomy // the stored value is authoritative
 	t, err = s.prepare(ctx, t, &stored)
 	if err != nil {
 		return err
@@ -836,6 +838,16 @@ func (s *TermWriteService) Update(ctx context.Context, actor auth.Principal, t d
 // Delete authorizes (manage_categories) and removes a term by ID.
 func (s *TermWriteService) Delete(ctx context.Context, actor auth.Principal, id int64) error {
 	if !auth.CanManageTerms(actor) {
+		return ErrForbidden
+	}
+	rows, err := s.w.TermsByIDs(ctx, []int64{id})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return domain.ErrNotFound
+	}
+	if !ManagedTaxonomy(s.reg, rows[0].Taxonomy) {
 		return ErrForbidden
 	}
 	return s.w.Delete(ctx, id)

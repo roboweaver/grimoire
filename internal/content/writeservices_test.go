@@ -586,7 +586,8 @@ func TestPostWriteUpdateConflictDetection(t *testing.T) {
 // --- TermWriteService -------------------------------------------------------
 
 func TestTermWriteAuthz(t *testing.T) {
-	w := &fakeTermWriter{}
+	// M19: Delete reads the stored row and gates on its taxonomy, so seed term 7.
+	w := &fakeTermWriter{byIDs: map[int64]domain.Term{7: {ID: 7, Name: "Old", Slug: "old", Taxonomy: "category"}}}
 	svc := NewTermWriteService(w)
 	term := domain.Term{Name: "News", Slug: "news", Taxonomy: "category"}
 
@@ -612,7 +613,8 @@ func TestTermWriteAuthz(t *testing.T) {
 // called-on-denial guarantee.
 func TestTermWriteUpdateAuthz(t *testing.T) {
 	// M18: Update reads the stored row, so seed term 7.
-	w := &fakeTermWriter{byIDs: map[int64]domain.Term{7: {ID: 7, Name: "Old", Slug: "old"}}}
+	// M19: the stored taxonomy is gated, so the seed names a managed one.
+	w := &fakeTermWriter{byIDs: map[int64]domain.Term{7: {ID: 7, Name: "Old", Slug: "old", Taxonomy: "category"}}}
 	svc := NewTermWriteService(w)
 	term := domain.Term{ID: 7, Name: "Renamed", Slug: "renamed"}
 

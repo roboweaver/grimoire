@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M12, M17, M18)
+# WordPress Compatibility (M1-M12, M17-M19)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -521,9 +521,6 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   - **Term names.** Names of all taxonomies are reduced to plain text at tier B
     on create and update, with the unchanged-name exemption described under
     M17 Sanitization. Slug rules still apply to registered taxonomies only.
-  - **Known gap.** Term update and delete are not yet gated on the taxonomy
-    being registered, so a term of an unwritable taxonomy can still be edited
-    by a holder of `manage_categories`. Still open.
 - **M18 — Write hardening (PR 2):** delete cleanup and page `parent` writes.
   No schema change, no migration, no new capability string. One additive
   storage port (`PostDependentsPurger`).
@@ -566,6 +563,41 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     - Nav-menu items that reference a deleted post are not removed or updated.
     - There is no trash.
     - WordPress hooks and the object cache are not involved.
+
+- **M19 — Term gate and delete parity (PR 1):** the term-side counterpart of
+  the M18 writable-type rule. No schema change, no migration, no new
+  capability string.
+  - **Managed taxonomy.** A taxonomy is managed if it is `category`,
+    `post_tag`, or registered under `taxonomies:` in the configuration. A term
+    is writable only if its stored taxonomy is managed. This applies to every
+    caller, administrators included. The stored taxonomy decides, not the
+    taxonomy in the request body.
+  - **Responses.**
+
+    | Operation | On an unmanaged taxonomy |
+    |---|---|
+    | Admin-API term update | `403`, nothing written |
+    | Admin-API term delete | `403`, nothing written |
+    | Admin-API term create | `400` (unchanged) |
+    | Term assignment (`termIds` on post create or update) | that taxonomy is reported in `partial`; the post write is kept |
+    | REST term routes | `404` (unchanged; no route exists for an unregistered taxonomy) |
+
+    A term id that does not exist still answers `404` on update and delete.
+  - **Built-in assignment check.** Assigning terms to the built-in
+    `category` and `post_tag` taxonomies now checks that every id is a term of
+    that taxonomy, as registered types already did. An id that belongs to
+    another taxonomy, or does not exist, is rejected with a term-invalid error:
+    `400` on the REST post routes, an entry in `partial` on the admin API.
+  - **`nav_menu` coexistence.** The menu editor (`/admin/api/menus`, gated by
+    `edit_theme_options`) writes its own `nav_menu` terms and does not go
+    through the term service, so it keeps working. A generic term update or
+    delete of a menu term (`manage_categories`) is refused with `403`, as are
+    `link_category`, `post_format` and other stored taxonomies that are not
+    managed.
+  - **Registry removal.** Removing a taxonomy from `taxonomies:` makes its
+    existing terms unwritable at the next start. The terms and their
+    relationships are untouched and become writable again when the taxonomy is
+    registered again.
 
 ## Public read guarantees
 

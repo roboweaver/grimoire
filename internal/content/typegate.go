@@ -16,3 +16,18 @@ func WritableType(reg *registry.Registry, typ string) bool {
 	_, ok := reg.PostType(typ)
 	return ok
 }
+
+// ManagedTaxonomy reports whether the term services may write terms of
+// taxonomy: the built-in taxonomies always, a registered taxonomy when reg holds
+// it, nothing else.
+func ManagedTaxonomy(reg *registry.Registry, taxonomy string) bool {
+	switch taxonomy {
+	case TaxonomyCategory, taxonomyPostTag:
+		return true
+	}
+	if reg == nil {
+		return false
+	}
+	_, ok := reg.Taxonomy(taxonomy)
+	return ok
+}

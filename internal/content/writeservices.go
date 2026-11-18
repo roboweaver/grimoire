@@ -101,6 +101,8 @@ type PostWriteService struct {
 	// menuItems removes the nav-menu items that point at a deleted post.
 	// Optional; nil skips the step.
 	menuItems domain.PostMenuItemPurger
+	// relationships removes every term relationship of a deleted post.
+	relationships domain.PostTermRelationshipPurger
 	// optionsR and optionsW let Delete remove a deleted post's id from the
 	// sticky_posts option. Optional; either nil skips the step.
 	optionsR domain.OptionRepository
@@ -196,6 +198,13 @@ func WithPostDependentsPurger(p domain.PostDependentsPurger) PostWriteOption {
 // is deleted. A nil purger skips the step.
 func WithPostMenuItemPurger(p domain.PostMenuItemPurger) PostWriteOption {
 	return func(s *PostWriteService) { s.menuItems = p }
+}
+
+// WithPostRelationshipPurger wires the port that removes every term
+// relationship of a deleted post, after the managed term detach and before the
+// unstick step. A nil purger skips the step.
+func WithPostRelationshipPurger(p domain.PostTermRelationshipPurger) PostWriteOption {
+	return func(s *PostWriteService) { s.relationships = p }
 }
 
 // WithStickyOptions wires the option ports PostWriteService.Delete uses to
@@ -637,7 +646,8 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 // only provide PostWriter unaffected.
 //
 // The full order is: revisions, term detach (deleteTaxonomies, via the
-// detacher when configured), unstick (a deleted "post" is removed from the
+// detacher when configured), relationship purge (every remaining term
+// relationship of the post, via the relationship purger when configured), unstick (a deleted "post" is removed from the
 // sticky_posts option when WithStickyOptions is wired), dependents purge (via the purger when configured,
 // with the row's own parent id and hierarchicalType), menu-item purge (via the
 // menu-item purger when configured, with the stored type), then the row delete. The
@@ -670,6 +680,11 @@ func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p d
 			if err := s.detacher.SetPostTerms(ctx, cur.ID, tax, nil); err != nil {
 				return err
 			}
+		}
+	}
+	if s.relationships != nil {
+		if err := s.relationships.PurgeTermRelationshipsOf(ctx, cur.ID); err != nil {
+			return err
 		}
 	}
 	if cur.Type == "post" && s.optionsR != nil && s.optionsW != nil {

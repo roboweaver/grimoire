@@ -187,7 +187,7 @@
       Files: `docs/compatibility.md`, `plans/post-m10-gap-analysis/README.md`, `plans/README.md`
       Verify: `grep -n "keep a dangling" docs/compatibility.md` finds nothing; the plans README
       row reads 1 of 2. _(Req 17.1, 17.3-17.5)_
-- [-] 4.2 Final gate for PR 1, with explicit cross-vendor verification. Confirm: no new file
+- [x] 4.2 Final gate for PR 1, with explicit cross-vendor verification. Confirm: no new file
       under `internal/storage/migrations`; `git diff main -- internal/domain/repository.go`
       shows doc-comment changes only (Req 3.3, 6.4); no new capability string; `go.mod` and
       `go.sum` unchanged; no new `GRIMOIRE_TEST_*` variable; `git diff main --
@@ -206,7 +206,7 @@
       violation; `docker ps -a` shows no leftover container. _(Req 3.3, 5.4, 6.3, 6.4, 15.1,
       16.2, 16.5)_
 ## Phase 5 — Storage: PR 2 contracts first (`internal/storage`, TDD) — PR 2
-- [~] 5.1 Write the failing storage tests first. (a)
+- [x] 5.1 Write the failing storage tests first. (a)
       `RunPostTermRelationshipPurgerContract(t, newRepos NewReposWithPrefixFunc)` in
       `internal/storage/storagetest/postrelationships_contract.go`, registered in
       `sqlite_test.go`, `mysql_test.go` and `postgres_test.go`. Fixture per `design.md`
@@ -245,7 +245,7 @@
       page id is deleted by `MediaRepo.Delete`). `grep -n '"wp_"'` on both new contracts finds
       nothing. _(Req 7.1-7.4, 8.1-8.6, 9.1-9.4, 10.2, 10.4-10.6, 11.1, 11.2, 11.5, 12.1-12.3; D4-D7, D10)_
 ## Phase 6 — Storage: relationships and media (`internal/domain`, `internal/storage`, TDD) — PR 2
-- [~] 6.1 Implement the port and the shared relationship helper. In
+- [x] 6.1 Implement the port and the shared relationship helper. In
       `internal/domain/repository.go` add `NonPostObjectTaxonomies` and
       `PostTermRelationshipPurger` with the doc comments of `design.md`. Create
       `internal/storage/wprepo/postrelationships.go` with the unexported
@@ -262,7 +262,7 @@
       Verify: `go test ./internal/storage/... -run PostTermRelationship` — the 5.1(a) contract
       and atomicity test pass on SQLite; `go build ./...` shows no other `Set` construction
       breaks. _(Req 10.1-10.6, 11.1, 11.2, 11.4, 11.5; D6, D7)_
-- [~] 6.2 Extend `MediaRepo.Delete`, then verify on all three databases. In
+- [x] 6.2 Extend `MediaRepo.Delete`, then verify on all three databases. In
       `internal/storage/wprepo/media.go` keep the one `RunInTx` and run, in order:
       `matchMenuItemsTx(…, id, "attachment")` then `deleteMenuItemTx` per id ascending then
       `recountTx`; `DELETE FROM {p}postmeta WHERE meta_key = '_thumbnail_id' AND meta_value = ?`
@@ -285,7 +285,7 @@
       `TestMediaRepoDeleteUnknownReturnsNotFound` stay green; no leftover container.
       _(Req 7.1-7.4, 8.1-8.6, 9.1-9.4, 12.4; D4-D6)_
 ## Phase 7 — Content and assembly: the delete step and the media route (`internal/content`, `cmd/grimoire`, TDD) — PR 2
-- [~] 7.1 Write the failing service tests first. Add
+- [x] 7.1 Write the failing service tests first. Add
       `internal/content/relationships_delete_test.go` over the `PostWriteService` fakes with a
       recording `PostTermRelationshipPurger`, detacher, option ports, dependents purger,
       menu-item purger and `PostWriter`: deleting a `post`, a `page` and a registered-type row
@@ -300,14 +300,14 @@
       Verify: `go test ./internal/content -run RelationshipsDelete` — fails (compile:
       `WithPostRelationshipPurger` does not exist; once stubbed, no purge call is recorded).
       _(Req 10.7-10.9; D8)_
-- [~] 7.2 Implement the delete step. In `internal/content/writeservices.go` add
+- [x] 7.2 Implement the delete step. In `internal/content/writeservices.go` add
       `WithPostRelationshipPurger(p domain.PostTermRelationshipPurger) PostWriteOption` and the
       call `PurgeTermRelationshipsOf(ctx, cur.ID)` in `Delete` after the managed term detach and
       before the unstick step, returning its error. Update the `Delete` doc comment's step list.
       Files: `internal/content/writeservices.go`
       Verify: `go test ./internal/content` — 7.1 passes, every existing test green;
       `go test ./cmd/grimoire -run BuiltinGolden` green. _(Req 10.7-10.9; D7, D8)_
-- [~] 7.3 Write the failing assembly tests first. Add
+- [x] 7.3 Write the failing assembly tests first. Add
       `cmd/grimoire/assembly_delete_cleanup_test.go` over `newCustomWriteHandler`, with
       `seedRawTerm`, `seedRawTermRelationship` and the menu helpers. (a) `DELETE
       /wp-json/wp/v2/pages/{P}`, the posts route and a registered-type route (with
@@ -330,7 +330,7 @@
       relationship and its count remain after a post delete, and the media comments, menu item and
       `_thumbnail_id` row remain after a media delete.
       _(Req 7-11, 13.1, 13.4; D4-D8)_
-- [~] 7.4 Wire the purger and prove the wiring. In `cmd/grimoire/assembly.go` add
+- [x] 7.4 Wire the purger and prove the wiring. In `cmd/grimoire/assembly.go` add
       `content.WithPostRelationshipPurger(repos.PostRelationships)` to the `NewPostWriteService`
       call, after `WithPostMenuItemPurger`. No other assembly change. Files: `cmd/grimoire/assembly.go`
       Verify: `go test ./cmd/grimoire` — 7.3 passes. **Proof of wiring:** remove
@@ -340,7 +340,7 @@
       subtest must fail on the reference assertion; restore. Record both results in the PR
       description. Golden green. _(Req 10.10, 13.2, 13.3)_
 ## Phase 8 — Documentation and PR 2 gate — PR 2
-- [~] 8.1 Update the documents to match PR 2. `docs/compatibility.md`: remove the M19 PR 3
+- [x] 8.1 Update the documents to match PR 2. `docs/compatibility.md`: remove the M19 PR 3
       "Known gaps" bullets "Deleting a media item does not clean menu items." and
       "Relationships in unmanaged taxonomies stay on a deleted post."; add "M20 — Delete gap
       closure (PR 2)": what a media delete now removes (menu items with children re-parented and
@@ -363,7 +363,7 @@
       Files: `docs/compatibility.md`, `plans/post-m10-gap-analysis/README.md`, `plans/README.md`
       Verify: `grep -n "does not clean menu items" docs/compatibility.md` finds nothing; the plans
       README row reads Implemented. _(Req 17.2-17.5)_
-- [~] 8.2 Final gate for PR 2, with explicit cross-vendor verification. Confirm: no new file under
+- [x] 8.2 Final gate for PR 2, with explicit cross-vendor verification. Confirm: no new file under
       `internal/storage/migrations`; `git diff main -- internal/domain/repository.go` adds
       exactly one interface (`PostTermRelationshipPurger`) and one variable
       (`NonPostObjectTaxonomies`) and changes no method of an existing interface (Req 14.3); no new

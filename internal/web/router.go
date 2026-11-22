@@ -424,8 +424,10 @@ func (s *Server) requireCustomDeps(st routing.Structure) {
 }
 
 // contentPatterns is every chi pattern the dispatcher owns, in registration
-// order: the structure's permalink patterns, its archive patterns, and the flat
-// /{slug} fallback.
+// order: the structure's permalink patterns, its archive patterns, its
+// path-form pagination patterns (/page/{n} and the tag, author, date and custom
+// archive forms; categories and custom terms ride their wildcards), and the
+// flat /{slug} fallback.
 //
 // The flat pattern is registered whether or not a structure is configured; what
 // changes is its role. With no structure it is the renderer, exactly as it was
@@ -445,5 +447,6 @@ func contentPatterns(st routing.Structure) []string {
 	pats := st.ChiPatterns()
 	pats = append(pats, st.ArchivePatterns()...)
 	pats = append(pats, st.CustomPatterns()...)
+	pats = append(pats, st.PaginationPatterns()...)
 	return append(pats, "/{slug}")
 }

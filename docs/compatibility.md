@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M12, M17-M20)
+# WordPress Compatibility (M1-M12, M16-M20)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -195,9 +195,9 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     and in `migrate -check`, and none of them is an error from
     `routing.Parse` — a renamed base is no reason to stop serving
     permalinks.
-  - **Pagination is M8's contract, unchanged.** Every archive returns the
-    same `Page`/`PerPage`/`Total`/`TotalPages` shape, selected by `?page=N`
-    with the same page size as the home page. An archive whose entity
+  - **Pagination keeps M8's contract.** Every archive returns the
+    same `Page`/`PerPage`/`Total`/`TotalPages` shape, selected by `/page/{n}/`
+    or `?page=N` (M16, below) with the same page size as the home page. An archive whose entity
     exists but holds no published posts renders empty with `200`; a page
     number past the last page `404`s, matching the home and category rule.
     Theme pagination links are built from the archive's canonical path
@@ -254,14 +254,11 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     plain-permalink date archives are the `?m=2024` query argument, not
     `/2024` — and it is what keeps `/2024` resolving a post slugged `2024`.
     The `?m=` query-argument form is not implemented either; grimoire has
-    no query-argument route.
+    no query-argument route. It is the next piece of M16 (PR 2) and stays
+    unimplemented until that ships.
 
   Divergent or still open after M9b:
 
-  - **Pagination is `?page=N`, where WordPress uses `/page/{n}/`.** This is
-    deliberate rather than pending: `/category/news/page/2` is
-    indistinguishable from a child category slugged `page`, so adopting
-    WordPress's path form would mean reserving `page` as a category slug.
   - **A base that collides with the permalink structure's leading literal
     keeps the post meaning.** `category_base` = `archives` against
     WordPress's "Numeric" preset `/archives/%post_id%` — a rename an
@@ -410,7 +407,7 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     at `/{slug}/{postname}/` (nested ancestry for a hierarchical type), its
     archive at `/{archive-slug}/` when `has_archive` is set, and a custom
     taxonomy term archive at `/{slug}/{term}/` (nested when hierarchical).
-    Archive pagination stays `?page=N`. Custom post type URLs do not use the
+    Archive pagination is `/page/{n}/` or `?page=N` (M16). Custom post type URLs do not use the
     dated permalink tokens. Custom post type date archives and feeds are out of
     scope.
   - **REST read.** `GET /wp-json/wp/v2/{rest_base}` (collection and
@@ -743,6 +740,68 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     - WordPress hooks and the object cache are not involved.
     - Published-only term counts (above), plugin taxonomies of non-post objects
       (above), and the `sticky_posts` read-modify-write limit are unchanged.
+- **M16 — Archive pagination (PR 1):** the WordPress path form
+  `/page/{n}/` beside grimoire's `?page=N`, on every paginated archive. No
+  schema change, no migration, no new capability, no new option. `?m=YYYYMM`
+  is PR 2 and is not implemented yet (see the M9b note on plain-permalink date
+  archives).
+  - **Where it applies.** The home page (`/page/2/`), categories at any depth
+    (`/category/news/page/2/`), tags, authors, year, month and day archives,
+    custom post type archives and custom taxonomy terms. The base, the permalink
+    front, the `date/` segment and every other archive rule are the existing
+    ones; the path form only appends `page/{n}`. Flat structures (no trailing
+    slash) use `/page/2`.
+  - **The peel rule.** The classifier removes a trailing `page/{n}` pair, where
+    `{n}` is a plain integer from 1 to 999999999 (no sign, no leading zero),
+    classifies what is left with the existing rules, and accepts it only if it
+    is a home, category, tag, author, date, custom archive or custom term path.
+    Otherwise the whole path is classified as before. `page` is **not** a
+    reserved word: `/category/page/` is still the category slugged `page`,
+    `/category/page/page/2/` is page 2 of it, and `/category/page/2/` is the
+    category walk `[page, 2]`. A top-level page slugged `page` still renders
+    at `/page/`. `/page`, `/page/x`, `/page/0`, `/page/02` and `/page/2/3` are
+    not pagination and behave as before.
+  - **Shadowed shapes.** Three URL shapes that used to resolve now mean
+    pagination, because WordPress's own rewrite order resolves them the same
+    way: a term two levels below a parent slugged `page` whose own slug is a
+    page number (`/category/news/page/2` as grandchild `2` of child `page`);
+    a top-level page slugged `page` with a child slugged by a number
+    (`/page/2`); and a post whose canonical path is `/page/{n}/`
+    (for example `/page/2/` under `/%postname%/%post_id%/`). There is no
+    fallback: when the page number is out of range the answer is `404`, and the
+    old interpretation is not retried. The development real-database check
+    (`TestRealWordPressPagination`, gated on `GRIMOIRE_TEST_WP_DSN`) found `0`
+    of each shape.
+  - **`?page=N` and `?paged=N` still work.** Both answer `200` with the
+    requested page. `?page=` wins over `?paged=` when both are present. Garbage,
+    `0` and negative values mean page 1. A positive integer above
+    `MaxPageNumber` (999999999), including one too large for an `int64`, is
+    clamped to it, so it answers `404` rather than overflowing the page offset.
+  - **Canonical `Link` header.** A query-form request on an archive carries
+    `Link: </category/news/page/2/>; rel="canonical"`, a relative path (escaped)
+    to the path form of the page actually served. Both forms answer `200` and
+    nothing redirects, because a visitor or a theme written for `?page=N`
+    must keep working. The header is sent only when the query has `page` or
+    `paged`.
+  - **Redirects.** `/…/page/1/` answers `301` to the archive's base path.
+    The other trailing-slash form of a path-form URL answers `301` to the
+    canonical one. A moved category or custom term answers `301` to the new
+    path **with** `/page/{n}/`. Every redirect keeps the raw query string
+    byte for byte.
+  - **Other statuses.** A page above the last answers `404`. An archive whose
+    entity exists but has no posts answers `200` on page 2, as it does on page
+    1. An unknown entity answers `404`.
+  - **Themes.** The handler builds the links: `PrevURL` and `NextURL` on
+    `IndexData` and `ArchiveData` (empty when there is no such page; the
+    previous link of page 2 is the base path, never `/page/1/`). The default
+    theme renders them. `ArchiveData.BaseURL` is unchanged, so a custom theme
+    that builds `{{.BaseURL}}?page=N` keeps working.
+  - **Startup notes.** A `category_base` or `tag_base` that resolves to `page`,
+    or a custom post type or taxonomy whose slug (or archive slug) is `page`,
+    is named in the startup `WARN` and by `grimoire-cli migrate -check`: under
+    that base `/page/{n}` is home page pagination, so an entry slugged by a page
+    number is unreachable. A configuration with no such base produces the same
+    notes as before.
 ## Public read guarantees
 
 - The **public** rendering path (unauthenticated `GET` routes) filters to

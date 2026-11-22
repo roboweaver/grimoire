@@ -291,10 +291,9 @@ wrong-ancestor forms to it, lists and counts its descendants' posts, and adds
 tag, author and date archives; `category_base` and `tag_base` now take effect
 everywhere a path is built or classified, and a base that collides with another
 base or with the permalink structure is named in a startup `WARN` and by
-`grimoire-cli migrate -check`. One divergence to know: archive pagination is
-`?page=N` rather than WordPress's `/page/{n}/`, deliberately —
-`/category/news/page/2` is indistinguishable from a child category slugged
-`page`. Precedence is worth knowing too: a path rooted at an archive base, or
+`grimoire-cli migrate -check`. Archive pagination uses WordPress's
+`/page/{n}/` form (M16); `?page=N` still works and `page` is not a reserved
+word. Precedence is worth knowing too: a path rooted at an archive base, or
 shaped like a date, wins over a post slugged the same way, as it does in
 WordPress. Hierarchical *page* URLs remain out of scope.
 [`docs/compatibility.md`](./docs/compatibility.md) has the full list, including

@@ -36,6 +36,10 @@ type IndexData struct {
 	Tagline    string
 	Posts      []PostView
 	Pagination content.Page
+	// PrevURL and NextURL are the adjacent-page links, built by the handler from
+	// routing.Structure.PageLinks. Empty means no such page; themes render a link
+	// only when set.
+	PrevURL, NextURL string
 }
 
 // SingleData backs the single/page templates.
@@ -69,6 +73,10 @@ type ArchiveData struct {
 	Term       TermView
 	Posts      []PostView
 	Pagination content.Page
+	// PrevURL and NextURL are the adjacent-page links, built by the handler from
+	// routing.Structure.PageLinks. Empty means no such page; themes render a link
+	// only when set.
+	PrevURL, NextURL string
 }
 
 // CategoryData backs the category template. It is an alias rather than a

@@ -400,8 +400,8 @@ func TestHandlersCustomArchiveListsOnlyThatTypePublished(t *testing.T) {
 		if !strings.Contains(body, "Tome-dune-x") {
 			t.Errorf("newest-first: page 1 must hold the newest book dune")
 		}
-		if !strings.Contains(body, `href="`+p+`?page=2"`) {
-			t.Errorf("page 1 lacks a Next link built from the canonical %q?page=2", p)
+		if next := sh.p("library", "page", "2"); !strings.Contains(body, `href="`+next+`"`) {
+			t.Errorf("page 1 lacks a path-form Next link %q", next)
 		}
 	})
 }
@@ -425,8 +425,8 @@ func TestHandlersCustomArchivePaginationCoversEveryItemOnce(t *testing.T) {
 		if len(seen) != customBooksPublished {
 			t.Errorf("%d distinct books across pages, want %d", len(seen), customBooksPublished)
 		}
-		if !strings.Contains(second.Body.String(), `href="`+p+`?page=1"`) {
-			t.Errorf("page 2 lacks a Previous link built from the canonical")
+		if !strings.Contains(second.Body.String(), `href="`+p+`"`) {
+			t.Errorf("page 2 lacks a Previous link to the base %q", p)
 		}
 		// Past the last page is a 404, not an empty 200.
 		wantStatus(t, c.get(p+"?page=3"), p+"?page=3", http.StatusNotFound)

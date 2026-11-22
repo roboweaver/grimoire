@@ -140,9 +140,11 @@ site's own `options` table at startup and serves content at those paths.
 
 - grimoire applies the permalink structure to **pages** as well as posts, where
   WordPress serves pages at `/{slug}` regardless.
-- Archive pagination is **`?page=N`** rather than WordPress's `/page/{n}/`,
-  deliberately — `/category/news/page/2` is otherwise indistinguishable from a
-  child category slugged `page`.
+- Archive pagination uses WordPress's **`/page/{n}/`** form, and `?page=N` and
+  `?paged=N` still work. `page` is not reserved: a category slugged `page` stays
+  reachable. Three rare URL shapes now mean pagination instead of content; see
+  M16 in [`compatibility.md`](./compatibility.md). The `?m=YYYYMM` date query is
+  not implemented yet.
 
 ## Themes
 
@@ -151,6 +153,16 @@ under the themes directory (default `themes`, override with the server's
 `-themes` flag or `GRIMOIRE_THEME` for the active theme name). The engine
 implements a subset of the WordPress template hierarchy; the shipped
 `themes/default` is the reference.
+
+Pagination links are built by the server, not the template. The index template
+receives `.PrevURL` and `.NextURL`, and the archive templates (category, tag,
+author, date, custom archive and term) receive the same two fields beside
+`.BaseURL`. Each is the path-form URL of the adjacent page (`/page/3/`,
+`/category/news/page/3/`, no trailing slash under a Flat structure), and is
+empty when there is no such page, so wrap each in `{{if .PrevURL}}` or
+`{{if .NextURL}}`. The previous link of page 2 is the base path. Existing themes
+that build `{{.BaseURL}}?page=N` themselves keep working, because `?page=N`
+still answers `200`.
 
 ## Known gaps
 

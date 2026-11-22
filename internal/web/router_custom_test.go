@@ -218,6 +218,11 @@ func TestRouterCustomRegistersPatternsWhenWired(t *testing.T) {
 	for _, p := range customPats {
 		want = append(want, http.MethodGet+" "+p)
 	}
+	// M16: the custom archive's path-form pagination patterns ride along; the
+	// plain ones are already in base and Compact removes the overlap.
+	for _, p := range plain.WithCustomTypes(types, taxes).PaginationPatterns() {
+		want = append(want, http.MethodGet+" "+p)
+	}
 	slices.Sort(want)
 	want = slices.Compact(want)
 	if !slices.Equal(got, want) {

@@ -25,7 +25,8 @@ const (
 	// values and no table or switch keyed on the old order shifts. The
 	// classifier makes NO claim the segments name a real page; it carries them
 	// as Target.Segments and the handler's walk produces the 301 or the 404
-	// (Req 6.2, 6.3).
+	// (Req 6.2, 6.3). A trailing page/{n} pair is peeled off first when the
+	// remainder is a paginatable archive, so it never reaches this kind then.
 	KindPage
 	// KindCustomPost, KindCustomArchive and KindCustomTerm address a registered
 	// custom post type's single, its archive, and a custom taxonomy term (M12).
@@ -34,7 +35,32 @@ const (
 	KindCustomPost
 	KindCustomArchive
 	KindCustomTerm
+	// KindHome is the paginated home page, /page/{n}. It is appended after
+	// KindCustomTerm so no existing value shifts. Classify returns it only for a
+	// paginated home path; "/" itself stays KindNone because the "/" route owns it.
+	KindHome
 )
+
+// MaxPageNumber is the largest page number any pagination form accepts. It keeps
+// the page offset computation clear of integer overflow.
+const MaxPageNumber = 999_999_999
+
+// ParsePageNumber reads s as a page number: ^[1-9][0-9]{0,8}$. A leading zero, a
+// sign, a non-digit and a value above MaxPageNumber are all rejected.
+func ParsePageNumber(s string) (int, bool) {
+	if s == "" || len(s) > 9 || s[0] == '0' {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, true
+}
 
 // Target is the classified meaning of one request path.
 type Target struct {
@@ -59,6 +85,9 @@ type Target struct {
 	// classifier that reported the canonical form instead would leave the
 	// handler redirecting every already-canonical archive URL to itself.
 	TrailingSlash bool
+	// Page is the page number of a path-form paginated path (/…/page/{n}), and 0
+	// for every other path.
+	Page int
 }
 
 // Classify decides what path addresses, applying the fixed precedence order of
@@ -89,6 +118,50 @@ type Target struct {
 // /blog/sections/news is not, while /blog/2024 is a date archive in the same
 // structure.
 func (s Structure) Classify(path string) Target {
+	segs := pathSegments(path)
+	if base, n, ok := splitPageSuffix(segs); ok {
+		if t, ok := s.classifyPaginated(path, base, n); ok {
+			return t
+		}
+	}
+	return s.classifyPath(path)
+}
+
+// splitPageSuffix peels a trailing page/{n} pair off segs.
+func splitPageSuffix(segs []string) (base []string, n int, ok bool) {
+	if len(segs) < 2 || segs[len(segs)-2] != "page" {
+		return nil, 0, false
+	}
+	n, ok = ParsePageNumber(segs[len(segs)-1])
+	if !ok {
+		return nil, 0, false
+	}
+	return segs[:len(segs)-2], n, true
+}
+
+// classifyPaginated classifies the remainder of a page/{n} path. An empty
+// remainder is the home page. Otherwise the remainder runs through classifyPath
+// and is accepted only for a paginatable kind, so every base, front, date/ and
+// collision rule is reused unchanged. ok is false when the remainder is not
+// paginatable, and the caller then classifies the whole path as before.
+func (s Structure) classifyPaginated(path string, base []string, n int) (Target, bool) {
+	slash := strings.HasSuffix(path, "/")
+	if len(base) == 0 {
+		return Target{Kind: KindHome, Page: n, TrailingSlash: slash}, true
+	}
+	t := s.classifyPath("/" + strings.Join(base, "/"))
+	switch t.Kind {
+	case KindCategory, KindTag, KindAuthor, KindDate, KindCustomArchive, KindCustomTerm:
+		t.Page = n
+		t.TrailingSlash = slash
+		return t, true
+	}
+	return Target{}, false
+}
+
+// classifyPath is the pre-pagination classifier; Classify's doc comment
+// describes its rows.
+func (s Structure) classifyPath(path string) Target {
 	t := Target{TrailingSlash: path != "/" && strings.HasSuffix(path, "/")}
 
 	segs := pathSegments(path)

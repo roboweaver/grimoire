@@ -251,7 +251,7 @@
       Files: (verification only)
       Verify: all gate commands green; the git checks show no violation. _(Req 12, 15.4, 15.5)_
 ## Phase 6 — Routing: the date query parser (`internal/routing`, pure, TDD) — PR 2
-- [~] 6.1 Write the failing parser tests first. Add `internal/routing/datequery_test.go`
+- [x] 6.1 Write the failing parser tests first. Add `internal/routing/datequery_test.go`
       (`package routing_test`): `ParseDateQuery` accepts `2024`, `202405`, `20240517`, `20240229`
       (leap day), `202402`; rejects `""`, `202`, `20245`, `2024051`, `202405170`, `202413`,
       `202400`, `20240230`, `20240500`, `20230229`, `+20240`, `2024 05`, ` 2024`, `2024-05`,
@@ -261,13 +261,13 @@
       Files: `internal/routing/datequery_test.go`
       Verify: `go test ./internal/routing -count=1` fails to build for `ParseDateQuery` and
       `DateQuery`. Record that. _(Req 10.1, 10.2, 11.1, 13.6)_
-- [~] 6.2 Implement `ParseDateQuery` and `DateQuery` in `internal/routing/classify.go` beside
+- [x] 6.2 Implement `ParseDateQuery` and `DateQuery` in `internal/routing/classify.go` beside
       `dateFromSegments`, reusing `fixedWidthInt` and `DateRef.Range`. They read no database and
       return no error.
       Files: `internal/routing/classify.go`
       Verify: `go test ./internal/routing -count=1` passes. _(Req 10.1, 10.2, 11.1, 11.4)_
 ## Phase 7 — Web: `?m=` on the home route (`internal/web`, `cmd/grimoire`, TDD) — PR 2
-- [~] 7.1 Write the failing handler and assembly tests first. Add `internal/web/datequery_test.go`
+- [x] 7.1 Write the failing handler and assembly tests first. Add `internal/web/datequery_test.go`
       and `cmd/grimoire/assembly_datequery_test.go`. Under `/%postname%/` (trailing slash and not)
       and under Flat, seeded with posts in May 2024 and elsewhere: `/?m=2024`, `/?m=202405`,
       `/?m=20240517` answer `200` with only that range's posts and the date heading; the structured
@@ -283,7 +283,7 @@
       Verify: `go test ./internal/web ./cmd/grimoire -run 'DateQuery' -count=1` fails: the valid
       `?m=` requests render the home page instead of the date archive. Record that.
       _(Req 10, 11, 14.3)_
-- [~] 7.2 Implement the home branch. In `internal/web/handlers.go` add `serveDateQuery` and call it
+- [x] 7.2 Implement the home branch. In `internal/web/handlers.go` add `serveDateQuery` and call it
       from `serveHome` when the target is the zero target and `ParseDateQuery` accepts the first
       `m` value; follow the design's steps 1-6 (structured: path-form links and an always-set
       `Link` header; Flat: `/?m=…&page=N` links, `BaseURL` `/?m=…`, no header). Keep the past-the-end
@@ -293,7 +293,7 @@
       Files: `internal/web/handlers.go`, `internal/render/view.go`
       Verify: `go test ./internal/web ./cmd/grimoire ./internal/render -count=1` passes; the
       pre-existing suites and `TestBuiltinGolden` stay green. _(Req 10, 11)_
-- [~] 7.3 Extend the real-database check. In `internal/routing/realdb_pagination_test.go` (or a new
+- [x] 7.3 Extend the real-database check. In `internal/routing/realdb_pagination_test.go` (or a new
       `realdb_datequery_test.go` with the same gating) take the dates of the 25 newest real posts and,
       for each, assert `ParseDateQuery` accepts the year, year-month and year-month-day strings
       built by `fmt.Sprintf` from the row's stored date (no timezone shift), that the resulting
@@ -302,7 +302,7 @@
       Files: `internal/routing/realdb_pagination_test.go` or `internal/routing/realdb_datequery_test.go`
       Verify: skips cleanly without the DSN; with it, passes against the reference database, and the
       task records whether a database was available. _(Req 14.5, 14.6)_
-- [~] 7.4 Prove the wiring. No new code. Revert once and run
+- [x] 7.4 Prove the wiring. No new code. Revert once and run
       `go test ./cmd/grimoire -run 'TestBuildHandlerDateQuery' -count=1`: (a) remove the `serveDateQuery`
       call in `serveHome` (every valid-`m` subtest fails); (b) make `ParseDateQuery` return false
       (same subtests fail, invalid-`m` subtests still pass); restore and confirm with
@@ -310,7 +310,7 @@
       Files: (verification only)
       Verify: each revert fails the stated subtests, and the restored tree passes. _(Req 14.3, 14.4)_
 ## Phase 8 — Documentation and PR 2 gate — PR 2
-- [~] 8.1 Update the documents to match PR 2. `docs/compatibility.md`: replace "The `?m=`
+- [x] 8.1 Update the documents to match PR 2. `docs/compatibility.md`: replace "The `?m=`
       query-argument form is not implemented either; grimoire has no query-argument route" with the
       date-query description: accepted widths (4, 6, 8 digits), calendar rule, `GET /` only, served
       in place with `200`, the `Link` header on structured sites, plain-permalink pagination links,
@@ -327,7 +327,7 @@
       `plans/wordpress-core-parity-roadmap/tasks.md`, `plans/post-m10-gap-analysis/README.md`
       Verify: no document says `?m=` is unimplemented; the roadmap shows `16.A` ticked.
       _(Req 16.2, 16.4, 16.5, 16.6)_
-- [~] 8.2 Final gate for PR 2. Confirm: no migration file, `git diff main -- internal/domain` empty,
+- [x] 8.2 Final gate for PR 2. Confirm: no migration file, `git diff main -- internal/domain` empty,
       `go.mod` and `go.sum` unchanged, no new `GRIMOIRE_TEST_*` variable, `git diff main --
       cmd/grimoire/testdata/builtin_golden internal/render/testdata/golden` empty. Run `gofmt -l .`
       (empty), `go vet ./...`, `go build ./...`, `go test ./...`, and `go test -race ./internal/routing

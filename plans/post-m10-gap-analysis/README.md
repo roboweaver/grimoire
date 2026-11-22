@@ -1,6 +1,6 @@
 # Post-M10 Gap Analysis — Candidate Milestones (M11+)
 
-> **Status: 📝 Proposal (M11, M12 incl. write, M13, M14, M15 ✅ shipped).** This document is a gap analysis, not a
+> **Status: 📝 Proposal (M11, M12 incl. write, M13, M14, M15, M16 ✅ shipped).** This document is a gap analysis, not a
 > committed roadmap. The WordPress-core-parity roadmap
 > ([`../wordpress-core-parity-roadmap`](../wordpress-core-parity-roadmap)) is
 > complete through its final group (M10.G). Each candidate below is a documented,
@@ -9,8 +9,8 @@
 > **M11 (REST delete parity, PR #64), M13 (term re-parenting, PR #67), and M14
 > (sanitization backfill, PR #70) have since been specified and merged.** M12 is
 > fully shipped: the read half (12.A/12.B, PRs #75/#76/#77) and the write half
-> (12.C, spec `17-custom-types-write`), as is M15 (PR #72). The remaining
-> candidate is M16 (optional).
+> (12.C, spec `17-custom-types-write`), as are M15 (PR #72) and M16
+> (`21-archive-path-pagination`, both PRs). **No planned milestones remain.**
 
 Every gap is traced to where it is already acknowledged in
 [`../../docs/compatibility.md`](../../docs/compatibility.md) or the root
@@ -181,11 +181,7 @@ route; and the page REST `link`. Cross-vendor contract + handler + content +
 real-WordPress-DB nested-page fixture coverage. No migration, no column, no new
 capability, no second permalink construction site.
 
-### M16 — Archive/pagination path-form parity (lower priority)  🚧 in progress (1 of 2 shipped, `../21-archive-path-pagination`)
-**Gap.** The `?m=YYYYMM` date-query form and date archives under a plain
-permalink are not served (compatibility.md, M9b notes). This is a **deliberate,
-documented divergence**, not a bug. Path-form pagination is no longer part of
-the gap (PR 1, below).
+### M16 — Archive/pagination path-form parity  ✅ shipped (`../21-archive-path-pagination`, 2 of 2)
 **Shipped in M16 (PR 1, `plans/21-archive-path-pagination`):** `/page/{n}/` on
 the home page and every paginated archive (nested category, tag, author, date,
 custom archive, custom term), through a classifier that peels a trailing
@@ -195,7 +191,15 @@ and `?paged=N` still answer `200` with a relative canonical `Link` header;
 handler-built `PrevURL` and `NextURL`. Three rare shapes are shadowed, with no
 fallback (documented in compatibility.md, M16); the development real-database
 check found none. No schema change.
-**Scope sketch.** PR 2 adds `?m=YYYYMM` on the home route. Lowest priority.
+**Shipped in M16 (PR 2):** `GET /?m=YYYY[MM[DD]]` serves the date archive in
+place with `200`. The first `m` wins, an invalid value is ignored (the home page
+renders as before, with no date read), and `m` is ignored on every other route.
+Structured sites send a path-form canonical `Link` header and path-form
+pagination links; Flat sites use `/?m=…&page=N` links and no header. The
+real-database check ran green against the development WordPress database (75
+`?m=` strings from 25 posts). Caveat: under Flat, `BaseURL` is `/?m=…`, so a
+custom theme must use `PrevURL` and `NextURL`. Still open: the hour, minute and
+second forms of `m`, and `?m=` on routes other than `/`.
 ## Recommended ordering
 
 1. ~~**M11 (REST delete)**~~ — ✅ shipped (PR #64).
@@ -206,4 +210,7 @@ check found none. No schema change.
    WordPress routing parity for pages.
 5. ~~**M12 (custom post types/taxonomies, read and write)**~~ — ✅ shipped
    (read PRs #75/#76/#77; write via `17-custom-types-write`).
-6. **M16 (pagination path form)** — optional polish. **Next (optional).**
+6. ~~**M16 (pagination path form and `?m=`)**~~ — ✅ shipped
+   (`21-archive-path-pagination`, 2 of 2).
+**Recommended next:** no planned milestones remain. What is left is trash
+handling and the gaps listed in the milestone sections above.

@@ -63,7 +63,9 @@ type SingleData struct {
 // display name, a formatted date range). BaseURL is the canonical archive path:
 // pagination links are built from it rather than reconstructed from Term.Slug,
 // which is wrong for a nested category and wrong for an overridden
-// category_base. Term is empty for the author and date kinds.
+// category_base. For a Flat-structure ?m= date archive BaseURL is /?m=..., so
+// themes should link pages with PrevURL and NextURL rather than build them from
+// BaseURL. Term is empty for the author and date kinds.
 type ArchiveData struct {
 	SiteTitle  string
 	Tagline    string

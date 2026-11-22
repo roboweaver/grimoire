@@ -84,6 +84,11 @@ func (s *Server) serveHome(w http.ResponseWriter, r *http.Request, t routing.Tar
 			return s.redirectCanonical(w, r, want)
 		}
 	}
+	if t.Kind == routing.KindNone {
+		if d, ok := routing.ParseDateQuery(r.URL.Query().Get("m")); ok {
+			return s.serveDateQuery(w, r, d)
+		}
+	}
 	ctx := r.Context()
 	title, tagline := s.options.SiteInfo(ctx)
 	page := pageFor(r, t)
@@ -105,6 +110,58 @@ func (s *Server) serveHome(w http.ResponseWriter, r *http.Request, t routing.Tar
 		NextURL:    next,
 	}
 	return s.renderHTML(w, r, "index", data)
+}
+
+// serveDateQuery serves GET /?m=YYYY[MM[DD]] as the date archive, in place with
+// 200. Only the zero home target reaches it, and only for a value
+// routing.ParseDateQuery accepted; any other value renders the home page.
+//
+// A structured site links to the path form of the archive and always sets the
+// canonical Link header, because this response duplicates that path's content.
+// A Flat site has no date path, so its links stay on /?m=... and it sets no
+// header.
+func (s *Server) serveDateQuery(w http.ResponseWriter, r *http.Request, d routing.DateRef) error {
+	ctx := r.Context()
+	page := pageParam(r)
+	a, err := s.posts.DateArchive(ctx, d, page, content.DefaultPerPage)
+	if err != nil {
+		return err
+	}
+	if page > 1 && a.Page.Total > 0 && page > a.Page.TotalPages {
+		return domain.ErrNotFound
+	}
+	var prev, next, baseURL string
+	if base := s.permalinks.DatePath(d); base != "" {
+		prev, next = s.permalinks.PageLinks(base, a.Page.Page, a.Page.TotalPages)
+		baseURL = base
+		p := (&url.URL{Path: s.permalinks.PaginatedPath(base, a.Page.Page)}).EscapedPath()
+		w.Header().Set("Link", "<"+p+`>; rel="canonical"`)
+	} else {
+		baseURL = "/?m=" + routing.DateQuery(d)
+		if a.Page.Page > 1 {
+			prev = baseURL
+			if a.Page.Page > 2 {
+				prev += "&page=" + strconv.Itoa(a.Page.Page-1)
+			}
+		}
+		if a.Page.Page < a.Page.TotalPages {
+			next = baseURL + "&page=" + strconv.Itoa(a.Page.Page+1)
+		}
+	}
+	title, tagline := s.options.SiteInfo(ctx)
+	data := render.ArchiveData{
+		SiteTitle:  title,
+		Tagline:    tagline,
+		Kind:       "date",
+		Heading:    a.Heading,
+		BaseURL:    baseURL,
+		Term:       termView(a.Term),
+		Posts:      postViews(ctx, a.Posts, s.options.BaseURLs(ctx), s.featured),
+		Pagination: a.Page,
+		PrevURL:    prev,
+		NextURL:    next,
+	}
+	return s.renderHTML(w, r, "date", data)
 }
 
 // resolve is the one dispatcher every ambiguous content route is registered to.

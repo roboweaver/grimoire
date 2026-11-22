@@ -38,7 +38,8 @@ milestones below are ordered accordingly:
   ancestry (`/{parent}/{child}`) and `301` the flat/dated form to it.
 - **M16 — Archive Pagination Path-Form Parity**: WordPress's `/page/{n}/`
   archive pagination and `?m=YYYYMM` date-query forms (optional, lowest
-  priority — the current `?page=N` behavior is correct and documented).
+  priority — the current `?page=N` behavior is correct and documented)
+  (✅ shipped, `plans/21-archive-path-pagination`).
 
 ### Milestone numbering note
 
@@ -980,7 +981,7 @@ ancestry, so that a child page's URL matches WordPress's
 > start from this document alone — see "Specification depth" above. This
 > milestone is the lowest priority in the roadmap and is optional.
 
-### Requirement 32: `/page/{n}/` and `?m=` Archive Forms
+### Requirement 32: `/page/{n}/` and `?m=` Archive Forms  ✅ shipped (M16, `plans/21-archive-path-pagination`)
 
 **User Story:** As a site owner who wants byte-for-byte URL parity with
 WordPress, I want archive pagination served at `/page/{n}/` and date queries
@@ -1002,7 +1003,7 @@ without a redirect.
    supported; M16 adds path-form parity rather than replacing the query form,
    which `docs/compatibility.md` documents as a deliberate, correct divergence.
 
-### Requirement 33: M16 Exclusions and Test Coverage
+### Requirement 33: M16 Exclusions and Test Coverage  ✅ shipped (M16, `plans/21-archive-path-pagination`)
 
 #### Acceptance Criteria
 

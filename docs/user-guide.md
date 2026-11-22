@@ -143,8 +143,9 @@ site's own `options` table at startup and serves content at those paths.
 - Archive pagination uses WordPress's **`/page/{n}/`** form, and `?page=N` and
   `?paged=N` still work. `page` is not reserved: a category slugged `page` stays
   reachable. Three rare URL shapes now mean pagination instead of content; see
-  M16 in [`compatibility.md`](./compatibility.md). The `?m=YYYYMM` date query is
-  not implemented yet.
+  M16 in [`compatibility.md`](./compatibility.md). `GET /?m=YYYY`, `?m=YYYYMM` and
+  `?m=YYYYMMDD` serve the matching date archive in place (invalid values are
+  ignored); under plain permalinks, its pagination links stay on `/?m=…&page=N`.
 
 ## Themes
 

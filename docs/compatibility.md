@@ -253,10 +253,9 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     classifies as a date archive, which is what WordPress does — its
     plain-permalink date archives are the `?m=2024` query argument, not
     `/2024` — and it is what keeps `/2024` resolving a post slugged `2024`.
-    The `?m=` query-argument form is not implemented either; grimoire has
-    no query-argument route. It is the next piece of M16 (PR 2) and stays
-    unimplemented until that ships.
-
+    The `?m=` query argument is served on `GET /` (M16, PR 2, below), so a
+    plain-permalink site reaches its date archives through `?m=` as in
+    WordPress.
   Divergent or still open after M9b:
 
   - **A base that collides with the permalink structure's leading literal
@@ -742,9 +741,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
       (above), and the `sticky_posts` read-modify-write limit are unchanged.
 - **M16 — Archive pagination (PR 1):** the WordPress path form
   `/page/{n}/` beside grimoire's `?page=N`, on every paginated archive. No
-  schema change, no migration, no new capability, no new option. `?m=YYYYMM`
-  is PR 2 and is not implemented yet (see the M9b note on plain-permalink date
-  archives).
+  schema change, no migration, no new capability, no new option. The `?m=`
+  date query is PR 2 (next section).
   - **Where it applies.** The home page (`/page/2/`), categories at any depth
     (`/category/news/page/2/`), tags, authors, year, month and day archives,
     custom post type archives and custom taxonomy terms. The base, the permalink
@@ -802,6 +800,38 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     that base `/page/{n}` is home page pagination, so an entry slugged by a page
     number is unreachable. A configuration with no such base produces the same
     notes as before.
+- **M16 — Archive pagination (PR 2):** the `?m=` date query on the home
+  route. No schema change, no migration, no new capability, no new option.
+  - **Accepted values.** `GET /?m=YYYY`, `?m=YYYYMM` and `?m=YYYYMMDD`: exactly
+    4, 6 or 8 ASCII digits that name a real calendar date (leap days included,
+    `20230229` is not one). The hour, minute and second forms
+    (`?m=2024051712...`) are not supported and are ignored like any other
+    invalid value.
+  - **Served in place.** A valid `?m=` on `GET /` answers `200` with the date
+    archive's posts and heading. Nothing redirects. The first `m` value wins
+    (`?m=2024&m=x` is the 2024 archive). `?page=N` and `?paged=N` select the
+    page, and a page past the last answers `404`.
+  - **Invalid values are ignored.** `?m=garbage`, `?m=202413`, `?m=` and the
+    like render the ordinary home page with `200`, byte for byte as `/` does,
+    and no date-archive read happens. No URL that served before changes.
+  - **Only `GET /`.** `?m=` on any other route (`/page/2/?m=202405`,
+    `/category/x/?m=202405`) is ignored.
+  - **Structured permalinks.** The response carries
+    `Link: </2024/05/>; rel="canonical"` (relative, escaped), and its
+    pagination links are the path form (`/2024/05/page/2/`).
+  - **Flat (plain) permalinks.** There is no date path, so no `Link` header is
+    sent and the pagination links stay on the query form
+    (`/?m=202405&page=2`). `ArchiveData.BaseURL` is `/?m=202405` in this case.
+    A custom theme that builds `{{.BaseURL}}?page=N` itself would produce
+    `/?m=202405?page=N` under Flat; such a theme must use `PrevURL` and
+    `NextURL`, which the handler builds correctly for both cases.
+  - **Verification.** The development real-database check
+    (`TestRealWordPressDateQuery`, gated on `GRIMOIRE_TEST_WP_DSN`) ran green
+    against the dev WordPress database with 75 `?m=` strings built from the
+    dates of 25 posts.
+  - **Still open.** The hour, minute and second forms of `m`, `?m=` on routes
+    other than `/`, feeds and sitemaps, comment pagination and
+    `<!--nextpage-->`.
 ## Public read guarantees
 
 - The **public** rendering path (unauthenticated `GET` routes) filters to

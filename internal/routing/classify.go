@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -407,6 +408,57 @@ func dateFromSegments(segs []string) (DateRef, bool) {
 		return DateRef{}, false
 	}
 	return d, true
+}
+
+// ParseDateQuery reads a WordPress ?m= value as a date: YYYY, YYYYMM or
+// YYYYMMDD, all digits at fixed width. Any other width (including the hour
+// form), a non-ASCII-digit byte, a zero month or day, or a non-calendar date
+// returns false. It reads no database and returns no error. Calendar validity
+// is delegated to DateRef.Range, as in dateFromSegments.
+func ParseDateQuery(s string) (DateRef, bool) {
+	var d DateRef
+	switch len(s) {
+	case 4, 6, 8:
+	default:
+		return DateRef{}, false
+	}
+	year, ok := fixedWidthInt(s[:4], 4)
+	if !ok {
+		return DateRef{}, false
+	}
+	d.Year = year
+	if len(s) >= 6 {
+		month, ok := fixedWidthInt(s[4:6], 2)
+		if !ok || month == 0 {
+			return DateRef{}, false
+		}
+		d.Month = month
+	}
+	if len(s) == 8 {
+		day, ok := fixedWidthInt(s[6:8], 2)
+		if !ok || day == 0 {
+			return DateRef{}, false
+		}
+		d.Day = day
+	}
+	if _, _, ok := d.Range(); !ok {
+		return DateRef{}, false
+	}
+	return d, true
+}
+
+// DateQuery renders d as a ?m= value at its granularity: YYYY, YYYYMM or
+// YYYYMMDD. It is the inverse of ParseDateQuery for any DateRef that parser
+// accepts.
+func DateQuery(d DateRef) string {
+	switch {
+	case d.Month == 0:
+		return fmt.Sprintf("%04d", d.Year)
+	case d.Day == 0:
+		return fmt.Sprintf("%04d%02d", d.Year, d.Month)
+	default:
+		return fmt.Sprintf("%04d%02d%02d", d.Year, d.Month, d.Day)
+	}
 }
 
 // pathSegments splits a request path into its non-empty segments, so the two

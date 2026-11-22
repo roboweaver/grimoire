@@ -1037,7 +1037,8 @@ archive pagination is correct and documented. The group below requires M16's own
 dedicated spec before implementation, and is undertaken only if `/page/{n}/`
 parity is explicitly wanted.
 
-- [ ] **16.A — /page/{n}/ + ?m= forms.** *(Optional, lowest priority.)* Serve
+- [x] **16.A — /page/{n}/ + ?m= forms.** ✅ shipped (`../21-archive-path-pagination`,
+      PR 1 `/page/{n}/`, PR 2 `?m=`). *(Optional, lowest priority.)* Serve
       `/page/{n}/`-form archive pagination in addition to the current `?page=N`
       form, disambiguating the `page` segment from a child term slugged `page`
       (e.g. reserving the segment or a structure-aware classifier rule in
@@ -1045,3 +1046,12 @@ parity is explicitly wanted.
       reason `?page=N` was chosen — and resolve the `?m=YYYYMM` date-query form
       to the corresponding date archive. The existing `?page=N` behavior stays
       correct and supported; M16 adds path-form parity rather than replacing it.
+      **Shipped:** `/page/{n}/` on the home page and every paginated archive
+      through a classifier that peels a trailing `page/{n}` (`page` is not
+      reserved; three rare shapes are shadowed, none in the dev database);
+      `?page=`/`?paged=` unchanged with a canonical `Link` header; handler-built
+      `PrevURL`/`NextURL`. `GET /?m=YYYY[MM[DD]]` serves the date archive in
+      place (first `m` wins, invalid values ignored, ignored off the home route,
+      path-form `Link` header on structured sites, `?m=` links under Flat).
+      Real-database check green against the dev WordPress DB (75 `?m=` strings
+      from 25 posts). No migration, column, capability or dependency.

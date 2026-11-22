@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/content"
@@ -21,19 +23,70 @@ import (
 // immediately before it is written to the response.
 const hookRenderPostHTML = "render.post_html"
 
-// pageParam parses a ?page= query value, defaulting to 1 for missing/invalid.
+// pageParam reads the query-form page number: page, else paged. An absent,
+// empty, non-integer, zero or negative value is page 1. Any positive decimal
+// integer above routing.MaxPageNumber, including one beyond int64, is clamped to
+// MaxPageNumber, so the out-of-range rule answers 404 and no offset arithmetic
+// can overflow.
 func pageParam(r *http.Request) int {
-	p, err := strconv.Atoi(r.URL.Query().Get("page"))
+	q := r.URL.Query()
+	raw := q.Get("page")
+	if _, ok := q["page"]; !ok {
+		raw = q.Get("paged")
+	}
+	p, err := strconv.Atoi(raw)
+	if errors.Is(err, strconv.ErrRange) && !strings.HasPrefix(raw, "-") {
+		return routing.MaxPageNumber
+	}
 	if err != nil || p < 1 {
 		return 1
+	}
+	if p > routing.MaxPageNumber {
+		return routing.MaxPageNumber
 	}
 	return p
 }
 
+// pageFor returns the path-form number when the target carries one, else the
+// query-form number.
+func pageFor(r *http.Request, t routing.Target) int {
+	if t.Page > 0 {
+		return t.Page
+	}
+	return pageParam(r)
+}
+
+// setCanonicalLink marks a query-form response with a relative canonical Link
+// header pointing at the archive page's canonical form. It writes nothing unless
+// the query has a page or paged argument. The path is escaped so a slug cannot
+// break the header.
+func setCanonicalLink(w http.ResponseWriter, r *http.Request, st routing.Structure, base string, page int) {
+	q := r.URL.Query()
+	_, hasPage := q["page"]
+	_, hasPaged := q["paged"]
+	if (!hasPage && !hasPaged) || base == "" {
+		return
+	}
+	p := (&url.URL{Path: st.PaginatedPath(base, page)}).EscapedPath()
+	w.Header().Set("Link", "<"+p+`>; rel="canonical"`)
+}
+
 func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
+	return s.serveHome(w, r, routing.Target{})
+}
+
+// serveHome renders the home list. A zero target is GET /; a KindHome target is
+// path-form pagination, which redirects unless the request path is already the
+// canonical form of its page.
+func (s *Server) serveHome(w http.ResponseWriter, r *http.Request, t routing.Target) error {
+	if t.Kind == routing.KindHome {
+		if want := s.permalinks.PaginatedPath("/", t.Page); r.URL.Path != want {
+			return s.redirectCanonical(w, r, want)
+		}
+	}
 	ctx := r.Context()
 	title, tagline := s.options.SiteInfo(ctx)
-	page := pageParam(r)
+	page := pageFor(r, t)
 	posts, pg, err := s.posts.RecentPage(ctx, page, content.DefaultPerPage)
 	if err != nil {
 		return err
@@ -41,11 +94,15 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 	if page > 1 && pg.Total > 0 && page > pg.TotalPages {
 		return domain.ErrNotFound
 	}
+	prev, next := s.permalinks.PageLinks("/", pg.Page, pg.TotalPages)
+	setCanonicalLink(w, r, s.permalinks, "/", pg.Page)
 	data := render.IndexData{
 		SiteTitle:  title,
 		Tagline:    tagline,
 		Posts:      postViews(ctx, posts, s.options.BaseURLs(ctx), s.featured),
 		Pagination: pg,
+		PrevURL:    prev,
+		NextURL:    next,
 	}
 	return s.renderHTML(w, r, "index", data)
 }
@@ -64,6 +121,8 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) error {
 // unobservable rather than something the code has to win.
 func (s *Server) resolve(w http.ResponseWriter, r *http.Request) error {
 	switch t := s.permalinks.Classify(r.URL.Path); t.Kind {
+	case routing.KindHome:
+		return s.serveHome(w, r, t)
 	case routing.KindPost:
 		return s.single(w, r, t)
 	case routing.KindCategory:
@@ -208,12 +267,12 @@ func (s *Server) customArchive(w http.ResponseWriter, r *http.Request, t routing
 	if !ok {
 		return domain.ErrNotFound
 	}
-	archive, err := s.customPosts.Archive(r.Context(), t.TypeName, pageParam(r), content.DefaultPerPage)
+	archive, err := s.customPosts.Archive(r.Context(), t.TypeName, pageFor(r, t), content.DefaultPerPage)
 	if err != nil {
 		return err
 	}
 	archive.Heading = pt.Heading()
-	return s.renderArchive(w, r, "archive", s.permalinks.CustomArchivePath(t.TypeName), archive)
+	return s.renderArchive(w, r, "archive", s.permalinks.CustomArchivePath(t.TypeName), t, archive)
 }
 
 // customTermArchive renders a custom taxonomy term archive (M12), listing the
@@ -223,10 +282,10 @@ func (s *Server) customTermArchive(w http.ResponseWriter, r *http.Request, t rou
 	if !ok {
 		return domain.ErrNotFound
 	}
-	archive, err := s.terms.TaxonomyArchive(r.Context(), tax.Name, tax.Hierarchical, tax.ObjectTypes, t.Segments, pageParam(r), content.DefaultPerPage)
+	archive, err := s.terms.TaxonomyArchive(r.Context(), tax.Name, tax.Hierarchical, tax.ObjectTypes, t.Segments, pageFor(r, t), content.DefaultPerPage)
 	var moved *content.CategoryMovedError
 	if errors.As(err, &moved) {
-		return s.redirectCustom(w, r, s.permalinks.CustomTermPath(tax.Name, moved.Ancestry))
+		return s.redirectCustom(w, r, s.permalinks.PaginatedPath(s.permalinks.CustomTermPath(tax.Name, moved.Ancestry), t.Page))
 	}
 	if err != nil {
 		return err
@@ -235,7 +294,7 @@ func (s *Server) customTermArchive(w http.ResponseWriter, r *http.Request, t rou
 	if ancestry == nil {
 		ancestry = []string{archive.Term.Slug}
 	}
-	return s.renderArchive(w, r, "archive", s.permalinks.CustomTermPath(tax.Name, ancestry), archive)
+	return s.renderArchive(w, r, "archive", s.permalinks.CustomTermPath(tax.Name, ancestry), t, archive)
 }
 
 // redirectCustom 301s to canonical, treating an empty target as a 404 so a
@@ -426,10 +485,10 @@ func (s *Server) pendingEcho(r *http.Request) (*render.CommentView, error) {
 // domain.ErrNotFound so that forgetting this arm cannot quietly 404 every legacy
 // category URL on the site.
 func (s *Server) categoryArchive(w http.ResponseWriter, r *http.Request, t routing.Target) error {
-	archive, err := s.terms.CategoryArchive(r.Context(), t.Segments, pageParam(r), content.DefaultPerPage)
+	archive, err := s.terms.CategoryArchive(r.Context(), t.Segments, pageFor(r, t), content.DefaultPerPage)
 	var moved *content.CategoryMovedError
 	if errors.As(err, &moved) {
-		return s.redirectCanonical(w, r, s.permalinks.CategoryPath(moved.Ancestry))
+		return s.redirectCanonical(w, r, s.permalinks.PaginatedPath(s.permalinks.CategoryPath(moved.Ancestry), t.Page))
 	}
 	if err != nil {
 		return err
@@ -437,7 +496,7 @@ func (s *Server) categoryArchive(w http.ResponseWriter, r *http.Request, t routi
 	// The canonical path is built from the resolved term's own ancestry, not
 	// from the requested segments, so it is a fixed point: a request already at
 	// it renders rather than redirecting to itself (Req 2.4).
-	return s.renderArchive(w, r, "category", s.permalinks.CategoryPath(archive.Ancestry), archive)
+	return s.renderArchive(w, r, "category", s.permalinks.CategoryPath(archive.Ancestry), t, archive)
 }
 
 // page serves a nested page path (M15), the page analogue of categoryArchive.
@@ -489,11 +548,11 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request, t routing.Target) 
 // requested one, so the Location is derived from the database row the way every
 // other archive's is.
 func (s *Server) tagArchive(w http.ResponseWriter, r *http.Request, t routing.Target) error {
-	archive, err := s.terms.TagArchive(r.Context(), t.Slug, pageParam(r), content.DefaultPerPage)
+	archive, err := s.terms.TagArchive(r.Context(), t.Slug, pageFor(r, t), content.DefaultPerPage)
 	if err != nil {
 		return err
 	}
-	return s.renderArchive(w, r, "tag", s.permalinks.TagPath(archive.Term.Slug), archive)
+	return s.renderArchive(w, r, "tag", s.permalinks.TagPath(archive.Term.Slug), t, archive)
 }
 
 // authorArchive serves an author archive (Req 7.1).
@@ -503,11 +562,11 @@ func (s *Server) tagArchive(w http.ResponseWriter, r *http.Request, t routing.Ta
 // author is Heading, the display_name, so the archive cannot render a
 // user_login the site had not already exposed (Req 7.4).
 func (s *Server) authorArchive(w http.ResponseWriter, r *http.Request, t routing.Target) error {
-	archive, err := s.posts.AuthorArchive(r.Context(), t.Slug, pageParam(r), content.DefaultPerPage)
+	archive, err := s.posts.AuthorArchive(r.Context(), t.Slug, pageFor(r, t), content.DefaultPerPage)
 	if err != nil {
 		return err
 	}
-	return s.renderArchive(w, r, "author", s.permalinks.AuthorPath(t.Slug), archive)
+	return s.renderArchive(w, r, "author", s.permalinks.AuthorPath(t.Slug), t, archive)
 }
 
 // dateArchive serves a date archive at whichever granularity the path carried
@@ -519,11 +578,11 @@ func (s *Server) authorArchive(w http.ResponseWriter, r *http.Request, t routing
 // by DateArchive, which is what makes "404 rather than querying" (Req 6.3) true
 // of the service and not only of the router.
 func (s *Server) dateArchive(w http.ResponseWriter, r *http.Request, t routing.Target) error {
-	archive, err := s.posts.DateArchive(r.Context(), t.Date, pageParam(r), content.DefaultPerPage)
+	archive, err := s.posts.DateArchive(r.Context(), t.Date, pageFor(r, t), content.DefaultPerPage)
 	if err != nil {
 		return err
 	}
-	return s.renderArchive(w, r, "date", s.permalinks.DatePath(t.Date), archive)
+	return s.renderArchive(w, r, "date", s.permalinks.DatePath(t.Date), t, archive)
 }
 
 // renderArchive is the shared tail of all four archive handlers: canonicalise,
@@ -546,16 +605,18 @@ func (s *Server) dateArchive(w http.ResponseWriter, r *http.Request, t routing.T
 // order: Total > 0 so an empty archive never 404s on page 2, and after the
 // canonical redirect so a non-canonical URL is corrected before its page number
 // is judged (Req 8.3).
-func (s *Server) renderArchive(w http.ResponseWriter, r *http.Request, kind, canonical string, a content.Archive) error {
+func (s *Server) renderArchive(w http.ResponseWriter, r *http.Request, kind, canonical string, t routing.Target, a content.Archive) error {
 	if canonical == "" {
 		return domain.ErrNotFound
 	}
-	if r.URL.Path != canonical {
-		return s.redirectCanonical(w, r, canonical)
+	if want := s.permalinks.PaginatedPath(canonical, t.Page); r.URL.Path != want {
+		return s.redirectCanonical(w, r, want)
 	}
-	if page := pageParam(r); page > 1 && a.Page.Total > 0 && page > a.Page.TotalPages {
+	if page := pageFor(r, t); page > 1 && a.Page.Total > 0 && page > a.Page.TotalPages {
 		return domain.ErrNotFound
 	}
+	prev, next := s.permalinks.PageLinks(canonical, a.Page.Page, a.Page.TotalPages)
+	setCanonicalLink(w, r, s.permalinks, canonical, a.Page.Page)
 	ctx := r.Context()
 	title, tagline := s.options.SiteInfo(ctx)
 	data := render.ArchiveData{
@@ -567,6 +628,8 @@ func (s *Server) renderArchive(w http.ResponseWriter, r *http.Request, kind, can
 		Term:       termView(a.Term),
 		Posts:      postViews(ctx, a.Posts, s.options.BaseURLs(ctx), s.featured),
 		Pagination: a.Page,
+		PrevURL:    prev,
+		NextURL:    next,
 	}
 	return s.renderHTML(w, r, kind, data)
 }

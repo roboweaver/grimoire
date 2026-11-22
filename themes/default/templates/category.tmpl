@@ -13,8 +13,8 @@
 {{if gt .Pagination.TotalPages 1}}
 <nav class="theme-pagination" aria-label="Posts pagination">
 <p class="spectrum-Body spectrum-Body--sizeS">Page {{.Pagination.Page}} of {{.Pagination.TotalPages}}</p>
-{{if gt .Pagination.Page 1}}<a href="{{.BaseURL}}?page={{sub .Pagination.Page 1}}" class="spectrum-Link">Previous</a>{{end}}
-{{if lt .Pagination.Page .Pagination.TotalPages}}<a href="{{.BaseURL}}?page={{add .Pagination.Page 1}}" class="spectrum-Link">Next</a>{{end}}
+{{if .PrevURL}}<a href="{{.PrevURL}}" class="spectrum-Link">Previous</a>{{end}}
+{{if .NextURL}}<a href="{{.NextURL}}" class="spectrum-Link">Next</a>{{end}}
 </nav>
 {{end}}
 {{end}}

@@ -84,6 +84,45 @@ func TestRenderArchiveDataThroughArchiveKinds(t *testing.T) {
 	}
 }
 
+// TestRenderArchiveDataKeepsBaseURLForCustomThemes asserts BaseURL still carries
+// the canonical archive path while PrevURL and NextURL are added beside it, so a
+// custom inline template that builds {{.BaseURL}}?page=N keeps producing the
+// link it always did, and a template reading the new fields sees the handler's
+// values. The default theme no longer hand-builds ?page= links; this custom
+// template is the one place that form is still exercised.
+//
+// Validates: Requirements 7.4, 7.5
+func TestRenderArchiveDataKeepsBaseURLForCustomThemes(t *testing.T) {
+	root, theme := writeTheme(t, map[string]string{
+		"base.tmpl":  miniBase,
+		"index.tmpl": kindMarker("index"),
+		"category.tmpl": `{{define "content"}}` +
+			`<a href="{{.BaseURL}}?page={{add .Pagination.Page 1}}">legacy</a>` +
+			`<a href="{{.PrevURL}}">prev</a><a href="{{.NextURL}}">next</a>` +
+			`{{end}}`,
+	})
+	e, err := Load(root, theme)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	data := archiveDataFixture("category")
+	data.PrevURL, data.NextURL = "/category/news/local/", "/category/news/local/page/2/"
+	var buf bytes.Buffer
+	if err := e.Render(&buf, "category", data); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		`href="/category/news/local?page=2"`,
+		`href="/category/news/local/"`,
+		`href="/category/news/local/page/2/"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered output missing %s, got %q", want, got)
+		}
+	}
+}
+
 // TestRenderArchiveDataFallsBackToArchiveTemplate asserts the same for a theme
 // that provides only archive.tmpl — the case the default theme is in for tag,
 // author and date, none of which has a template of its own (Req 11.3).

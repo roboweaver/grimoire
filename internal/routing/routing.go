@@ -799,6 +799,87 @@ func (s Structure) ArchivePatterns() []string {
 	return pats
 }
 
+// PaginatedPath returns the URL of page n of the archive whose page-1 path is
+// base. For n < 2 it returns base as given. Otherwise it returns base +
+// "/page/{n}", with a trailing slash when the structure has one, whichever form
+// base arrived in. An empty base addresses nothing and yields "".
+func (s Structure) PaginatedPath(base string, n int) string {
+	if base == "" {
+		return ""
+	}
+	if n < 2 {
+		return base
+	}
+	p := strings.TrimSuffix(base, "/") + "/page/" + strconv.Itoa(n)
+	if s.TrailingSlash {
+		p += "/"
+	}
+	return p
+}
+
+// PageLinks returns the previous and next page URLs for the page being shown.
+// prev is base itself when page == 2, never a /page/1/ form, and "" when
+// page <= 1. next is "" when page >= totalPages. An empty base yields "", "".
+func (s Structure) PageLinks(base string, page, totalPages int) (prev, next string) {
+	if base == "" {
+		return "", ""
+	}
+	if page > 1 {
+		prev = s.PaginatedPath(base, page-1)
+	}
+	if page < 1 {
+		page = 1
+	}
+	if page < totalPages {
+		next = s.PaginatedPath(base, page+1)
+	}
+	return prev, next
+}
+
+// PaginationPatterns returns the chi patterns path-form pagination needs, in
+// both slash forms and duplicate-free: the home page, tags, authors, date
+// archives when the structure serves them, and each custom type archive.
+// Categories and custom taxonomy terms are absent because their wildcards
+// already reach the dispatcher. It is separate from ArchivePatterns and
+// CustomPatterns so their contracts stay as they are.
+//
+// The prefixes come from archivePrefix and CustomBase, the helpers the
+// constructors and Classify use, so a pattern cannot be registered where
+// Classify would decline.
+func (s Structure) PaginationPatterns() []string {
+	const page, num = "page", "{pagenum}"
+	var pats []string
+	seen := map[string]bool{}
+	add := func(prefix []string, tail ...string) {
+		for _, p := range bothSlashForms(joinPattern(prefix, append(tail, page, num)...)) {
+			if !seen[p] {
+				seen[p] = true
+				pats = append(pats, p)
+			}
+		}
+	}
+	add(nil)
+
+	tag := append(s.archivePrefix(archiveTag), baseSegments(s.TagBase)...)
+	add(tag, "{slug}")
+	author := append(s.archivePrefix(archiveAuthor), AuthorBase)
+	add(author, "{nicename}")
+
+	if s.servesDateArchives() {
+		date := s.archivePrefix(archiveDate)
+		year, month, day := paramPattern(tokYear), paramPattern(tokMonth), paramPattern(tokDay)
+		add(date, year)
+		add(date, year, month)
+		add(date, year, month, day)
+	}
+	for _, t := range s.customTypes {
+		if t.HasArchive() {
+			add(s.CustomBase(t.ArchiveSlug, t.WithFront))
+		}
+	}
+	return pats
+}
+
 // customType and customTax look a registered entry up by name.
 func (s Structure) customType(name string) (TypeRoute, bool) {
 	for _, t := range s.customTypes {

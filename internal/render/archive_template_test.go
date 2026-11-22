@@ -63,73 +63,198 @@ func TestDefaultThemeArchiveRendersHeading(t *testing.T) {
 	}
 }
 
-// TestDefaultThemeArchivePaginationUsesBaseURL asserts archive.tmpl renders
-// pagination when TotalPages > 1, and that every link is built from .BaseURL —
-// the canonical archive path the handler resolved — rather than by concatenating
-// a hard-coded base with .Term.Slug the way category.tmpl does today. The
-// hard-coded form is wrong for a nested category and wrong for an overridden
-// category_base, and Term is empty entirely for the author and date kinds.
+// TestDefaultThemeArchivePaginationUsesHandlerLinks asserts the default theme's
+// archive.tmpl renders the PrevURL and NextURL the handler built, verbatim, and
+// never builds a ?page= link itself. The handler derives both from
+// routing.Structure.PageLinks, so the theme must not re-derive them from
+// .BaseURL or .Pagination. A Previous link is rendered only when PrevURL is set
+// and a Next link only when NextURL is set, independent of the page numbers.
 //
-// Validates: Requirements 8.4, 11.3
-func TestDefaultThemeArchivePaginationUsesBaseURL(t *testing.T) {
+// Validates: Requirements 7.4
+func TestDefaultThemeArchivePaginationUsesHandlerLinks(t *testing.T) {
 	e := defaultEngine(t)
 	cases := []struct {
-		name     string
-		page     int
-		total    int
-		wantHref []string
-		notHref  []string
+		name       string
+		page       int
+		total      int
+		prev, next string
+		wantHref   []string
+		wantText   []string
+		notText    []string
 	}{
 		{
-			name:     "first page links next only",
-			page:     1,
-			total:    3,
-			wantHref: []string{`href="/sections/news/local?page=2"`},
-			notHref:  []string{`?page=0"`},
+			name: "first page links next only", page: 1, total: 3,
+			next:     "/sections/news/local/page/2/",
+			wantHref: []string{`href="/sections/news/local/page/2/"`},
+			wantText: []string{"Next"},
+			notText:  []string{"Previous"},
 		},
 		{
-			name:     "middle page links both directions",
-			page:     2,
-			total:    3,
-			wantHref: []string{`href="/sections/news/local?page=1"`, `href="/sections/news/local?page=3"`},
+			name: "page two previous is the base, never page 1", page: 2, total: 3,
+			prev: "/sections/news/local/", next: "/sections/news/local/page/3/",
+			wantHref: []string{`href="/sections/news/local/"`, `href="/sections/news/local/page/3/"`},
+			wantText: []string{"Previous", "Next"},
+			notText:  []string{"/page/1"},
 		},
 		{
-			name:     "last page links previous only",
-			page:     3,
-			total:    3,
-			wantHref: []string{`href="/sections/news/local?page=2"`},
-			notHref:  []string{`?page=4"`},
+			name: "middle page links both directions", page: 3, total: 5,
+			prev: "/sections/news/local/page/2/", next: "/sections/news/local/page/4/",
+			wantHref: []string{`href="/sections/news/local/page/2/"`, `href="/sections/news/local/page/4/"`},
+			wantText: []string{"Previous", "Next"},
+		},
+		{
+			name: "last page links previous only", page: 3, total: 3,
+			prev:     "/sections/news/local/page/2/",
+			wantHref: []string{`href="/sections/news/local/page/2/"`},
+			wantText: []string{"Previous"},
+			notText:  []string{"Next"},
 		},
 	}
 	for _, kind := range archiveFallbackKinds {
 		t.Run(kind, func(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
+					data := defaultThemeArchiveData(kind, tc.page, tc.total)
+					data.PrevURL, data.NextURL = tc.prev, tc.next
 					var buf bytes.Buffer
-					if err := e.Render(&buf, kind, defaultThemeArchiveData(kind, tc.page, tc.total)); err != nil {
+					if err := e.Render(&buf, kind, data); err != nil {
 						t.Fatalf("render %q: %v", kind, err)
 					}
 					got := buf.String()
-					for _, want := range tc.wantHref {
+					for _, want := range append(tc.wantHref, tc.wantText...) {
 						if !strings.Contains(got, want) {
-							t.Fatalf("kind %q: pagination missing %s, got:\n%s", kind, want, got)
+							t.Fatalf("kind %q: output missing %s, got:\n%s", kind, want, got)
 						}
 					}
-					for _, unwanted := range tc.notHref {
+					for _, unwanted := range tc.notText {
 						if strings.Contains(got, unwanted) {
-							t.Fatalf("kind %q: pagination must not link %s, got:\n%s", kind, unwanted, got)
+							t.Fatalf("kind %q: output must not contain %s, got:\n%s", kind, unwanted, got)
 						}
 					}
-					// A link built from a hard-coded base plus the term slug is
-					// the defect Req 8.4 names; assert it is absent rather than
-					// only that the right link is present, since both can hold.
-					if strings.Contains(got, `href="/category/`) {
-						t.Fatalf("kind %q: pagination must be built from .BaseURL, not a hard-coded /category/ base, got:\n%s", kind, got)
+					if strings.Contains(got, "?page=") {
+						t.Fatalf("kind %q: the default theme must not build a ?page= link, got:\n%s", kind, got)
 					}
 				})
 			}
 		})
 	}
+}
+
+// TestDefaultThemeArchiveHidesLinksWhenURLsEmpty asserts the links follow
+// PrevURL and NextURL, not the page counters: with both empty on a middle page
+// the pagination block still renders but neither Previous nor Next does.
+//
+// Validates: Requirements 7.4
+func TestDefaultThemeArchiveHidesLinksWhenURLsEmpty(t *testing.T) {
+	e := defaultEngine(t)
+	for _, kind := range archiveFallbackKinds {
+		t.Run(kind, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := e.Render(&buf, kind, defaultThemeArchiveData(kind, 2, 3)); err != nil {
+				t.Fatalf("render %q: %v", kind, err)
+			}
+			got := buf.String()
+			for _, unwanted := range []string{"Previous", "Next", "?page="} {
+				if strings.Contains(got, unwanted) {
+					t.Fatalf("kind %q: empty PrevURL and NextURL must render no %q, got:\n%s", kind, unwanted, got)
+				}
+			}
+		})
+	}
+}
+
+// TestDefaultThemeCategoryRendersHandlerLinks is the same assertion for
+// category.tmpl, which the category kind selects directly.
+//
+// Validates: Requirements 7.4
+func TestDefaultThemeCategoryRendersHandlerLinks(t *testing.T) {
+	e := defaultEngine(t)
+	data := defaultThemeArchiveData("category", 2, 3)
+	data.PrevURL, data.NextURL = "/sections/news/local/", "/sections/news/local/page/3/"
+	var buf bytes.Buffer
+	if err := e.Render(&buf, "category", data); err != nil {
+		t.Fatalf("render category: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{`href="/sections/news/local/"`, `href="/sections/news/local/page/3/"`, "Previous", "Next"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("category output missing %s, got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "?page=") {
+		t.Fatalf("category.tmpl must not build a ?page= link, got:\n%s", got)
+	}
+
+	data.PrevURL, data.NextURL = "", ""
+	buf.Reset()
+	if err := e.Render(&buf, "category", data); err != nil {
+		t.Fatalf("render category: %v", err)
+	}
+	for _, unwanted := range []string{"Previous", "Next", "?page="} {
+		if strings.Contains(buf.String(), unwanted) {
+			t.Fatalf("category: empty PrevURL and NextURL must render no %q, got:\n%s", unwanted, buf.String())
+		}
+	}
+}
+
+// TestDefaultThemeIndexRendersHandlerLinks asserts index.tmpl renders the
+// PrevURL and NextURL the home handler supplies, and nothing else.
+//
+// Validates: Requirements 7.4
+func TestDefaultThemeIndexRendersHandlerLinks(t *testing.T) {
+	e := defaultEngine(t)
+	base := IndexData{
+		SiteTitle:  "grimoire",
+		Tagline:    "A Go-native CMS",
+		Posts:      []PostView{{Slug: "hello-world", Title: "Hello World", Excerpt: "First post.", Date: fixedDate}},
+		Pagination: content.Page{Page: 2, PerPage: 10, Total: 30, TotalPages: 3},
+	}
+	render := func(t *testing.T, d IndexData) string {
+		t.Helper()
+		var buf bytes.Buffer
+		if err := e.Render(&buf, "index", d); err != nil {
+			t.Fatalf("render index: %v", err)
+		}
+		return buf.String()
+	}
+
+	t.Run("both set", func(t *testing.T) {
+		d := base
+		d.PrevURL, d.NextURL = "/", "/page/3/"
+		got := render(t, d)
+		for _, want := range []string{`href="/" class="spectrum-Link">Previous`, `href="/page/3/" class="spectrum-Link">Next`} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("index output missing %s, got:\n%s", want, got)
+			}
+		}
+		if strings.Contains(got, "?page=") {
+			t.Fatalf("index.tmpl must not build a ?page= link, got:\n%s", got)
+		}
+	})
+	t.Run("both empty", func(t *testing.T) {
+		got := render(t, base)
+		for _, unwanted := range []string{"Previous", "Next", "?page="} {
+			if strings.Contains(got, unwanted) {
+				t.Fatalf("empty PrevURL and NextURL must render no %q, got:\n%s", unwanted, got)
+			}
+		}
+	})
+	t.Run("next only", func(t *testing.T) {
+		d := base
+		d.NextURL = "/page/3/"
+		got := render(t, d)
+		if !strings.Contains(got, `href="/page/3/"`) || strings.Contains(got, "Previous") {
+			t.Fatalf("want Next without Previous, got:\n%s", got)
+		}
+	})
+	t.Run("prev only", func(t *testing.T) {
+		d := base
+		d.PrevURL = "/"
+		got := render(t, d)
+		if !strings.Contains(got, "Previous") || strings.Contains(got, "Next") {
+			t.Fatalf("want Previous without Next, got:\n%s", got)
+		}
+	})
 }
 
 // TestDefaultThemeArchiveOmitsPaginationOnSinglePage asserts the pagination block

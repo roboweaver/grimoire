@@ -80,10 +80,38 @@ func (s Structure) baseOptionNotes() []string {
 			tagBaseOption, AuthorBase, AuthorBase))
 	}
 
+	notes = append(notes, pageBaseNote(categoryBaseOption, s.CategoryBase)...)
+	notes = append(notes, pageBaseNote(tagBaseOption, s.TagBase)...)
 	notes = append(notes, multiSegmentBaseNote(categoryBaseOption, s.CategoryBase)...)
 	notes = append(notes, multiSegmentBaseNote(tagBaseOption, s.TagBase)...)
 
 	return notes
+}
+
+// pageBaseNote reports a base that resolves to "page" (Req 9.6). Path-form
+// pagination peels page/{n} off first, so a term slugged by a page number under
+// that base is unreachable, and the operator is told which option causes it.
+func pageBaseNote(option, base string) []string {
+	if base != "page" {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"%s resolves to %q: /page/{n} is home page pagination, so a term "+
+			"slugged by a page number under that base is unreachable",
+		option, base)}
+}
+
+// pageSlugNote reports a custom entry whose slug or archive slug is "page"
+// (Req 9.7), for the same reason as pageBaseNote.
+func pageSlugNote(what, name, field, slug string) []string {
+	if slug != "page" {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"custom %s %q: its %s resolves to %q: /page/{n} is home page "+
+			"pagination, so an entry slugged by a page number under that "+
+			"base is unreachable",
+		what, name, field, slug)}
 }
 
 // multiSegmentBaseNote reports a base that normalizes to more than one segment
@@ -177,6 +205,11 @@ func (s Structure) shadowNotes() []string {
 		}
 		notes = append(notes, s.yearFirstNote(tr.Name, "single",
 			s.CustomBase(tr.Slug, tr.WithFront))...)
+		notes = append(notes, pageSlugNote("post type", tr.Name, "slug", tr.Slug)...)
+		notes = append(notes, pageSlugNote("post type", tr.Name, "archive slug", tr.ArchiveSlug)...)
+	}
+	for _, tr := range s.customTaxes {
+		notes = append(notes, pageSlugNote("taxonomy", tr.Name, "slug", tr.Slug)...)
 	}
 	return notes
 }

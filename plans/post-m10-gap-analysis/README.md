@@ -181,19 +181,21 @@ route; and the page REST `link`. Cross-vendor contract + handler + content +
 real-WordPress-DB nested-page fixture coverage. No migration, no column, no new
 capability, no second permalink construction site.
 
-### M16 — Archive/pagination path-form parity (lower priority)
-
-**Gap.** Archive pagination uses `?page=N` where WordPress uses `/page/{n}/`,
-and the `?m=YYYYMM` date-query form and date archives under a plain permalink
-are not served (compatibility.md:250–258). These are **deliberate, documented
-divergences**, not bugs — `/category/news/page/2` is ambiguous with a child
-category slugged `page`.
-
-**Scope sketch.** Only worth a milestone if `/page/{n}/` parity is explicitly
-wanted; it requires disambiguating the `page` segment (e.g. reserving it, or a
-structure-aware classifier rule). Lowest priority — current behavior is correct
-and documented.
-
+### M16 — Archive/pagination path-form parity (lower priority)  🚧 in progress (1 of 2 shipped, `../21-archive-path-pagination`)
+**Gap.** The `?m=YYYYMM` date-query form and date archives under a plain
+permalink are not served (compatibility.md, M9b notes). This is a **deliberate,
+documented divergence**, not a bug. Path-form pagination is no longer part of
+the gap (PR 1, below).
+**Shipped in M16 (PR 1, `plans/21-archive-path-pagination`):** `/page/{n}/` on
+the home page and every paginated archive (nested category, tag, author, date,
+custom archive, custom term), through a classifier that peels a trailing
+`page/{n}` and reuses the existing rules, so `page` is not reserved. `?page=N`
+and `?paged=N` still answer `200` with a relative canonical `Link` header;
+`/page/1/` and the wrong slash form `301` with the raw query kept. Themes get
+handler-built `PrevURL` and `NextURL`. Three rare shapes are shadowed, with no
+fallback (documented in compatibility.md, M16); the development real-database
+check found none. No schema change.
+**Scope sketch.** PR 2 adds `?m=YYYYMM` on the home route. Lowest priority.
 ## Recommended ordering
 
 1. ~~**M11 (REST delete)**~~ — ✅ shipped (PR #64).

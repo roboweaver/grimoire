@@ -722,3 +722,64 @@ func TestRESTPaginationHeadersUnaffected(t *testing.T) {
 		})
 	}
 }
+
+// M16 task 3.1 -- the probe table of design.md Finding 2. The new static "page"
+// nodes (/page/{pagenum}, /{year}/page/{pagenum}, /{year}/{monthnum}/page/{pagenum},
+// /{year}/{monthnum}/{day}/page/{pagenum}, tag/author/custom variants) must not
+// hide a parameter route: a post slugged "page", /page, /page/x and /page/2/3
+// must keep reaching the dispatcher, with and without WithPages. The server and
+// its fixture (a post slugged "page") are in pagination_archives_test.go.
+func TestPaginationRoutesDoNotShadowDispatcher(t *testing.T) {
+	type probe struct {
+		path         string
+		want         int
+		wantLocation string
+	}
+	for _, withPages := range []bool{false, true} {
+		for _, tc := range []struct {
+			structure string
+			probes    []probe
+		}{
+			{structPostName, []probe{
+				{"/page/", http.StatusOK, ""},                    // the post slugged page
+				{"/page", http.StatusMovedPermanently, "/page/"}, // no number: the dispatcher, not pagination
+				{"/page/x/", http.StatusNotFound, ""},            // not a page number
+				{"/page/x", http.StatusNotFound, ""},
+				{"/page/2/3/", http.StatusNotFound, ""},        // last pair is 2/3, not page/n
+				{"/page/0/", http.StatusNotFound, ""},          // not a page number
+				{"/page/2/", http.StatusOK, ""},                // home page 2 (the post "page" is not involved)
+				{"/page/1/", http.StatusMovedPermanently, "/"}, // page 1 is the base
+				{"/hello-1/page/2/", http.StatusNotFound, ""},  // a post is not paginatable
+				{"/about/page/2/", http.StatusNotFound, ""},    // /{slug}/* walk, remainder is a page
+			}},
+			{structMonthAndName, []probe{
+				{"/2024/01/page/", http.StatusOK, ""},                            // post slugged page, canonical
+				{"/2024/01/page", http.StatusMovedPermanently, "/2024/01/page/"}, // other slash form
+				{"/2024/01/hello-1/", http.StatusOK, ""},                         // an ordinary post
+				{"/2024/page/", http.StatusNotFound, ""},                         // no number
+				{"/2024/page/x/", http.StatusNotFound, ""},                       // not a page number
+				{"/2024/01/page/2/", http.StatusNotFound, ""},                    // month archive page 2: 3 posts, past the end
+				{"/2024/01/page/1/", http.StatusMovedPermanently, "/2024/01/"},   // page 1 is the base
+				{"/2024/page/2/", http.StatusNotFound, ""},                       // year archive page 2, past the end
+			}},
+		} {
+			name := "no pages"
+			if withPages {
+				name = "with pages"
+			}
+			t.Run(tc.structure+"/"+name, func(t *testing.T) {
+				h := newPaginationServer(t, tc.structure, withPages, seedPostSluggedPage)
+				for _, p := range tc.probes {
+					rec := get(t, h, p.path)
+					if rec.Code != p.want {
+						t.Errorf("GET %s = %d, want %d (body %.100s)", p.path, rec.Code, p.want, rec.Body.String())
+						continue
+					}
+					if got := rec.Header().Get("Location"); got != p.wantLocation {
+						t.Errorf("GET %s Location = %q, want %q", p.path, got, p.wantLocation)
+					}
+				}
+			})
+		}
+	}
+}

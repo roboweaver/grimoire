@@ -146,6 +146,17 @@ func builtinGoldenScript() []goldenReq {
 		{name: "admin terms list unknown", actor: "admin", method: "GET", path: "/admin/api/terms?taxonomy=nonsense"},
 		{name: "admin term forbidden", actor: "contrib", method: "POST", path: "/admin/api/terms", body: `{"name":"x","slug":"x","taxonomy":"category"}`},
 		{name: "admin term delete", actor: "admin", method: "DELETE", path: "/admin/api/terms/{achild}"},
+		// M22 PR 1: REST trash and restore. An empty actor is anonymous.
+		{name: "rest trash create", actor: "editor", method: "POST", path: "/wp-json/wp/v2/posts",
+			body: `{"title":"Golden Trash","content":"<p>t</p>","status":"publish"}`, save: "rtrash"},
+		{name: "rest trash delete", actor: "editor", method: "DELETE", path: "/wp-json/wp/v2/posts/{rtrash}"},
+		{name: "rest trash delete again", actor: "editor", method: "DELETE", path: "/wp-json/wp/v2/posts/{rtrash}"},
+		{name: "rest trash list default", actor: "editor", method: "GET", path: "/wp-json/wp/v2/posts"},
+		{name: "rest trash list status trash", actor: "editor", method: "GET", path: "/wp-json/wp/v2/posts?status=trash"},
+		{name: "rest trash list anonymous", actor: "", method: "GET", path: "/wp-json/wp/v2/posts?status=trash"},
+		{name: "rest trash restore", actor: "editor", method: "PATCH", path: "/wp-json/wp/v2/posts/{rtrash}", body: `{"status":"draft"}`},
+		{name: "rest trash force delete", actor: "editor", method: "DELETE", path: "/wp-json/wp/v2/posts/{rtrash}?force=true"},
+		{name: "rest trash gone", actor: "editor", method: "GET", path: "/wp-json/wp/v2/posts/{rtrash}"},
 	}
 }
 

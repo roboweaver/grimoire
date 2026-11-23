@@ -105,7 +105,7 @@ func TestRESTCustomParentDeletePreviousLinkNested(t *testing.T) {
 	rcpwWant(t, rec, http.StatusCreated, "")
 	id := rcppID(t, rcpwObj(t, rec))
 
-	rec = rcpwDo(h, http.MethodDelete, rcppGuidePath(id), "", nil)
+	rec = rcpwDo(h, http.MethodDelete, rcppGuidePath(id)+"?force=true", "", nil)
 	rcpwWant(t, rec, http.StatusOK, "")
 	prev, _ := rcpwObj(t, rec)["previous"].(map[string]any)
 	if link, _ := prev["link"].(string); !strings.Contains(link, "/guide/g-one/doomed") {

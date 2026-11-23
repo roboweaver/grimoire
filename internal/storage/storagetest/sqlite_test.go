@@ -137,3 +137,24 @@ func TestSQLiteMediaDeleteContract(t *testing.T) {
 		return repos, "sqlite", "wp_", cleanup
 	})
 }
+
+func TestSQLiteTermCountContract(t *testing.T) {
+	RunTermCountContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}
+
+func TestSQLitePostTrasherContract(t *testing.T) {
+	RunPostTrasherContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}
+
+func TestSQLiteNavMenuTrashedTargetContract(t *testing.T) {
+	RunNavMenuTrashedTargetContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}

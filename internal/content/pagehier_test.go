@@ -320,3 +320,27 @@ func TestPageServiceAncestryForReturnsRootFirstAncestry(t *testing.T) {
 	}
 	assertSlugs(t, top, []string{"contact"})
 }
+
+// --- M22 task 3.1 (RED): slugTaken ignores trashed nodes (Req 6.11) ---------
+
+func TestSlugTakenIgnoresTrashedNodes(t *testing.T) {
+	nodes := []domain.PostNode{
+		{ID: 1, Slug: "about", ParentID: 0, Status: "trash"},
+		{ID: 2, Slug: "team", ParentID: 5, Status: "publish"},
+		{ID: 3, Slug: "team", ParentID: 6, Status: "trash"},
+	}
+	for _, hier := range []bool{false, true} {
+		if slugTaken(nodes, "about", hier, 0, 99) {
+			t.Fatalf("hier=%v: a trashed node must not block its slug", hier)
+		}
+	}
+	if !slugTaken(nodes, "team", true, 5, 99) {
+		t.Fatal("a live node under the same parent must still block its slug")
+	}
+	if slugTaken(nodes, "team", true, 6, 99) {
+		t.Fatal("a trashed node under the parent must not block the slug")
+	}
+	if !slugTaken(nodes, "team", false, 0, 99) {
+		t.Fatal("flat scope: the live node must still block the slug")
+	}
+}

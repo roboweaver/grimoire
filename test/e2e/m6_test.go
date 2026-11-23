@@ -507,7 +507,7 @@ func TestM6RESTWriteParityE2E(t *testing.T) {
 	}
 
 	// Delete: 200 with {"deleted":true,"previous":{...}}.
-	deleteResp := restDo(http.MethodDelete, "/wp-json/wp/v2/posts/"+strconv.FormatInt(created.ID, 10), nil, nil)
+	deleteResp := restDo(http.MethodDelete, "/wp-json/wp/v2/posts/"+strconv.FormatInt(created.ID, 10)+"?force=true", nil, nil)
 	deleteRespBody, _ := io.ReadAll(deleteResp.Body)
 	deleteResp.Body.Close()
 	if deleteResp.StatusCode != http.StatusOK {

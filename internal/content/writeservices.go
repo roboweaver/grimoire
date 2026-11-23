@@ -107,7 +107,22 @@ type PostWriteService struct {
 	// sticky_posts option. Optional; either nil skips the step.
 	optionsR domain.OptionRepository
 	optionsW domain.OptionWriter
+	// trasher moves rows to and from the trash. Optional; nil leaves trash
+	// unsupported (Trash fails, Update to "trash" fails, Restore fails).
+	trasher domain.PostTrasher
+	// trashDays mirrors EMPTY_TRASH_DAYS: 0 disables trashing. It defaults to
+	// 0 so a service built without options behaves as before M22.
+	trashDays int
 }
+
+// ErrTrashUnsupported is returned by Trash (and by Update when it would trash
+// a row) when trash is not enabled: no Trash_Store is wired or Trash days is 0.
+// It is returned after the authorization check. Handlers map it to 501.
+var ErrTrashUnsupported = errors.New("content: trash is not enabled")
+
+// ErrRestoreStatusInvalid is returned by Restore when the requested status is
+// not one a restored row may take ("trash" or an unknown value).
+var ErrRestoreStatusInvalid = errors.New("content: invalid restore status")
 
 // ErrSlugInvalid is returned when a registered-type post slug does not match
 // ^[a-z0-9][a-z0-9_-]*$ or when no slug can be derived from the title. Nothing
@@ -211,6 +226,162 @@ func WithPostRelationshipPurger(p domain.PostTermRelationshipPurger) PostWriteOp
 // remove a deleted post's id from sticky_posts. Either nil skips the step.
 func WithStickyOptions(r domain.OptionRepository, w domain.OptionWriter) PostWriteOption {
 	return func(s *PostWriteService) { s.optionsR, s.optionsW = r, w }
+}
+
+// WithPostTrasher wires the Trash_Store used by Trash, Restore and the Update
+// transitions into and out of the trash.
+func WithPostTrasher(t domain.PostTrasher) PostWriteOption {
+	return func(s *PostWriteService) { s.trasher = t }
+}
+
+// WithTrashDays sets Trash days (EMPTY_TRASH_DAYS). 0, the default, disables
+// trashing; the value itself is only read for that test here (the purge lives
+// in the scheduler).
+func WithTrashDays(days int) PostWriteOption {
+	return func(s *PostWriteService) { s.trashDays = days }
+}
+
+// TrashEnabled reports whether Trash can run: a Trash_Store is wired and Trash
+// days is greater than 0.
+func (s *PostWriteService) TrashEnabled() bool { return s.trasher != nil && s.trashDays > 0 }
+
+// ByID is an unauthorized read pass-through to the writer.
+func (s *PostWriteService) ByID(ctx context.Context, id int64) (domain.Post, error) {
+	return s.w.ByID(ctx, id)
+}
+
+// effectiveStatus is the status capability checks use for cur: its own status,
+// except for a trashed row, which is checked as the status it had before it
+// was trashed (_wp_trash_meta_status), or "draft" when none is recorded or no
+// Trash_Store is wired (WordPress map_meta_cap).
+func (s *PostWriteService) effectiveStatus(ctx context.Context, cur domain.Post) (string, error) {
+	if cur.Status != "trash" {
+		return cur.Status, nil
+	}
+	if s.trasher == nil {
+		return "draft", nil
+	}
+	info, err := s.trasher.TrashInfo(ctx, cur.ID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "draft", nil
+		}
+		return "", err
+	}
+	if info.HasPreviousStatus && info.PreviousStatus != "" && info.PreviousStatus != "trash" {
+		return info.PreviousStatus, nil
+	}
+	return "draft", nil
+}
+
+// loadWritable loads the stored row and applies the gates every transition
+// shares: a missing row or an unmanaged type is ErrForbidden.
+func (s *PostWriteService) loadWritable(ctx context.Context, id int64) (domain.Post, error) {
+	cur, err := s.w.ByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return domain.Post{}, ErrForbidden
+		}
+		return domain.Post{}, err
+	}
+	if cur.Type == "" {
+		cur.Type = "post"
+	}
+	if !s.WritableType(cur.Type) {
+		return domain.Post{}, ErrForbidden
+	}
+	return cur, nil
+}
+
+// Trash moves a row to the trash in WordPress's representation. Order: the
+// row is loaded and gated (missing row, unmanaged type or a failed delete
+// capability, evaluated on the Effective status, are ErrForbidden), then
+// ErrTrashUnsupported when trash is not enabled, then domain.ErrAlreadyTrashed,
+// then unstick (type "post" with the sticky ports wired), then TrashPost.
+// Revisions, children, menu items, term relationships and attachments stay.
+func (s *PostWriteService) Trash(ctx context.Context, actor auth.Principal, id int64) error {
+	cur, err := s.loadWritable(ctx, id)
+	if err != nil {
+		return err
+	}
+	eff, err := s.effectiveStatus(ctx, cur)
+	if err != nil {
+		return err
+	}
+	if !auth.CanDeletePostSuffix(actor, s.suffixFor(cur.Type), eff, cur.Author) {
+		return ErrForbidden
+	}
+	return s.trashRow(ctx, cur)
+}
+
+// trashRow runs Trash after authorization.
+func (s *PostWriteService) trashRow(ctx context.Context, cur domain.Post) error {
+	if !s.TrashEnabled() {
+		return ErrTrashUnsupported
+	}
+	if cur.Status == "trash" {
+		return domain.ErrAlreadyTrashed
+	}
+	if cur.Type == "post" && s.optionsR != nil && s.optionsW != nil {
+		if err := s.unstick(ctx, cur.ID); err != nil {
+			return err
+		}
+	}
+	_, err := s.trasher.TrashPost(ctx, cur.ID, time.Now())
+	return err
+}
+
+// validRestoreStatuses are the statuses a restored row may take.
+var validRestoreStatuses = []string{"publish", "future", "draft", "pending", "private"}
+
+// Restore takes a trashed row out of the trash. status "" means "draft",
+// "previous" means the recorded previous status (or "draft" when none is
+// recorded), anything else is used as given. Authorization is the edit
+// capability on the Effective status, then on the new status (the publish
+// check). It returns domain.ErrNotTrashed for a live row and ErrForbidden
+// before any other error.
+func (s *PostWriteService) Restore(ctx context.Context, actor auth.Principal, id int64, status string) error {
+	cur, err := s.loadWritable(ctx, id)
+	if err != nil {
+		return err
+	}
+	eff, err := s.effectiveStatus(ctx, cur)
+	if err != nil {
+		return err
+	}
+	suffix := s.suffixFor(cur.Type)
+	if !auth.CanEditPostSuffix(actor, suffix, eff, cur.Author) {
+		return ErrForbidden
+	}
+	if cur.Status != "trash" {
+		return domain.ErrNotTrashed
+	}
+	switch status {
+	case "":
+		status = "draft"
+	case "previous":
+		status = eff
+	}
+	if !slices.Contains(validRestoreStatuses, status) {
+		return ErrRestoreStatusInvalid
+	}
+	if !auth.CanEditPostSuffix(actor, suffix, status, cur.Author) {
+		return ErrForbidden
+	}
+	return s.restoreRow(ctx, cur, status, "")
+}
+
+// restoreRow calls RestorePost. slug is "" to restore the stored desired name.
+func (s *PostWriteService) restoreRow(ctx context.Context, cur domain.Post, status, slug string) error {
+	if s.trasher == nil {
+		return ErrTrashUnsupported
+	}
+	return s.trasher.RestorePost(ctx, cur.ID, domain.RestoreRequest{
+		Status:            status,
+		Slug:              slug,
+		HierarchicalScope: s.hierarchicalType(cur.Type) != "",
+		At:                time.Now(),
+	})
 }
 
 // unstickOptionName is the option holding the sticky post ids.
@@ -538,6 +709,17 @@ func (s *PostWriteService) sanitizeIncoming(actor auth.Principal, p, cur domain.
 // resulting state, so publishing still requires the publish capability. A
 // missing record returns the generic ErrForbidden (existence is not leaked).
 //
+// Trash transitions (M22): for a trashed row the edit capability is evaluated
+// on its Effective status (the status it had before trashing). A request whose
+// status is "trash" for a live row applies the field changes with the status
+// unchanged, then trashes the row (this also needs the delete capability and
+// trash enabled, both checked before anything is written). A request with a
+// status other than "trash" for a trashed row applies the field changes with
+// the status still "trash", then restores the row to that status; the restore
+// slug is empty (the store restores the desired name) when the request kept
+// the stored name, else the request's slug. A trashed row updated with status
+// "trash" (or none) stays trashed.
+//
 // expectedModified, when non-zero, is compared against the stored record's
 // Modified timestamp AFTER authorization but BEFORE the field merge/write —
 // an unauthorized caller must never learn the current Modified value via a
@@ -547,23 +729,31 @@ func (s *PostWriteService) sanitizeIncoming(actor auth.Principal, p, cur domain.
 // If-Unmodified-Since (Req 6.5), while the admin API always supplies a
 // non-zero value (Req 3.1 makes modified a required field).
 func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p domain.Post, expectedModified time.Time) error {
-	cur, err := s.w.ByID(ctx, p.ID)
+	cur, err := s.loadWritable(ctx, p.ID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return ErrForbidden
-		}
 		return err
 	}
-	if cur.Type == "" {
-		cur.Type = "post"
-	}
-	if !s.WritableType(cur.Type) {
-		return ErrForbidden
-	}
 	suffix := s.suffixFor(cur.Type)
-	if !auth.CanEditPostSuffix(actor, suffix, cur.Status, cur.Author) {
+	eff, err := s.effectiveStatus(ctx, cur)
+	if err != nil {
+		return err
+	}
+	if !auth.CanEditPostSuffix(actor, suffix, eff, cur.Author) {
 		return ErrForbidden
 	}
+	wasTrashed := cur.Status == "trash"
+	toTrash := p.Status == "trash" && !wasTrashed
+	if toTrash {
+		// Entering the trash also needs the delete capability and trash
+		// enabled; both are decided before anything is written.
+		if !auth.CanDeletePostSuffix(actor, suffix, cur.Status, cur.Author) {
+			return ErrForbidden
+		}
+		if !s.TrashEnabled() {
+			return ErrTrashUnsupported
+		}
+	}
+	storedSlug := cur.Slug
 	if !expectedModified.IsZero() && !cur.Modified.Equal(expectedModified) {
 		return &ConflictError{CurrentModified: cur.Modified}
 	}
@@ -624,19 +814,48 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 		// the repo actually re-derives the GMT value from the new Date.
 		cur.DateGMT = time.Time{}
 	}
-	if p.Status != "" && p.Status != cur.Status {
+	// The status stays as stored while the fields are written: a row entering
+	// the trash is trashed afterwards, a row leaving it is restored afterwards.
+	leaving := wasTrashed && p.Status != "" && p.Status != "trash"
+	if leaving {
+		if !slices.Contains(validRestoreStatuses, p.Status) {
+			return ErrRestoreStatusInvalid
+		}
+		if !auth.CanEditPostSuffix(actor, suffix, p.Status, cur.Author) {
+			return ErrForbidden
+		}
+	} else if !toTrash && !wasTrashed && p.Status != "" && p.Status != cur.Status {
 		if !auth.CanEditPostSuffix(actor, suffix, p.Status, cur.Author) {
 			return ErrForbidden
 		}
 		cur.Status = p.Status
 	}
-	return s.w.Update(ctx, cur)
+	if leaving && cur.Slug != storedSlug && cur.Slug == "" {
+		cur.Slug = Slugify(cur.Title)
+	}
+	if err := s.w.Update(ctx, cur); err != nil {
+		return err
+	}
+	switch {
+	case toTrash:
+		return s.trashRow(ctx, cur)
+	case leaving:
+		slug := cur.Slug
+		if slug == storedSlug {
+			slug = ""
+		}
+		return s.restoreRow(ctx, cur, p.Status, slug)
+	}
+	return nil
 }
 
 // Delete authorizes and removes a post. It loads the authoritative stored record
 // by ID and evaluates the delete capability against THAT record's Type, Status,
 // and Author, so a forged struct cannot delete another user's post. A missing
-// record returns the generic ErrForbidden (existence is not leaked).
+// record returns the generic ErrForbidden (existence is not leaked). For a
+// trashed row the capability is evaluated on its Effective status (the status
+// it had before trashing), not on "trash". Delete is the permanent delete;
+// Trash is the recoverable one.
 //
 // When the writer also implements domain.RevisionWriter (true for every
 // production PostWriter), revision cleanup runs before deleting the parent.
@@ -654,20 +873,15 @@ func (s *PostWriteService) Update(ctx context.Context, actor auth.Principal, p d
 // first failing step returns its error and later steps do not run. Every
 // earlier step is idempotent, so a retry after a failure converges.
 func (s *PostWriteService) Delete(ctx context.Context, actor auth.Principal, p domain.Post) error {
-	cur, err := s.w.ByID(ctx, p.ID)
+	cur, err := s.loadWritable(ctx, p.ID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return ErrForbidden
-		}
 		return err
 	}
-	if cur.Type == "" {
-		cur.Type = "post"
+	eff, err := s.effectiveStatus(ctx, cur)
+	if err != nil {
+		return err
 	}
-	if !s.WritableType(cur.Type) {
-		return ErrForbidden
-	}
-	if !auth.CanDeletePostSuffix(actor, s.suffixFor(cur.Type), cur.Status, cur.Author) {
+	if !auth.CanDeletePostSuffix(actor, s.suffixFor(cur.Type), eff, cur.Author) {
 		return ErrForbidden
 	}
 	if rw, ok := s.w.(domain.RevisionWriter); ok {

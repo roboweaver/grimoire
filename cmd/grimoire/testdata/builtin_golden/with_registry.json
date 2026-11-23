@@ -363,79 +363,127 @@
       "Content-Type": "application/json; charset=UTF-8"
     },
     "body": {
-      "deleted": true,
-      "previous": {
-        "_links": {
-          "author": [
-            {
-              "embeddable": true,
-              "href": "http://example.com/wp-json/wp/v2/users/2"
-            }
-          ],
-          "collection": [
-            {
-              "href": "http://example.com/wp-json/wp/v2/posts"
-            }
-          ],
-          "replies": [
-            {
-              "href": "http://example.com/wp-json/wp/v2/comments?post=1"
-            }
-          ],
-          "self": [
-            {
-              "href": "http://example.com/wp-json/wp/v2/posts/1"
-            }
-          ],
-          "wp:attachment": [
-            {
-              "href": "http://example.com/wp-json/wp/v2/media?parent=1"
-            }
-          ]
-        },
-        "author": 2,
-        "categories": [],
-        "comment_status": "",
-        "content": {
-          "protected": false,
-          "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
-        },
-        "date": "\u003cts\u003e",
-        "date_gmt": "\u003cts\u003e",
-        "excerpt": {
-          "rendered": "ex2"
-        },
-        "featured_media": 0,
-        "guid": {
-          "rendered": "http://example.com/"
-        },
-        "id": 1,
-        "link": "http://example.com/golden-two/",
-        "modified": "\u003cts\u003e",
-        "modified_gmt": "\u003cts\u003e",
-        "ping_status": "open",
-        "slug": "golden-two",
-        "status": "publish",
-        "tags": [],
-        "title": {
-          "rendered": "Golden Post 2"
-        },
-        "type": "post"
-      }
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=1"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts/1"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=1"
+          }
+        ]
+      },
+      "author": 2,
+      "categories": [],
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "ex2"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 1,
+      "link": "http://example.com/golden-two__trashed/",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "golden-two__trashed",
+      "status": "trash",
+      "tags": [],
+      "title": {
+        "rendered": "Golden Post 2"
+      },
+      "type": "post"
     }
   },
   {
     "name": "rest post get deleted",
-    "status": 404,
+    "status": 200,
     "headers": {
       "Content-Type": "application/json; charset=UTF-8"
     },
     "body": {
-      "code": "rest_post_invalid_id",
-      "data": {
-        "status": 404
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=1"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts/1"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=1"
+          }
+        ]
       },
-      "message": "Invalid post ID."
+      "author": 2,
+      "categories": [],
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "ex2"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 1,
+      "link": "http://example.com/golden-two__trashed/",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "golden-two__trashed",
+      "status": "trash",
+      "tags": [],
+      "title": {
+        "rendered": "Golden Post 2"
+      },
+      "type": "post"
     }
   },
   {
@@ -705,64 +753,61 @@
       "Content-Type": "application/json; charset=UTF-8"
     },
     "body": {
-      "deleted": true,
-      "previous": {
-        "_links": {
-          "author": [
-            {
-              "embeddable": true,
-              "href": "http://example.com/wp-json/wp/v2/users/2"
-            }
-          ],
-          "collection": [
-            {
-              "href": "http://example.com/wp-json/wp/v2/pages"
-            }
-          ],
-          "replies": [
-            {
-              "href": "http://example.com/wp-json/wp/v2/comments?post=4"
-            }
-          ],
-          "self": [
-            {
-              "href": "http://example.com/wp-json/wp/v2/pages/4"
-            }
-          ],
-          "wp:attachment": [
-            {
-              "href": "http://example.com/wp-json/wp/v2/media?parent=4"
-            }
-          ]
-        },
-        "author": 2,
-        "comment_status": "",
-        "content": {
-          "protected": false,
-          "rendered": "\u003cp\u003epage\u003c/p\u003e"
-        },
-        "date": "\u003cts\u003e",
-        "date_gmt": "\u003cts\u003e",
-        "excerpt": {
-          "rendered": "\u003cp\u003epage\u003c/p\u003e"
-        },
-        "featured_media": 0,
-        "guid": {
-          "rendered": "http://example.com/"
-        },
-        "id": 4,
-        "link": "http://example.com//",
-        "modified": "\u003cts\u003e",
-        "modified_gmt": "\u003cts\u003e",
-        "parent": 0,
-        "ping_status": "open",
-        "slug": "",
-        "status": "publish",
-        "title": {
-          "rendered": "Golden Page 2"
-        },
-        "type": "page"
-      }
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/pages"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=4"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/pages/4"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=4"
+          }
+        ]
+      },
+      "author": 2,
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003epage\u003c/p\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "\u003cp\u003epage\u003c/p\u003e"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 4,
+      "link": "http://example.com/__trashed/",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "parent": 0,
+      "ping_status": "open",
+      "slug": "__trashed",
+      "status": "trash",
+      "title": {
+        "rendered": "Golden Page 2"
+      },
+      "type": "page"
     }
   },
   {
@@ -1350,5 +1395,447 @@
   {
     "name": "admin term delete",
     "status": 204
+  },
+  {
+    "name": "rest trash create",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=10"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts/10"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=10"
+          }
+        ]
+      },
+      "author": 2,
+      "categories": [],
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003et\u003c/p\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "\u003cp\u003et\u003c/p\u003e"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 10,
+      "link": "http://example.com//",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "",
+      "status": "publish",
+      "tags": [],
+      "title": {
+        "rendered": "Golden Trash"
+      },
+      "type": "post"
+    }
+  },
+  {
+    "name": "rest trash delete",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=10"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts/10"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=10"
+          }
+        ]
+      },
+      "author": 2,
+      "categories": [],
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003et\u003c/p\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "\u003cp\u003et\u003c/p\u003e"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 10,
+      "link": "http://example.com/__trashed/",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "__trashed",
+      "status": "trash",
+      "tags": [],
+      "title": {
+        "rendered": "Golden Trash"
+      },
+      "type": "post"
+    }
+  },
+  {
+    "name": "rest trash delete again",
+    "status": 410,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "code": "rest_already_trashed",
+      "data": {
+        "status": 410
+      },
+      "message": "The post has already been deleted."
+    }
+  },
+  {
+    "name": "rest trash list default",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-WP-Total": "0",
+      "X-WP-TotalPages": "0"
+    },
+    "body": []
+  },
+  {
+    "name": "rest trash list status trash",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-WP-Total": "2",
+      "X-WP-TotalPages": "1"
+    },
+    "body": [
+      {
+        "_links": {
+          "author": [
+            {
+              "embeddable": true,
+              "href": "http://example.com/wp-json/wp/v2/users/2"
+            }
+          ],
+          "collection": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts"
+            }
+          ],
+          "replies": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/comments?post=10"
+            }
+          ],
+          "self": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts/10"
+            }
+          ],
+          "wp:attachment": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/media?parent=10"
+            }
+          ]
+        },
+        "author": 2,
+        "categories": [],
+        "comment_status": "",
+        "content": {
+          "protected": false,
+          "rendered": "\u003cp\u003et\u003c/p\u003e"
+        },
+        "date": "\u003cts\u003e",
+        "date_gmt": "\u003cts\u003e",
+        "excerpt": {
+          "rendered": "\u003cp\u003et\u003c/p\u003e"
+        },
+        "featured_media": 0,
+        "guid": {
+          "rendered": "http://example.com/"
+        },
+        "id": 10,
+        "link": "http://example.com/__trashed/",
+        "modified": "\u003cts\u003e",
+        "modified_gmt": "\u003cts\u003e",
+        "ping_status": "open",
+        "slug": "__trashed",
+        "status": "trash",
+        "tags": [],
+        "title": {
+          "rendered": "Golden Trash"
+        },
+        "type": "post"
+      },
+      {
+        "_links": {
+          "author": [
+            {
+              "embeddable": true,
+              "href": "http://example.com/wp-json/wp/v2/users/2"
+            }
+          ],
+          "collection": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts"
+            }
+          ],
+          "replies": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/comments?post=1"
+            }
+          ],
+          "self": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts/1"
+            }
+          ],
+          "wp:attachment": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/media?parent=1"
+            }
+          ]
+        },
+        "author": 2,
+        "categories": [],
+        "comment_status": "",
+        "content": {
+          "protected": false,
+          "rendered": "\u003cp\u003ebody\u003c/p\u003e\u003cscript\u003ex()\u003c/script\u003e"
+        },
+        "date": "\u003cts\u003e",
+        "date_gmt": "\u003cts\u003e",
+        "excerpt": {
+          "rendered": "ex2"
+        },
+        "featured_media": 0,
+        "guid": {
+          "rendered": "http://example.com/"
+        },
+        "id": 1,
+        "link": "http://example.com/golden-two__trashed/",
+        "modified": "\u003cts\u003e",
+        "modified_gmt": "\u003cts\u003e",
+        "ping_status": "open",
+        "slug": "golden-two__trashed",
+        "status": "trash",
+        "tags": [],
+        "title": {
+          "rendered": "Golden Post 2"
+        },
+        "type": "post"
+      }
+    ]
+  },
+  {
+    "name": "rest trash list anonymous",
+    "status": 403,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "code": "rest_forbidden_status",
+      "data": {
+        "status": 403
+      },
+      "message": "Status is forbidden."
+    }
+  },
+  {
+    "name": "rest trash restore",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "_links": {
+        "author": [
+          {
+            "embeddable": true,
+            "href": "http://example.com/wp-json/wp/v2/users/2"
+          }
+        ],
+        "collection": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts"
+          }
+        ],
+        "replies": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/comments?post=10"
+          }
+        ],
+        "self": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/posts/10"
+          }
+        ],
+        "wp:attachment": [
+          {
+            "href": "http://example.com/wp-json/wp/v2/media?parent=10"
+          }
+        ]
+      },
+      "author": 2,
+      "categories": [],
+      "comment_status": "",
+      "content": {
+        "protected": false,
+        "rendered": "\u003cp\u003et\u003c/p\u003e"
+      },
+      "date": "\u003cts\u003e",
+      "date_gmt": "\u003cts\u003e",
+      "excerpt": {
+        "rendered": "\u003cp\u003et\u003c/p\u003e"
+      },
+      "featured_media": 0,
+      "guid": {
+        "rendered": "http://example.com/"
+      },
+      "id": 10,
+      "link": "http://example.com//",
+      "modified": "\u003cts\u003e",
+      "modified_gmt": "\u003cts\u003e",
+      "ping_status": "open",
+      "slug": "",
+      "status": "draft",
+      "tags": [],
+      "title": {
+        "rendered": "Golden Trash"
+      },
+      "type": "post"
+    }
+  },
+  {
+    "name": "rest trash force delete",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "deleted": true,
+      "previous": {
+        "_links": {
+          "author": [
+            {
+              "embeddable": true,
+              "href": "http://example.com/wp-json/wp/v2/users/2"
+            }
+          ],
+          "collection": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts"
+            }
+          ],
+          "replies": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/comments?post=10"
+            }
+          ],
+          "self": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts/10"
+            }
+          ],
+          "wp:attachment": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/media?parent=10"
+            }
+          ]
+        },
+        "author": 2,
+        "categories": [],
+        "comment_status": "",
+        "content": {
+          "protected": false,
+          "rendered": "\u003cp\u003et\u003c/p\u003e"
+        },
+        "date": "\u003cts\u003e",
+        "date_gmt": "\u003cts\u003e",
+        "excerpt": {
+          "rendered": "\u003cp\u003et\u003c/p\u003e"
+        },
+        "featured_media": 0,
+        "guid": {
+          "rendered": "http://example.com/"
+        },
+        "id": 10,
+        "link": "http://example.com//",
+        "modified": "\u003cts\u003e",
+        "modified_gmt": "\u003cts\u003e",
+        "ping_status": "open",
+        "slug": "",
+        "status": "draft",
+        "tags": [],
+        "title": {
+          "rendered": "Golden Trash"
+        },
+        "type": "post"
+      }
+    }
+  },
+  {
+    "name": "rest trash gone",
+    "status": 404,
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    "body": {
+      "code": "rest_post_invalid_id",
+      "data": {
+        "status": 404
+      },
+      "message": "Invalid post ID."
+    }
   }
 ]

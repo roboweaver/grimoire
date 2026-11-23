@@ -139,4 +139,42 @@ func runCommentsContract(t *testing.T, newRepos NewReposFunc) {
 			t.Fatalf("Get deleted err = %v, want ErrNotFound", err)
 		}
 	})
+
+	t.Run("an empty status filter omits comments of a trashed post", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		now := time.Date(2024, 1, 6, 10, 0, 0, 0, time.UTC)
+		id, err := repos.CommentWriter.Create(ctx, domain.Comment{
+			PostID: 1, Author: "Trashed With Post", AuthorEmail: "tp@example.com",
+			Date: now, DateGMT: now, Content: "hidden with its post", Status: "post-trashed",
+		})
+		if err != nil {
+			t.Fatalf("Create post-trashed comment: %v", err)
+		}
+		all, err := repos.Comments.List(ctx, domain.CommentFilter{Limit: 10})
+		if err != nil {
+			t.Fatalf("List empty statuses: %v", err)
+		}
+		if len(all) != 4 {
+			t.Errorf("List with empty Statuses = %d comments, want 4 (post-trashed omitted)", len(all))
+		}
+		for _, c := range all {
+			if c.ID == id {
+				t.Errorf("List with empty Statuses returned the post-trashed comment %d", id)
+			}
+		}
+		if n, err := repos.Comments.Count(ctx, domain.CommentFilter{}); err != nil || n != 4 {
+			t.Errorf("Count with empty Statuses = %d, %v; want 4, nil", n, err)
+		}
+		named, err := repos.Comments.List(ctx, domain.CommentFilter{Statuses: []string{"post-trashed"}, Limit: 10})
+		if err != nil {
+			t.Fatalf("List post-trashed: %v", err)
+		}
+		if len(named) != 1 || named[0].ID != id {
+			t.Errorf("List Statuses=[post-trashed] = %+v, want exactly comment %d", named, id)
+		}
+		if n, err := repos.Comments.Count(ctx, domain.CommentFilter{Statuses: []string{"post-trashed"}}); err != nil || n != 1 {
+			t.Errorf("Count Statuses=[post-trashed] = %d, %v; want 1, nil", n, err)
+		}
+	})
 }

@@ -100,14 +100,11 @@ func reparentChildrenTx(ctx context.Context, tx bun.Tx, prefix, vendor string, i
 	return err
 }
 
-// recountTx sets term_taxonomy.count to the relationship count for each
-// distinct id.
-func recountTx(ctx context.Context, tx bun.Tx, prefix string, ttIDs []int64) error {
+// recountTx sets term_taxonomy.count for each distinct id using the shared
+// count rule (see recountStatement): relationships minus trashed posts.
+func recountTx(ctx context.Context, tx bun.Tx, prefix, vendor string, ttIDs []int64) error {
 	for _, tt := range dedupInt64(ttIDs) {
-		if _, err := tx.ExecContext(ctx,
-			"UPDATE "+prefix+"term_taxonomy SET count = "+
-				"(SELECT COUNT(*) FROM "+prefix+"term_relationships WHERE term_taxonomy_id = ?) "+
-				"WHERE term_taxonomy_id = ?", tt, tt); err != nil {
+		if _, err := tx.ExecContext(ctx, recountStatement(prefix, vendor), tt, tt); err != nil {
 			return err
 		}
 	}

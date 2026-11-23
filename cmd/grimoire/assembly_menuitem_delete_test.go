@@ -36,7 +36,7 @@ func menuDeleteCases() []menuDeleteCase {
 	products := func(e customWriteEnv) *customWriteActor { return &e.Products }
 	adminDel := func(id int64) string { return fmt.Sprintf("/admin/api/posts/%d", id) }
 	restDel := func(base string) func(int64) string {
-		return func(id int64) string { return fmt.Sprintf("%s/%d", base, id) }
+		return func(id int64) string { return fmt.Sprintf("%s/%d?force=true", base, id) }
 	}
 	return []menuDeleteCase{
 		{"admin page", "page", "/wp-json/wp/v2/pages", admin, adminDel, http.StatusNoContent},

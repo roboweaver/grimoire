@@ -126,3 +126,36 @@ func TestPostgresMediaDeleteContract(t *testing.T) {
 		return repos, "postgres", prefix, cleanup
 	})
 }
+
+func TestPostgresTermCountContract(t *testing.T) {
+	dsn := os.Getenv("GRIMOIRE_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set GRIMOIRE_TEST_POSTGRES_DSN to run the Postgres contract suite")
+	}
+	RunTermCountContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, prefix, cleanup := newReposFromDSNWithPrefix(t, "postgres", dsn)
+		return repos, "postgres", prefix, cleanup
+	})
+}
+
+func TestPostgresPostTrasherContract(t *testing.T) {
+	dsn := os.Getenv("GRIMOIRE_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set GRIMOIRE_TEST_POSTGRES_DSN to run the PostgreSQL contract suite")
+	}
+	RunPostTrasherContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, prefix, cleanup := newReposFromDSNWithPrefix(t, "postgres", dsn)
+		return repos, "postgres", prefix, cleanup
+	})
+}
+
+func TestPostgresNavMenuTrashedTargetContract(t *testing.T) {
+	dsn := os.Getenv("GRIMOIRE_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set GRIMOIRE_TEST_POSTGRES_DSN to run the PostgreSQL contract suite")
+	}
+	RunNavMenuTrashedTargetContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, prefix, cleanup := newReposFromDSNWithPrefix(t, "postgres", dsn)
+		return repos, "postgres", prefix, cleanup
+	})
+}

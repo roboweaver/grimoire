@@ -12,7 +12,7 @@ import (
 //
 // Supported types: nil (and any nil pointer), bool, int, string, []int
 // (encoded as a PHP list array with integer keys 0..N-1, as WordPress stores
-// sticky_posts), and map[string]any / map[string]bool (encoded as a PHP
+// sticky_posts), and map[int]string (integer keys ascending), and map[string]any / map[string]bool (encoded as a PHP
 // associative array with string keys). Nil encodes as PHP's null (N;), matching how WordPress
 // stores an Application Password's last_used/last_ip before first use.
 // String lengths are counted in bytes, matching PHP semantics. Map keys are
@@ -56,6 +56,8 @@ func serializeValue(b *strings.Builder, v any) error {
 			b.WriteByte(';')
 		}
 		b.WriteByte('}')
+	case map[int]string:
+		serializeIntStringMap(b, val)
 	case map[string]any:
 		return serializeMap(b, val)
 	case map[string]bool:
@@ -76,6 +78,26 @@ func serializeString(b *strings.Builder, s string) {
 	b.WriteString(`:"`)
 	b.WriteString(s)
 	b.WriteString(`";`)
+}
+
+// serializeIntStringMap writes a PHP array with integer keys in ascending
+// order and string values, as WordPress stores _wp_trash_meta_comments_status.
+func serializeIntStringMap(b *strings.Builder, m map[int]string) {
+	keys := make([]int, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+	b.WriteString("a:")
+	b.WriteString(strconv.Itoa(len(m)))
+	b.WriteString(":{")
+	for _, k := range keys {
+		b.WriteString("i:")
+		b.WriteString(strconv.Itoa(k))
+		b.WriteByte(';')
+		serializeString(b, m[k])
+	}
+	b.WriteByte('}')
 }
 
 func serializeMap(b *strings.Builder, m map[string]any) error {

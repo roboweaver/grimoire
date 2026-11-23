@@ -102,6 +102,10 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 		content.WithRevisionRegistry(deps.Registry))
 	autosave := content.NewAutosaveService(repos.Revisions, repos.PostWriter,
 		content.WithAutosaveRegistry(deps.Registry))
+	// trashDays is the retention window, in days, before a trashed post is
+	// eligible for purge. It is a constant until task 10.2 replaces it with a
+	// configuration key.
+	trashDays := 30
 	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite), content.WithContentPolicy(contentPolicy),
 		content.WithPostRegistry(deps.Registry),
 		content.WithPostNodeReader(repos.PostNodeReader),
@@ -109,7 +113,9 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 		content.WithPostDependentsPurger(repos.PostDependents),
 		content.WithPostMenuItemPurger(repos.PostMenuItems),
 		content.WithPostRelationshipPurger(repos.PostRelationships),
-		content.WithStickyOptions(repos.Options, repos.OptionWriter))
+		content.WithStickyOptions(repos.Options, repos.OptionWriter),
+		content.WithPostTrasher(repos.PostTrash),
+		content.WithTrashDays(trashDays))
 	// mediaWrite backs the REST media write surface (POST/PATCH
 	// /wp-json/wp/v2/media). It layers capability-checked create/update over the
 	// existing media read/write service and the Media reader / MediaWriter ports,
@@ -170,7 +176,7 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	).WithREST(
 		restMapper, repos.AdminPosts, repos.PostWriter, repos.Posts, repos.Media, repos.Users,
 		cfg.REST.PerPageMax,
-	).WithApplicationPasswords(
+	).WithPostTrash(postWrite).WithApplicationPasswords(
 		appPasswords, cfg.REST.RequireTLSForApplicationPasswords, cfg.REST.TrustedProxyHeader,
 	).Routes()
 

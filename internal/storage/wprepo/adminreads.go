@@ -40,9 +40,7 @@ func (r *PostRepo) ListForAdmin(ctx context.Context, f domain.AdminPostFilter) (
 		TableExpr("?", bun.Ident(r.prefix+"posts")).
 		Column(postColumns...).
 		Where("post_type IN (?)", bun.In(adminTypes(f)))
-	if len(f.Statuses) > 0 {
-		q = q.Where("post_status IN (?)", bun.In(f.Statuses))
-	}
+	q = applyAdminStatuses(q, f.Statuses)
 	if f.Author != 0 {
 		q = q.Where("post_author = ?", f.Author)
 	}
@@ -58,6 +56,15 @@ func (r *PostRepo) ListForAdmin(ctx context.Context, f domain.AdminPostFilter) (
 		return nil, err
 	}
 	return toDomainPosts(rows), nil
+}
+
+// applyAdminStatuses restricts a posts query to the explicit statuses, or,
+// when none are given, to every status except trash.
+func applyAdminStatuses(q *bun.SelectQuery, statuses []string) *bun.SelectQuery {
+	if len(statuses) > 0 {
+		return q.Where("post_status IN (?)", bun.In(statuses))
+	}
+	return q.Where("post_status <> 'trash'")
 }
 
 // applyAdminSearch restricts a posts query to rows whose title or content
@@ -95,9 +102,7 @@ func (r *PostRepo) CountForAdmin(ctx context.Context, f domain.AdminPostFilter) 
 	q := r.db.NewSelect().
 		TableExpr("?", bun.Ident(r.prefix+"posts")).
 		Where("post_type IN (?)", bun.In(adminTypes(f)))
-	if len(f.Statuses) > 0 {
-		q = q.Where("post_status IN (?)", bun.In(f.Statuses))
-	}
+	q = applyAdminStatuses(q, f.Statuses)
 	if f.Author != 0 {
 		q = q.Where("post_author = ?", f.Author)
 	}
@@ -142,7 +147,8 @@ func (r *PostRepo) AuthorsOfTypes(ctx context.Context, types []string) ([]domain
 }
 
 // CountByStatus counts posts of the given post_type and post_status. An empty
-// typ matches any type; an empty status matches any status. Pure COUNT(*).
+// typ matches any type; an empty status matches every status except trash
+// (count the trash with status "trash"). Pure COUNT(*).
 func (r *PostRepo) CountByStatus(ctx context.Context, typ, status string) (int, error) {
 	q := r.db.NewSelect().TableExpr("?", bun.Ident(r.prefix+"posts"))
 	if typ != "" {
@@ -150,6 +156,8 @@ func (r *PostRepo) CountByStatus(ctx context.Context, typ, status string) (int, 
 	}
 	if status != "" {
 		q = q.Where("post_status = ?", status)
+	} else {
+		q = q.Where("post_status <> 'trash'")
 	}
 	return q.Count(ctx)
 }

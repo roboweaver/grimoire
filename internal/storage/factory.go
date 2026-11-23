@@ -75,6 +75,8 @@ type Set struct {
 	PostMenuItems domain.PostMenuItemPurger
 	// Plan 20 additive port: removes a post's term relationships outside the managed taxonomies.
 	PostRelationships domain.PostTermRelationshipPurger
+	// Plan 22 additive port: moves a post to and from the trash in WordPress's representation.
+	PostTrash domain.PostTrasher
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -214,6 +216,7 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			PostDependents:    posts,
 			PostMenuItems:     posts,
 			PostRelationships: posts,
+			PostTrash:         posts,
 		},
 		db:    db,
 		bunDB: bunDB,

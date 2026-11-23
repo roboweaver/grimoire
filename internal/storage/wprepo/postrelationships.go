@@ -13,7 +13,7 @@ import (
 // domain.NonPostObjectTaxonomies, then recount each affected term_taxonomy.
 func (r *PostRepo) PurgeTermRelationshipsOf(ctx context.Context, postID int64) error {
 	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		return purgeRelationshipsTx(ctx, tx, r.prefix, postID)
+		return purgeRelationshipsTx(ctx, tx, r.prefix, vendorOf(r.db), postID)
 	})
 }
 
@@ -22,7 +22,26 @@ func (r *PostRepo) PurgeTermRelationshipsOf(ctx context.Context, postID int64) e
 // links, not posts), one DELETE per distinct term_taxonomy_id, then recounts
 // those term_taxonomy rows. Relationships whose term_taxonomy row is missing
 // are not matched by the join and are left alone. It must run inside tx.
-func purgeRelationshipsTx(ctx context.Context, tx bun.Tx, prefix string, objectID int64) error {
+func purgeRelationshipsTx(ctx context.Context, tx bun.Tx, prefix, vendor string, objectID int64) error {
+	ids, err := relatedTermTaxonomyIDsTx(ctx, tx, prefix, objectID)
+	if err != nil {
+		return err
+	}
+	for _, tt := range ids {
+		if _, err := tx.ExecContext(ctx,
+			"DELETE FROM "+prefix+"term_relationships WHERE object_id = ? AND term_taxonomy_id = ?",
+			objectID, tt); err != nil {
+			return err
+		}
+	}
+	return recountTx(ctx, tx, prefix, vendor, ids)
+}
+
+// relatedTermTaxonomyIDsTx returns the distinct term_taxonomy_ids of objectID's
+// relationships whose taxonomy is not in domain.NonPostObjectTaxonomies, in
+// ascending order. Relationships whose term_taxonomy row is missing are not
+// matched by the join. It must run inside tx.
+func relatedTermTaxonomyIDsTx(ctx context.Context, tx bun.Tx, prefix string, objectID int64) ([]int64, error) {
 	q := "SELECT tr.term_taxonomy_id FROM " + prefix + "term_relationships tr " +
 		"JOIN " + prefix + "term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id " +
 		"WHERE tr.object_id = ?"
@@ -35,15 +54,7 @@ func purgeRelationshipsTx(ctx context.Context, tx bun.Tx, prefix string, objectI
 	}
 	ids, err := scanInt64s(ctx, tx, q, args...)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ids = sortedUniqueInt64(ids)
-	for _, tt := range ids {
-		if _, err := tx.ExecContext(ctx,
-			"DELETE FROM "+prefix+"term_relationships WHERE object_id = ? AND term_taxonomy_id = ?",
-			objectID, tt); err != nil {
-			return err
-		}
-	}
-	return recountTx(ctx, tx, prefix, ids)
+	return sortedUniqueInt64(ids), nil
 }

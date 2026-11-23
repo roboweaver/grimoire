@@ -63,7 +63,7 @@ Delivered across PRs #75, #76, #77.
 delete for registered custom post types and taxonomies, with capabilities
 derived from `capability_type`, sanitization, slug and `parent` guards, term
 assignment and delete cleanup (`plans/17-custom-types-write`).
-**Still deferred after M17:** delete is permanent, with no trash.
+**Still deferred after M17:** delete is permanent, with no trash. (M22 PR 1 adds trash to REST delete; see `plans/22-trash-and-restore`.)
 **Shipped in M18 (PR 1, `plans/18-write-hardening`):** stored rows of types not
 registered under `content:` are unwritable (`403` on the admin API, `404` for
 revisions and autosave), the scheduler skips them, revisions and autosave honor
@@ -212,5 +212,7 @@ second forms of `m`, and `?m=` on routes other than `/`.
    (read PRs #75/#76/#77; write via `17-custom-types-write`).
 6. ~~**M16 (pagination path form and `?m=`)**~~ — ✅ shipped
    (`21-archive-path-pagination`, 2 of 2).
-**Recommended next:** no planned milestones remain. What is left is trash
-handling and the gaps listed in the milestone sections above.
+**Recommended next:** M22 (`22-trash-and-restore`) is in progress, 1 of 3 shipped:
+REST trash and restore are done in PR 1; the admin API and SPA (PR 2) and
+`content.trash_days` with the automatic purge (PR 3) remain. After M22, what is
+left is the gaps listed in the milestone sections above.

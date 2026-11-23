@@ -260,6 +260,7 @@ var (
 	_ domain.PostDependentsPurger       = (*PostRepo)(nil)
 	_ domain.PostTermRelationshipPurger = (*PostRepo)(nil)
 	_ domain.PostMenuItemPurger         = (*PostRepo)(nil)
+	_ domain.PostTrasher                = (*PostRepo)(nil)
 	_ domain.TermWriter                 = (*TermRepo)(nil)
 	_ domain.TermReader                 = (*TermRepo)(nil)
 	_ domain.OptionWriter               = (*OptionRepo)(nil)

@@ -137,9 +137,7 @@ func (r *PostTermsRepo) SetPostTerms(ctx context.Context, postID int64, taxonomy
 
 		// Step 3: recompute count for the union of previously- and
 		// newly-related taxonomy rows.
-		countQ := "UPDATE " + r.prefix + "term_taxonomy SET count = " +
-			"(SELECT COUNT(*) FROM " + r.prefix + "term_relationships WHERE term_taxonomy_id = ?) " +
-			"WHERE term_taxonomy_id = ?"
+		countQ := recountStatement(r.prefix, vendorOf(r.db))
 		seen := make(map[int64]bool, len(priorTTIDs)+len(newTTIDs))
 		for _, ttID := range append(priorTTIDs, newTTIDs...) {
 			if seen[ttID] {

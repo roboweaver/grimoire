@@ -46,3 +46,19 @@ func TestM4EntitiesConstructable(t *testing.T) {
 		t.Fatal("M4 entity fields not wired correctly")
 	}
 }
+
+func TestTrashErrorsAreDistinct(t *testing.T) {
+	if errors.Is(ErrAlreadyTrashed, ErrNotFound) {
+		t.Fatal("ErrAlreadyTrashed must not match ErrNotFound")
+	}
+	if errors.Is(ErrNotTrashed, ErrNotFound) {
+		t.Fatal("ErrNotTrashed must not match ErrNotFound")
+	}
+	if errors.Is(ErrAlreadyTrashed, ErrNotTrashed) || errors.Is(ErrNotTrashed, ErrAlreadyTrashed) {
+		t.Fatal("ErrAlreadyTrashed and ErrNotTrashed must be distinct")
+	}
+	wrapped := fmt.Errorf("repo: %w", ErrAlreadyTrashed)
+	if !errors.Is(wrapped, ErrAlreadyTrashed) {
+		t.Fatal("wrapped ErrAlreadyTrashed should match")
+	}
+}

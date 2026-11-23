@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M12, M16-M20)
+# WordPress Compatibility (M1-M12, M16-M20, M22)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -481,8 +481,9 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     the `termIds` map keyed by taxonomy name. A taxonomy not attached to the
     type, or a term belonging to another taxonomy, is rejected (`400` on REST,
     a `partial` entry on the admin API).
-  - **Delete.** `DELETE` is a permanent delete with no trash. The cleanup
-    performed on delete is described under M18 PR 2 below.
+  - **Delete.** Since M22 PR 1, `DELETE` without `?force=true` moves the row
+    to the trash; with `?force=true` it is the permanent delete described
+    under M18 PR 2 below (see "M22 — Trash and restore (PR 1)").
   - **Other behavior.** `public: false` types are writable: `public` governs
     the public route only. The admin API keeps the `edit_posts` floor, so a role
     holding only `edit_products` can use REST but not the admin API for that
@@ -538,7 +539,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
       keep their `post_parent`. `post_modified` is not changed.
     - *Atomicity and retries.* The purge is one transaction. Every step before
       the final delete is idempotent, so a retry after a failure converges.
-    - Delete stays permanent: there is no trash.
+    - Delete stays permanent for the admin API and for `?force=true`. REST
+      `DELETE` without `force` has trashed since M22 PR 1.
   - **Page `parent`.** `parent` is writable on pages over REST
     (`/wp-json/wp/v2/pages`) and the admin API. An admin update body without
     `type` is treated as the stored row's type. `post` rows ignore `parent`.
@@ -554,7 +556,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
       `404` on both paths, and same-slug pages under different parents each
       serve their own body.
   - **Known gaps (PR 2).**
-    - There is no trash.
+    - REST `DELETE` trashes by default since M22 PR 1; the admin API `DELETE`
+      stays permanent until M22 PR 2.
     - WordPress hooks and the object cache are not involved.
 
 - **M19 — Term gate and delete parity (PR 1):** the term-side counterpart of
@@ -643,7 +646,7 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     (`RunPostMenuItemPurgerContract`). MySQL and PostgreSQL run when the
     `GRIMOIRE_TEST_*` DSNs are set, as CI does.
   - **Known gaps (PR 3).**
-    - There is no trash and no restore. (The media-delete menu-item gap and the
+    - Trash and restore arrived in M22 PR 1 for REST. (The media-delete menu-item gap and the
       unmanaged-taxonomy relationship gap listed here were closed in M20 PR 2.)
     - Term-side post meta, WordPress hooks and the object cache are not involved.
 - **M20 — Delete gap closure (PR 1):** child menu items and the menu count on
@@ -729,7 +732,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     (`RunPostTermRelationshipPurgerContract`, `RunMediaDeleteContract`). MySQL and
     PostgreSQL run when the `GRIMOIRE_TEST_*` DSNs are set, as CI does.
   - **Known gaps (M20 PR 2).**
-    - There is no trash and no restore.
+    - Trash and restore arrived in M22 PR 1 for posts, pages and registered
+      types. Attachments have no trash (WordPress `MEDIA_TRASH` is false).
     - Theme mods that reference the attachment (`custom_logo`, `header_image` and
       similar) are not cleared.
     - The intermediate image-size files and the original file on disk are not
@@ -832,6 +836,122 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   - **Still open.** The hour, minute and second forms of `m`, `?m=` on routes
     other than `/`, feeds and sitemaps, comment pagination and
     `<!--nextpage-->`.
+- **M22 — Trash and restore (PR 1):** REST `DELETE` of a post, a page or a
+  registered-type row now trashes it, in the rows WordPress itself writes, and
+  `PUT`/`PATCH` can trash and restore. No schema change, no migration, no new
+  capability string. One additive storage port (`PostTrasher`). PR 1 ships the
+  store, the service and the REST surface; the admin API and SPA are PR 2, and
+  `content.trash_days` and the automatic purge are PR 3.
+  - **REST `DELETE` (posts, pages, registered types).** Without `force`, the
+    row is trashed and the response is `200` with the post object as a `GET`
+    returns it (status `trash`). With `?force=true` (or `force=1`) it is the
+    permanent delete of M18-M20 and the response is
+    `{"deleted": true, "previous": <object>}`, as before. `force` is read from
+    the query string only. Media and users are unchanged: they have no trash
+    and still require `force=true` (`400 rest_trash_not_supported`).
+  - **Error codes.**
+    - `404 rest_post_invalid_id`: unknown id or wrong type.
+    - `403 rest_cannot_delete`: the caller may not delete the row. This is
+      checked first, so a forbidden caller learns nothing about trash state.
+      The code was `rest_cannot_edit` before M22 (a placeholder).
+    - `501 rest_trash_not_supported`: trash is not enabled or not wired and
+      `force` is absent. Nothing is deleted.
+    - `410 rest_already_trashed`: the row is already in the trash and `force`
+      is absent.
+    - `500 rest_delete_failed`: a storage failure; one transaction, so
+      nothing changed.
+  - **Representation (what a trash writes).** The same rows as WordPress's
+    `wp_trash_post`, so a WordPress on the same database reads the result and
+    the reverse:
+    - `post_status` becomes `trash`; `post_modified` and `post_modified_gmt`
+      move to the trash time.
+    - `postmeta`: `_wp_trash_meta_status` (the status the row had) and
+      `_wp_trash_meta_time` (Unix seconds).
+    - `post_name` gets the suffix `__trashed` unless it already ends with it
+      (cut at 191 bytes first, never inside a `%XX` escape), and the old name
+      is saved as `_wp_desired_post_slug`. An empty name becomes `__trashed`.
+    - Nothing else is removed: revisions, children, term relationships, menu
+      items and attachments stay. A trashed page's published child resolves at
+      `/{parent}__trashed/child/` until the parent is restored, as in
+      WordPress.
+  - **Restore.** `PUT`/`PATCH` of a trashed row with a `status` other than
+    `trash` (`publish`, `future`, `draft`, `pending` or `private`) restores it
+    to that status, applying any field changes in the same request. The
+    restore rule is WordPress's `wp_untrash_post`: there is no automatic
+    return to the previous status, so a client that wants the old status sends
+    it. The service-level default for an unspecified restore is `draft`.
+    The slug returns to the saved `_wp_desired_post_slug` (or the name without
+    `__trashed`) and is made unique among live rows of the same type (`-2`,
+    `-3`, ...; scoped to the parent for pages and hierarchical types); a
+    request that sends a different slug uses that one. The restore deletes
+    `_wp_trash_meta_status`, `_wp_trash_meta_time` and
+    `_wp_desired_post_slug`. A `PATCH` without `status` leaves a trashed row
+    trashed. `PUT`/`PATCH` with `status: trash` on a live row applies the
+    field changes and then trashes it; `POST` with `status: trash` is still
+    rejected. A `PUT`/`PATCH` that trashes when trash is unavailable, or on a
+    row already trashed, is not mapped to the delete codes: it answers
+    `500 rest_update_failed`.
+  - **Comments.** Trashing stores each comment's state as
+    `_wp_trash_meta_comments_status` (a serialized `id => approved` array,
+    integer keys) and sets the post's comments to `post-trashed`;
+    `comment_count` is left alone. Restoring puts each comment back (a
+    recorded `post-trashed` becomes `0`) and deletes the meta. A value that
+    cannot be read sets the post's `post-trashed` comments to `0`. A comment
+    list with no status filter no longer returns `post-trashed` comments;
+    lists that name a status are unchanged. WordPress's own REST restore leaves
+    `post-trashed` comments behind; grimoire's restore does not.
+  - **Term counts.** One shared rule now counts the relationships whose object
+    is not a trashed post, so a trash or a restore recounts every taxonomy the
+    row is in and category pages stop counting trashed posts. WordPress counts
+    only published posts for post taxonomies; the remaining gap (drafts count
+    in grimoire) predates M22 and is unchanged.
+  - **Menus.** Public menus (`NavMenuService.ByLocation` and `BySlug`) drop
+    items whose target is trashed and show that item's children in its place.
+    Stored menu items are untouched, so a restore brings the item back. The
+    admin menu views are unchanged.
+  - **Sticky.** Trashing a `post` removes its id from `sticky_posts` first
+    (a malformed option is left alone). A restore does not re-stick it, as in
+    WordPress.
+  - **Capabilities.** A trashed row is authorized as the status it had before
+    it was trashed (`_wp_trash_meta_status`), or as a draft when none is
+    recorded. A Contributor therefore cannot restore or permanently delete a
+    formerly published row. Trash needs the delete capability of the type;
+    a restore needs the edit capability on that status and then on the new
+    status (the publish check). The policy tests `publish` only, so a
+    recorded `future` is treated as a draft; this predates M22.
+  - **Reads.** Public routes already filter to `publish`, so a trashed row is
+    `404` there (now pinned by tests). `GET` of a single trashed row answers
+    `200` to a caller who may read unpublished rows and `404` to anyone else.
+    Collections take `?status=` (`publish`, `future`, `draft`, `pending`,
+    `private`, `trash`, `any`, or a comma list). An absent value or `publish`
+    behaves as before, an unknown value is `400 rest_invalid_param`, and a
+    caller who cannot read unpublished rows gets `403 rest_forbidden_status`
+    for anything but `publish`. `any` excludes `trash`. The admin list and its
+    counts leave trash out unless `trash` is requested.
+  - **Migration note (behavior change for existing clients).** A REST client
+    that used `DELETE` as a permanent delete now trashes the row instead: the
+    row stays in the database, its URL stops resolving and its slug changes to
+    `…__trashed`. Send `?force=true` to keep the old behavior. Until
+    `content.trash_days` arrives in PR 3, trash is always on with a 30-day
+    window and `trash_days: 0` (disable trashing, restoring the old default)
+    is not yet available. Nothing is purged automatically in PR 1: trashed rows
+    stay until restored or force-deleted. Clients that read the delete
+    response should expect the post object rather than `deleted`/`previous`
+    when `force` is absent, and `403` bodies now carry `rest_cannot_delete`.
+  - **Admin API.** `DELETE` on the admin API is still a permanent delete until
+    M22 PR 2. The admin SPA has no trash view yet.
+  - **Verified on** SQLite, MySQL 8.0 and PostgreSQL 16 by shared contracts
+    (the post-trash and term-count contracts); MySQL and PostgreSQL run when
+    the `GRIMOIRE_TEST_*` DSNs are set, as CI does. A read-only real-database
+    check (`TestM22TrashRealDBE2E`, gated on `GRIMOIRE_TEST_WP_DSN`) censuses
+    trashed rows and reads each through the store and the REST mapper; the
+    development database holds no trashed rows, so it passed with nothing to
+    read.
+  - **Known gaps (PR 1).** Attachments and users have no trash. WordPress
+    hooks and the object cache are not involved. Trashing a page does not move
+    its children. The admin API and SPA, `trash_days` and the purge are PR 2
+    and PR 3.
+
 ## Public read guarantees
 
 - The **public** rendering path (unauthenticated `GET` routes) filters to

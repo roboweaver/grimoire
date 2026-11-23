@@ -26,7 +26,7 @@ func (r *PostRepo) PurgeMenuItemsOf(ctx context.Context, postID int64, objectTyp
 			}
 			ttIDs = append(ttIDs, tts...)
 		}
-		return recountTx(ctx, tx, r.prefix, ttIDs)
+		return recountTx(ctx, tx, r.prefix, vendor, ttIDs)
 	})
 }
 

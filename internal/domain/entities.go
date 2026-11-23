@@ -220,7 +220,10 @@ type NavMenuItem struct {
 	ObjectID int64
 	ParentID int64
 	Order    int
-	Children []NavMenuItem
+	// TargetTrashed is true when the item's post_type target is in the trash.
+	// Read-only: it is computed on read and never stored.
+	TargetTrashed bool
+	Children      []NavMenuItem
 }
 
 // NavMenuPatch is a partial menu update; a nil field is left unchanged (Req 1.2).

@@ -74,6 +74,8 @@ func (r *CommentRepo) List(ctx context.Context, f domain.CommentFilter) ([]domai
 	}
 	if len(f.Statuses) > 0 {
 		q = q.Where("comment_approved IN (?)", bun.In(f.Statuses))
+	} else {
+		q = q.Where("comment_approved <> 'post-trashed'")
 	}
 	if f.PostID != 0 {
 		q = q.OrderExpr("comment_date ASC, ? ASC", bun.Ident("comment_ID"))
@@ -103,6 +105,8 @@ func (r *CommentRepo) Count(ctx context.Context, f domain.CommentFilter) (int, e
 	}
 	if len(f.Statuses) > 0 {
 		q = q.Where("comment_approved IN (?)", bun.In(f.Statuses))
+	} else {
+		q = q.Where("comment_approved <> 'post-trashed'")
 	}
 	return q.Count(ctx)
 }

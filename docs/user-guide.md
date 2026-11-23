@@ -103,7 +103,13 @@ the real WordPress response shape — `_links`, `?_embed`, and `X-WP-Total*`
 pagination headers. It offers read parity for posts, pages, comments, media and
 users, plus write endpoints for comments, posts/pages, categories/tags, media,
 and users — including `DELETE` for media and users (which require `force=true`,
-matching WordPress's no-trash semantics for those types). Every write passes
+matching WordPress's no-trash semantics for those types). `DELETE` of a post,
+page or registered-type row moves it to the trash, as in WordPress, and
+`?force=true` deletes it permanently; a `PUT`/`PATCH` with a `status` other than
+`trash` restores a trashed row (a restore with no status given is a draft, as in
+WordPress). See the M22 section of [`compatibility.md`](./compatibility.md),
+including the note for clients that used `DELETE` as a permanent delete. The
+admin's own delete is still permanent in this release. Every write passes
 through a capability-aware HTML sanitizer at the write boundary (see
 [`compatibility.md`](./compatibility.md) for the tier model).
 

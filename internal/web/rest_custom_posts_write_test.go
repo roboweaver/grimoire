@@ -281,7 +281,7 @@ func TestRESTCustomPostWriteCapabilities(t *testing.T) {
 	t.Run("update and delete use the stored row's family", func(t *testing.T) {
 		h := e.handler(t, true, map[string]bool{"edit_posts": true, "delete_posts": true})
 		rcpwWant(t, rcpwDo(h, http.MethodPut, rcpwPath(e.existing), `{"title":"X"}`, nil), http.StatusForbidden, "rest_cannot_edit")
-		rcpwWant(t, rcpwDo(h, http.MethodDelete, rcpwPath(e.existing), "", nil), http.StatusForbidden, "rest_cannot_edit")
+		rcpwWant(t, rcpwDo(h, http.MethodDelete, rcpwPath(e.existing)+"?force=true", "", nil), http.StatusForbidden, "rest_cannot_delete") // M22: code was rest_cannot_edit; force keeps the permanent path
 		if got := rcpwStored(t, e, e.existing); got.Title != "T-existing" {
 			t.Errorf("forbidden write changed the row: %q", got.Title)
 		}
@@ -447,11 +447,11 @@ func TestRESTCustomPostWriteRouteIndex(t *testing.T) {
 	}
 }
 
-// Req 13.1: DELETE answers 200 {deleted, previous}, ignores ?force, removes the row.
+// Req 13.1 (M22: now requires ?force=true; non-force trashes): DELETE ?force=true answers 200 {deleted, previous} and removes the row.
 func TestRESTCustomPostWriteDelete(t *testing.T) {
 	e := newRCPWEnv(t)
 	h := e.handler(t, true, rcpwCapSet())
-	rec := rcpwDo(h, http.MethodDelete, rcpwPath(e.existing)+"?force=false", "", nil)
+	rec := rcpwDo(h, http.MethodDelete, rcpwPath(e.existing)+"?force=true", "", nil)
 	rcpwWant(t, rec, http.StatusOK, "")
 	got := rcpwObj(t, rec)
 	if got["deleted"] != true {
@@ -462,7 +462,7 @@ func TestRESTCustomPostWriteDelete(t *testing.T) {
 		t.Errorf("previous = %v, want the product object", got["previous"])
 	}
 	if _, err := e.repos.PostWriter.ByID(context.Background(), e.existing); err == nil {
-		t.Errorf("row %d still exists after DELETE ?force=false", e.existing)
+		t.Errorf("row %d still exists after DELETE ?force=true", e.existing)
 	}
 }
 

@@ -252,7 +252,7 @@ func TestBuildHandlerCustomPostWrites(t *testing.T) {
 		http.StatusForbidden, "editor REST create")
 	want(doJSON(t, h, ed, http.MethodPatch, fmt.Sprintf("%s/%d", restProduct, widget.ID), `{"title":"Nope"}`),
 		http.StatusForbidden, "editor REST update")
-	want(doJSON(t, h, ed, http.MethodDelete, fmt.Sprintf("%s/%d", restProduct, widget.ID), ""),
+	want(doJSON(t, h, ed, http.MethodDelete, fmt.Sprintf("%s/%d?force=true", restProduct, widget.ID), ""),
 		http.StatusForbidden, "editor REST delete")
 	want(doJSON(t, h, ed, http.MethodPost, "/admin/api/posts", `{"title":"Nope","type":"product","status":"draft"}`),
 		http.StatusForbidden, "editor admin create")
@@ -319,7 +319,7 @@ func TestBuildHandlerCustomPostWrites(t *testing.T) {
 	exec("INSERT INTO "+env.Prefix+"term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, ?, ?, ?, ?)",
 		9101, 9001, "genre", "", 0, 1)
 	exec("INSERT INTO "+env.Prefix+"term_relationships (object_id, term_taxonomy_id, term_order) VALUES (?, ?, ?)", termed.ID, 9101, 0)
-	rec = doJSON(t, h, pu, http.MethodDelete, fmt.Sprintf("%s/%d", restProduct, termed.ID), "")
+	rec = doJSON(t, h, pu, http.MethodDelete, fmt.Sprintf("%s/%d?force=true", restProduct, termed.ID), "")
 	want(rec, http.StatusOK, "REST delete termed product")
 	if !rest(rec).Deleted {
 		t.Fatalf("delete response not marked deleted: %s", rec.Body.String())
@@ -341,7 +341,7 @@ func TestBuildHandlerCustomPostWrites(t *testing.T) {
 	}
 
 	// Remaining REST delete on the first product.
-	want(doJSON(t, h, pu, http.MethodDelete, fmt.Sprintf("%s/%d", restProduct, widget.ID), ""),
+	want(doJSON(t, h, pu, http.MethodDelete, fmt.Sprintf("%s/%d?force=true", restProduct, widget.ID), ""),
 		http.StatusOK, "REST delete product")
 	want(doJSON(t, h, nil, http.MethodGet, "/product/widget/", ""), http.StatusNotFound, "GET deleted product")
 }
@@ -540,7 +540,7 @@ func TestBuildHandlerCustomHierarchyAndTerms(t *testing.T) {
 	want(doJSON(t, h, nil, http.MethodGet, "/product/wrong-vocab/", ""), http.StatusNotFound, "GET refused product")
 
 	// --- delete decrements the counts (13.3) ---
-	want(doJSON(t, h, pu, http.MethodDelete, fmt.Sprintf("%s/%d", restProduct, tagged.ID), ""),
+	want(doJSON(t, h, pu, http.MethodDelete, fmt.Sprintf("%s/%d?force=true", restProduct, tagged.ID), ""),
 		http.StatusOK, "REST delete tagged product")
 	if termCount(g1) != 1 || termCount(g2) != 0 {
 		t.Fatalf("counts after delete = %d/%d, want 1/0", termCount(g1), termCount(g2))

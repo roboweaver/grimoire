@@ -114,7 +114,7 @@ type PostTermsRepository interface {
 // schema, so the existing-WordPress-DB overlay is unaffected.
 type AdminPostFilter struct {
 	Types    []string // e.g. {"post","page"}; empty = both post and page
-	Statuses []string // e.g. {"publish","draft","pending","private"}; empty = all
+	Statuses []string // e.g. {"publish","draft","pending","private"}; empty = every status except trash; {"trash"} = only trashed rows
 	Limit    int      // page size; <=0 means "no limit"
 	Offset   int      // rows to skip
 
@@ -153,7 +153,8 @@ type AdminPostRepository interface {
 // PostCounter counts posts for the dashboard. Additive; pure COUNT(*).
 type PostCounter interface {
 	// CountByStatus counts posts of the given post_type and post_status. An
-	// empty typ matches any type; an empty status matches any status.
+	// empty typ matches any type; an empty status matches every status
+	// except trash (count the trash with status "trash").
 	CountByStatus(ctx context.Context, typ, status string) (int, error)
 }
 
@@ -171,7 +172,8 @@ type TermCounter interface {
 }
 
 // CommentFilter selects comments for the public list or admin queue. Empty
-// Statuses means all statuses; PostID 0 means across all posts.
+// Statuses means every status except post-trashed (name it to list those);
+// PostID 0 means across all posts.
 type CommentFilter struct {
 	PostID   int64
 	Statuses []string
@@ -710,4 +712,41 @@ type PostMenuItemPurger interface {
 	// deleted item's menu parent (0 when it had none, or when that parent is
 	// itself deleted, the nearest surviving ancestor); nothing else changes.
 	PurgeMenuItemsOf(ctx context.Context, postID int64, objectType string) error
+}
+
+// TrashInfo is what WordPress recorded when it trashed a row. Each Has flag
+// reports whether the corresponding meta row exists.
+type TrashInfo struct {
+	PreviousStatus    string
+	HasPreviousStatus bool
+	TrashedAt         time.Time
+	HasTrashedAt      bool
+	DesiredSlug       string
+	HasDesiredSlug    bool
+}
+
+// RestoreRequest parameterizes PostTrasher.RestorePost.
+type RestoreRequest struct {
+	Status            string    // new post_status; never "trash"
+	Slug              string    // explicit post_name; "" restores the stored desired name
+	HierarchicalScope bool      // uniqueness is scoped to post_parent (pages, hierarchical types)
+	At                time.Time // post_modified for the restore
+}
+
+// PostTrasher moves a row to and from the trash in the representation
+// WordPress writes (wp_trash_post, wp_untrash_post, wp_trash_post_comments,
+// wp_untrash_post_comments), so a WordPress sharing the database reads the
+// result natively. Each method is one transaction. It never deletes a row, a
+// revision, a term, a menu item or a child.
+type PostTrasher interface {
+	// TrashPost trashes id at the given time and returns the status the row
+	// had. It returns ErrNotFound for a missing id and ErrAlreadyTrashed for a
+	// row already in the trash.
+	TrashPost(ctx context.Context, id int64, at time.Time) (previousStatus string, err error)
+	// RestorePost takes id out of the trash. It returns ErrNotFound for a
+	// missing id and ErrNotTrashed for a row that is not in the trash.
+	RestorePost(ctx context.Context, id int64, req RestoreRequest) error
+	// TrashInfo reads the trash meta of id (the first row by meta_id per key).
+	// It returns ErrNotFound when the post row is missing.
+	TrashInfo(ctx context.Context, id int64) (TrashInfo, error)
 }

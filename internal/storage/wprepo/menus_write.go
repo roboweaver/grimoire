@@ -368,7 +368,7 @@ func (r *NavMenuRepo) DeleteItem(ctx context.Context, menuID, itemID int64) erro
 		if err != nil {
 			return err
 		}
-		return recountTx(ctx, tx, r.prefix, ttIDs)
+		return recountTx(ctx, tx, r.prefix, vendor, ttIDs)
 	})
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -54,10 +55,9 @@ func restPostBase(typ string) (collection, single string) {
 }
 
 // handleRESTPostsCollection serves GET .../posts and GET .../pages: a
-// paginated, newest-first collection of published items of the given type
-// (Req 2.1, 2.3). Draft/pending/private items are never listed here
-// regardless of caller capability; that widening only applies to the
-// single-item endpoint (Req 2.4).
+// paginated, newest-first collection of items of the given type. It lists
+// published items unless the status parameter widens it, which needs the
+// edit capability (M22, parseRESTStatuses).
 func (s *Server) handleRESTPostsCollection(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -66,11 +66,16 @@ func (s *Server) handleRESTPostsCollection(typ string) http.HandlerFunc {
 			return
 		}
 
+		statuses, st, code, msg := s.parseRESTStatuses(r, typ)
+		if code != "" {
+			writeRESTError(w, st, code, msg)
+			return
+		}
 		paging := parseRESTPaging(r, s.restPerPageMax)
 		orderBy, order := restOrder(r)
 		f := domain.AdminPostFilter{
 			Types:    []string{typ},
-			Statuses: []string{"publish"},
+			Statuses: statuses,
 			Limit:    paging.PerPage,
 			Offset:   paging.Offset,
 			Search:   q.Get("search"),
@@ -313,10 +318,14 @@ func (s *Server) parseRESTPostWrite(body restPostWriteRequest, typ string, curre
 	if p.Status == "" {
 		p.Status = "draft"
 	}
-	if !validPostStatuses[p.Status] {
+	valid := validPostStatuses
+	if current != nil {
+		valid = validUpdateStatuses // updates may also move a row into the trash (M22)
+	}
+	if !valid[p.Status] {
 		return domain.Post{}, "rest_invalid_param", errors.New("invalid status")
 	}
-	if p.Title == "" && p.Status != "draft" {
+	if p.Title == "" && p.Status != "draft" && p.Status != "trash" {
 		return domain.Post{}, "rest_invalid_param", errors.New("title is required unless status is draft")
 	}
 	if body.Date != nil {
@@ -506,10 +515,10 @@ func (s *Server) handleRESTPostUpdate(typ string) http.HandlerFunc {
 
 // handleRESTPostDelete handles DELETE .../posts/{id}, .../pages/{id} (Req
 // 6.3/6.8). Existence and type are checked before authorization, same as
-// update. Unlike the admin API's 204, WP REST parity requires 200 with the
-// deleted item echoed back in "previous" (Req 6.3). There is no distinct
-// "rest_cannot_delete" code in the spec, so a forbidden delete reuses
-// "rest_cannot_edit", matching the same code update's forbidden case uses.
+// update. Without ?force=true the row is trashed (M22) and the post object is
+// answered; with force the row is deleted and, unlike the admin API's 204, WP
+// REST parity requires 200 with the deleted item echoed back in "previous"
+// (Req 6.3). A forbidden delete answers rest_cannot_delete.
 // Auth follows the same CSRF pattern as create/update (Req 7.4/8.7).
 func (s *Server) handleRESTPostDelete(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -554,16 +563,103 @@ func (s *Server) handleRESTPostDelete(typ string) http.HandlerFunc {
 			writeRESTError(w, http.StatusInternalServerError, "rest_list_failed", "Could not encode "+typ+".")
 			return
 		}
-		if err := s.postWrite.Delete(r.Context(), principal, domain.Post{ID: id}); err != nil {
-			if errors.Is(err, content.ErrForbidden) {
-				writeRESTError(w, http.StatusForbidden, "rest_cannot_edit", "Sorry, you are not allowed to delete this "+typ+".")
+		if restForceDelete(r) {
+			if err := s.postWrite.Delete(r.Context(), principal, domain.Post{ID: id}); err != nil {
+				s.writeRESTDeleteError(w, typ, err)
 				return
 			}
-			writeRESTError(w, http.StatusInternalServerError, "rest_delete_failed", "Could not delete "+typ+".")
+			_ = writeRESTResponse(w, r, http.StatusOK, map[string]any{"deleted": true, "previous": previous})
 			return
 		}
-		_ = writeRESTResponse(w, r, http.StatusOK, map[string]any{"deleted": true, "previous": previous})
+		if s.postTrash == nil {
+			s.writeRESTDeleteError(w, typ, content.ErrTrashUnsupported)
+			return
+		}
+		if err := s.postTrash.Trash(r.Context(), principal, id); err != nil {
+			s.writeRESTDeleteError(w, typ, err)
+			return
+		}
+		s.writeRESTPostResult(w, r, typ, id, http.StatusOK)
 	}
+}
+
+// writeRESTDeleteError maps a Delete or Trash error to its REST response.
+// content.ErrForbidden is checked first so a forbidden actor never learns
+// whether the row is already trashed or trash is disabled.
+func (s *Server) writeRESTDeleteError(w http.ResponseWriter, typ string, err error) {
+	switch {
+	case errors.Is(err, content.ErrForbidden):
+		writeRESTError(w, http.StatusForbidden, "rest_cannot_delete", "Sorry, you are not allowed to delete this "+typ+".")
+	case errors.Is(err, content.ErrTrashUnsupported):
+		writeRESTError(w, http.StatusNotImplemented, "rest_trash_not_supported", "The post does not support trashing. Set 'force=true' to delete.")
+	case errors.Is(err, domain.ErrAlreadyTrashed):
+		writeRESTError(w, http.StatusGone, "rest_already_trashed", "The post has already been deleted.")
+	default:
+		writeRESTError(w, http.StatusInternalServerError, "rest_delete_failed", "Could not delete "+typ+".")
+	}
+}
+
+// postTrashWriter is the trash surface of the post write service
+// (*content.PostWriteService satisfies it). It is separate from
+// postAdminWriter so existing fakes of that interface keep compiling.
+type postTrashWriter interface {
+	Trash(ctx context.Context, actor auth.Principal, id int64) error
+	Restore(ctx context.Context, actor auth.Principal, id int64, status string) error
+	TrashEnabled() bool
+}
+
+// WithPostTrash sets the trash service used by a non-force REST DELETE. With
+// none set, a non-force DELETE answers 501 rest_trash_not_supported and
+// deletes nothing.
+func (s *Server) WithPostTrash(w postTrashWriter) *Server {
+	s.postTrash = w
+	return s
+}
+
+// validUpdateStatuses is validPostStatuses plus "trash"; only PUT/PATCH use it.
+var validUpdateStatuses = map[string]bool{
+	"draft": true, "pending": true, "publish": true, "private": true, "future": true, "trash": true,
+}
+
+// restLiveStatuses is what status=any expands to.
+var restLiveStatuses = []string{"publish", "future", "draft", "pending", "private"}
+
+// parseRESTStatuses reads the collection's status query parameter. It returns
+// the statuses to list, or a non-empty code with the HTTP status and message
+// of the error to answer.
+func (s *Server) parseRESTStatuses(r *http.Request, typ string) (statuses []string, httpStatus int, code, msg string) {
+	raw := r.URL.Query().Get("status")
+	if raw == "" || raw == "publish" {
+		return []string{"publish"}, 0, "", ""
+	}
+	seen := map[string]bool{}
+	add := func(v string) {
+		if !seen[v] {
+			seen[v] = true
+			statuses = append(statuses, v)
+		}
+	}
+	for _, tok := range strings.Split(raw, ",") {
+		tok = strings.TrimSpace(tok)
+		switch {
+		case tok == "":
+		case tok == "any":
+			for _, v := range restLiveStatuses {
+				add(v)
+			}
+		case validUpdateStatuses[tok]:
+			add(tok)
+		default:
+			return nil, http.StatusBadRequest, "rest_invalid_param", "Invalid parameter(s): status"
+		}
+	}
+	if len(statuses) == 0 {
+		return []string{"publish"}, 0, "", ""
+	}
+	if !s.canReadUnpublished(r, typ) && !(len(statuses) == 1 && statuses[0] == "publish") {
+		return nil, http.StatusForbidden, "rest_forbidden_status", "Status is forbidden."
+	}
+	return statuses, 0, "", ""
 }
 
 // writeRESTPostResult fetches the just-written post/page by id and writes

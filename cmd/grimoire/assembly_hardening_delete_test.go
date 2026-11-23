@@ -108,7 +108,7 @@ type hardeningDeleteSurface struct {
 
 var hardeningDeleteSurfaces = []hardeningDeleteSurface{
 	{"admin", func(_ string, id int64) string { return fmt.Sprintf("/admin/api/posts/%d", id) }, http.StatusNoContent},
-	{"rest", func(rest string, id int64) string { return fmt.Sprintf("/wp-json/wp/v2/%s/%d", rest, id) }, http.StatusOK},
+	{"rest", func(rest string, id int64) string { return fmt.Sprintf("/wp-json/wp/v2/%s/%d?force=true", rest, id) }, http.StatusOK},
 }
 
 // TestBuildHandlerHardeningDeletePost (Req 7.1, 7.4, 8, 9.2): deleting a built-in

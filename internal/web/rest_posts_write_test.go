@@ -406,7 +406,7 @@ func TestRESTPostDelete(t *testing.T) {
 		`{"title":"To Delete","status":"draft"}`, nil)
 	id := restJSONID(t, createRec)
 
-	rec := doRESTWrite(t, h, http.MethodDelete, "/wp-json/wp/v2/posts/"+strconv.FormatInt(id, 10), secret, "", nil)
+	rec := doRESTWrite(t, h, http.MethodDelete, "/wp-json/wp/v2/posts/"+strconv.FormatInt(id, 10)+"?force=true", secret, "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -443,7 +443,7 @@ func TestRESTPageDelete(t *testing.T) {
 		`{"title":"To Delete","status":"draft"}`, nil)
 	id := restJSONID(t, createRec)
 
-	rec := doRESTWrite(t, h, http.MethodDelete, "/wp-json/wp/v2/pages/"+strconv.FormatInt(id, 10), secret, "", nil)
+	rec := doRESTWrite(t, h, http.MethodDelete, "/wp-json/wp/v2/pages/"+strconv.FormatInt(id, 10)+"?force=true", secret, "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
@@ -511,7 +511,7 @@ func TestRESTPostWriteSessionAuthRequiresCSRF(t *testing.T) {
 		}
 	})
 	t.Run("delete/correct token", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodDelete, idPath, nil)
+		req := httptest.NewRequest(http.MethodDelete, idPath+"?force=true", nil)
 		req.AddCookie(&http.Cookie{Name: "grimoire_session", Value: "anything"})
 		req.Header.Set("X-CSRF-Token", "correct-token")
 		rec := httptest.NewRecorder()

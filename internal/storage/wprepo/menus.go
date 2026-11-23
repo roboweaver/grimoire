@@ -196,11 +196,11 @@ ORDER BY p.menu_order ASC, ` + pID + ` ASC`
 		}
 		row.ObjectID, _ = strconv.ParseInt(objectID, 10, 64)
 		row.ParentID, _ = strconv.ParseInt(parentID, 10, 64)
-		label, url, err := r.resolveMenuTarget(ctx, row)
+		label, url, trashed, err := r.resolveMenuTarget(ctx, row)
 		if err != nil {
 			return nil, err
 		}
-		flat = append(flat, domain.NavMenuItem{ID: row.ID, Label: label, URL: url, Type: row.Type, Object: row.Object, ObjectID: row.ObjectID, ParentID: row.ParentID, Order: row.Order})
+		flat = append(flat, domain.NavMenuItem{ID: row.ID, Label: label, URL: url, Type: row.Type, Object: row.Object, ObjectID: row.ObjectID, ParentID: row.ParentID, Order: row.Order, TargetTrashed: trashed})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -208,29 +208,29 @@ ORDER BY p.menu_order ASC, ` + pID + ` ASC`
 	return buildMenuTree(flat), nil
 }
 
-func (r *NavMenuRepo) resolveMenuTarget(ctx context.Context, row navItemRow) (string, string, error) {
+func (r *NavMenuRepo) resolveMenuTarget(ctx context.Context, row navItemRow) (string, string, bool, error) {
 	if row.Type == "custom" {
-		return row.Title, row.URL, nil
+		return row.Title, row.URL, false, nil
 	}
 	if row.Type == "post_type" {
-		var title, slug string
+		var title, slug, status string
 		err := r.db.NewSelect().
 			TableExpr("?", bun.Ident(r.prefix+"posts")).
-			Column("post_title", "post_name").
+			Column("post_title", "post_name", "post_status").
 			Where("? = ?", bun.Ident("ID"), row.ObjectID).
 			Limit(1).
-			Scan(ctx, &title, &slug)
+			Scan(ctx, &title, &slug, &status)
 		if errors.Is(err, sql.ErrNoRows) {
-			return fallbackLabel(row.Title), row.URL, nil
+			return fallbackLabel(row.Title), row.URL, false, nil
 		}
 		if err != nil {
-			return "", "", err
+			return "", "", false, err
 		}
 		label := row.Title
 		if strings.TrimSpace(label) == "" {
 			label = title
 		}
-		return label, "/" + slug, nil
+		return label, "/" + slug, status == "trash", nil
 	}
 	if row.Type == "taxonomy" {
 		var name, slug string
@@ -241,18 +241,18 @@ func (r *NavMenuRepo) resolveMenuTarget(ctx context.Context, row navItemRow) (st
 			Limit(1).
 			Scan(ctx, &name, &slug)
 		if errors.Is(err, sql.ErrNoRows) {
-			return fallbackLabel(row.Title), row.URL, nil
+			return fallbackLabel(row.Title), row.URL, false, nil
 		}
 		if err != nil {
-			return "", "", err
+			return "", "", false, err
 		}
 		label := row.Title
 		if strings.TrimSpace(label) == "" {
 			label = name
 		}
-		return label, fmt.Sprintf("/%s/%s", row.Object, slug), nil
+		return label, fmt.Sprintf("/%s/%s", row.Object, slug), false, nil
 	}
-	return fallbackLabel(row.Title), row.URL, nil
+	return fallbackLabel(row.Title), row.URL, false, nil
 }
 
 func buildMenuTree(flat []domain.NavMenuItem) []domain.NavMenuItem {

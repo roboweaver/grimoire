@@ -279,7 +279,7 @@ func (r *MediaRepo) Delete(ctx context.Context, id int64) error {
 			}
 			ttIDs = append(ttIDs, tts...)
 		}
-		if err := recountTx(ctx, tx, r.prefix, ttIDs); err != nil {
+		if err := recountTx(ctx, tx, r.prefix, vendor, ttIDs); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,
@@ -296,7 +296,7 @@ func (r *MediaRepo) Delete(ctx context.Context, id int64) error {
 			"DELETE FROM ? WHERE ? = ?", comments, bun.Ident("comment_post_ID"), id); err != nil {
 			return err
 		}
-		if err := purgeRelationshipsTx(ctx, tx, r.prefix, id); err != nil {
+		if err := purgeRelationshipsTx(ctx, tx, r.prefix, vendor, id); err != nil {
 			return err
 		}
 		// Dangling rows (no term_taxonomy row, so purgeRelationshipsTx cannot

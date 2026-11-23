@@ -462,13 +462,15 @@ func TestRESTPostWriteCapabilityMatrix(t *testing.T) {
 			wantCode int
 			wantErr  string // "" when wantCode is 200
 		}{
-			{"anonymous", nil, http.StatusForbidden, "rest_cannot_edit"},
-			{"subscriber-owner", postMatrixFake(1, "sub", auth.RoleSubscriber), http.StatusForbidden, "rest_cannot_edit"},
+			{"anonymous", nil, http.StatusForbidden, "rest_cannot_delete"},
+			{"subscriber-owner", postMatrixFake(1, "sub", auth.RoleSubscriber), http.StatusForbidden, "rest_cannot_delete"},
+			// M22: ?force=true keeps these on the permanent-delete path (non-force now trashes);
+			// the forbidden code is rest_cannot_delete (was rest_cannot_edit before M22).
 			// OWN delete (caller is user 1): delete_posts + delete_published_posts.
 			{"author-owner", postMatrixFake(1, "author", auth.RoleAuthor), http.StatusOK, ""},
 			// OTHER-author delete (caller is user 7): delete_others_posts
 			// required. Author lacks it → 403; editor/administrator hold it → 200.
-			{"author-other", postMatrixFake(7, "author7", auth.RoleAuthor), http.StatusForbidden, "rest_cannot_edit"},
+			{"author-other", postMatrixFake(7, "author7", auth.RoleAuthor), http.StatusForbidden, "rest_cannot_delete"},
 			{"editor-other", postMatrixFake(7, "editor7", auth.RoleEditor), http.StatusOK, ""},
 			{"administrator-other", postMatrixFake(7, "admin7", auth.RoleAdministrator), http.StatusOK, ""},
 		}
@@ -482,9 +484,9 @@ func TestRESTPostWriteCapabilityMatrix(t *testing.T) {
 
 				var req *http.Request
 				if tc.fake == nil {
-					req = httptest.NewRequest(http.MethodDelete, "/wp-json/wp/v2/posts/1", nil)
+					req = httptest.NewRequest(http.MethodDelete, "/wp-json/wp/v2/posts/1?force=true", nil)
 				} else {
-					req = matrixPostReq(http.MethodDelete, "/wp-json/wp/v2/posts/1", "")
+					req = matrixPostReq(http.MethodDelete, "/wp-json/wp/v2/posts/1?force=true", "")
 				}
 				rec := httptest.NewRecorder()
 				h.ServeHTTP(rec, req)

@@ -247,7 +247,7 @@ func TestBuildHandlerDeleteCleanupPurgeFailure(t *testing.T) {
 	victim := seedRawPost(t, env, "post", "publish", 0)
 	seedRawTermRelationship(t, env, victim, terms.productCat)
 	seedRawTermRelationship(t, env, victim, terms.postFormat)
-	path := fmt.Sprintf("/wp-json/wp/v2/posts/%d", victim)
+	path := fmt.Sprintf("/wp-json/wp/v2/posts/%d?force=true", victim)
 
 	rec := doJSON(t, env.Handler, &env.Admin, http.MethodDelete, path, "")
 	if rec.Code != http.StatusInternalServerError {
@@ -298,7 +298,7 @@ func TestBuildHandlerDeleteCleanupDenied(t *testing.T) {
 	}{
 		{"contributor media", &env.Contrib, fmt.Sprintf("/wp-json/wp/v2/media/%d?force=true", f.att), http.StatusForbidden},
 		{"unknown media", &env.Admin, "/wp-json/wp/v2/media/999999?force=true", http.StatusNotFound},
-		{"contributor post", &env.Contrib, fmt.Sprintf("/wp-json/wp/v2/posts/%d", victim), http.StatusForbidden},
+		{"contributor post", &env.Contrib, fmt.Sprintf("/wp-json/wp/v2/posts/%d?force=true", victim), http.StatusForbidden},
 	} {
 		if rec := doJSON(t, env.Handler, tc.actor, http.MethodDelete, tc.path, ""); rec.Code != tc.status {
 			t.Errorf("%s: status = %d, want %d; body %s", tc.name, rec.Code, tc.status, rec.Body.String())

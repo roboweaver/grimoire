@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/domain"
+	"github.com/roboweaver/grimoire/internal/storage"
 )
 
 // runAdminContract covers the additive read/count ports backing the M3
@@ -266,4 +267,82 @@ func runAdminContract(t *testing.T, newRepos NewReposFunc) {
 			}
 		}
 	})
+
+	t.Run("ListForAdmin and CountForAdmin omit trashed rows unless the trash is asked for", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		tcCreateTrashed(ctx, t, repos)
+		posts, err := repos.AdminPosts.ListForAdmin(ctx, domain.AdminPostFilter{})
+		if err != nil {
+			t.Fatalf("ListForAdmin default: %v", err)
+		}
+		want := []string{"about", "secret", "hello-3", "hello-2", "hello-1"}
+		if len(posts) != len(want) {
+			t.Fatalf("default list = %d rows, want %d without the trashed rows", len(posts), len(want))
+		}
+		for i, w := range want {
+			if posts[i].Slug != w {
+				t.Errorf("default list[%d] slug = %q, want %q", i, posts[i].Slug, w)
+			}
+		}
+		if n, err := repos.AdminPosts.CountForAdmin(ctx, domain.AdminPostFilter{}); err != nil || n != 5 {
+			t.Errorf("CountForAdmin default = %d, %v; want 5, nil (trash omitted)", n, err)
+		}
+		trashed, err := repos.AdminPosts.ListForAdmin(ctx, domain.AdminPostFilter{Statuses: []string{"trash"}})
+		if err != nil {
+			t.Fatalf("ListForAdmin trash: %v", err)
+		}
+		got := map[string]bool{}
+		for _, p := range trashed {
+			got[p.Slug] = true
+			if p.Status != "trash" {
+				t.Errorf("trash list returned %q with status %q", p.Slug, p.Status)
+			}
+		}
+		if len(trashed) != 2 || !got["trashed-post"] || !got["trashed-page"] {
+			t.Errorf("trash list = %+v, want exactly trashed-post and trashed-page", trashed)
+		}
+		if n, err := repos.AdminPosts.CountForAdmin(ctx, domain.AdminPostFilter{Statuses: []string{"trash"}}); err != nil || n != 2 {
+			t.Errorf("CountForAdmin trash = %d, %v; want 2, nil", n, err)
+		}
+	})
+	t.Run("CountByStatus with an empty status omits trashed rows", func(t *testing.T) {
+		repos, cleanup := newRepos(t)
+		defer cleanup()
+		tcCreateTrashed(ctx, t, repos)
+		cases := []struct {
+			typ, status string
+			want        int
+		}{
+			{"page", "", 1},      // the fixture page; the trashed page is not counted
+			{"post", "", 4},      // the fixture posts; the trashed post is not counted
+			{"", "", 11},         // every type, every status except trash: 4 posts + 1 page + 2 attachments + 4 nav_menu_items
+			{"page", "trash", 1}, // an explicit trash status counts the trash
+			{"post", "trash", 1},
+			{"", "trash", 2},
+		}
+		for _, c := range cases {
+			got, err := repos.PostCounter.CountByStatus(ctx, c.typ, c.status)
+			if err != nil {
+				t.Fatalf("CountByStatus(%q,%q): %v", c.typ, c.status, err)
+			}
+			if got != c.want {
+				t.Errorf("CountByStatus(%q,%q) = %d, want %d", c.typ, c.status, got, c.want)
+			}
+		}
+	})
+}
+
+// tcCreateTrashed adds one trashed post and one trashed page to the fixtures.
+func tcCreateTrashed(ctx context.Context, t *testing.T, repos *storage.Repositories) {
+	t.Helper()
+	for _, p := range []domain.Post{
+		{Author: 1, Title: "Trashed post", Slug: "trashed-post", Type: "post"},
+		{Author: 1, Title: "Trashed page", Slug: "trashed-page", Type: "page"},
+	} {
+		p.Status, p.Date, p.CommentStatus = "trash", time.Now(), "open"
+		if _, err := repos.PostWriter.Create(ctx, p); err != nil {
+			t.Fatalf("create trashed %s: %v", p.Slug, err)
+		}
+	}
 }

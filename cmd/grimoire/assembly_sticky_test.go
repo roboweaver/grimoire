@@ -94,7 +94,7 @@ func TestBuildHandlerSticky(t *testing.T) {
 		stickyDelete(t, env, &env.Admin, fmt.Sprintf("/admin/api/posts/%d", a), http.StatusNoContent)
 		stickyWantOption(t, env, stickyList(b), "after admin delete of A (Req 8.1)")
 
-		stickyDelete(t, env, &env.Admin, fmt.Sprintf("/wp-json/wp/v2/posts/%d", b), http.StatusOK)
+		stickyDelete(t, env, &env.Admin, fmt.Sprintf("/wp-json/wp/v2/posts/%d?force=true", b), http.StatusOK)
 		stickyWantOption(t, env, "a:0:{}", "after REST delete of the last id (Req 8.5)")
 	})
 

@@ -44,6 +44,7 @@ type Server struct {
 	// expected to be called whenever WithAdmin is, so these are only ever
 	// nil in tests/embedders that intentionally omit the write routes.
 	postWrite      postAdminWriter
+	postTrash      postTrashWriter // M22; nil until WithPostTrash
 	termWrite      termAdminService
 	postTermsWrite postTermsAdminWriter
 	postTermsRead  postTermsAdminReader

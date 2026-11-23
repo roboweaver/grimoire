@@ -268,7 +268,7 @@ func lifecycleRows() []lifecycleRow {
 			secret := l.appPassword("products")
 			l.want(l.doAppPassword("products", secret, http.MethodPost, lcProduct, `{"title":"By AP","status":"publish"}`),
 				http.StatusCreated, "app password create")
-			l.want(l.do(pu, http.MethodDelete, path, ""), http.StatusOK, "DELETE")
+			l.want(l.do(pu, http.MethodDelete, path+"?force=true", ""), http.StatusOK, "DELETE")
 			var idx struct {
 				Routes map[string]struct {
 					Methods []string `json:"methods"`
@@ -302,7 +302,7 @@ func lifecycleRows() []lifecycleRow {
 			l.want(l.doAppPassword("editor", secret, http.MethodPost, lcProduct, `{"title":"No","status":"draft"}`),
 				http.StatusForbidden, "editor app password")
 			id := l.id(l.do(&l.env.Products, http.MethodPost, lcProduct, `{"title":"Mine","status":"publish"}`))
-			l.want(l.do(ed, http.MethodDelete, fmt.Sprintf("%s/%d", lcProduct, id), ""), http.StatusForbidden, "editor delete")
+			l.want(l.do(ed, http.MethodDelete, fmt.Sprintf("%s/%d?force=true", lcProduct, id), ""), http.StatusForbidden, "editor delete")
 		}},
 		{8, "write-boundary sanitization", func(t *testing.T, l lifecycleHelper) {
 			pu := &l.env.Products
@@ -433,7 +433,7 @@ func lifecycleRows() []lifecycleRow {
 			rec := l.do(cu, http.MethodPost, lcProduct, fmt.Sprintf(`{"title":"Del","status":"publish","genre":[%d]}`, g))
 			l.want(rec, http.StatusCreated, "create")
 			pid := l.id(rec)
-			rec = l.do(cu, http.MethodDelete, fmt.Sprintf("%s/%d?force=false", lcProduct, pid), "")
+			rec = l.do(cu, http.MethodDelete, fmt.Sprintf("%s/%d?force=true", lcProduct, pid), "")
 			l.want(rec, http.StatusOK, "delete ignoring force")
 			if d, _ := l.obj(rec)["deleted"].(bool); !d {
 				t.Fatalf("not marked deleted: %s", rec.Body.String())
@@ -445,7 +445,7 @@ func lifecycleRows() []lifecycleRow {
 			// Children are re-pointed to the deleted post's own parent (M18 Req 9.1/9.3).
 			root := l.id(l.do(cu, http.MethodPost, lcGuide, `{"title":"Par","status":"publish"}`))
 			kid := l.id(l.do(cu, http.MethodPost, lcGuide, fmt.Sprintf(`{"title":"Chi","status":"publish","parent":%d}`, root)))
-			l.want(l.do(cu, http.MethodDelete, fmt.Sprintf("%s/%d", lcGuide, root), ""), http.StatusOK, "delete parent")
+			l.want(l.do(cu, http.MethodDelete, fmt.Sprintf("%s/%d?force=true", lcGuide, root), ""), http.StatusOK, "delete parent")
 			var parent int64
 			if err := l.env.Repos.DB().QueryRowContext(context.Background(),
 				"SELECT post_parent FROM "+l.env.Prefix+"posts WHERE ID = ?", kid).Scan(&parent); err != nil {
@@ -571,8 +571,8 @@ func TestCustomLifecyclePublicAndPrivateTypes(t *testing.T) {
 			l.want(l.do(pu, http.MethodPut, fmt.Sprintf("/admin/api/posts/%d", admID),
 				fmt.Sprintf(`{"title":"Adm Two","type":%q,"status":"publish","modified":%q}`, tc.typ, mod)), http.StatusOK, "admin update")
 			// Delete.
-			l.want(l.do(pu, http.MethodDelete, fmt.Sprintf("%s/%d", rest, restID), ""), http.StatusOK, "REST delete")
-			l.want(l.doAppPassword("products", secret, http.MethodDelete, fmt.Sprintf("%s/%d", rest, apID), ""), http.StatusOK, "AP delete")
+			l.want(l.do(pu, http.MethodDelete, fmt.Sprintf("%s/%d?force=true", rest, restID), ""), http.StatusOK, "REST delete")
+			l.want(l.doAppPassword("products", secret, http.MethodDelete, fmt.Sprintf("%s/%d?force=true", rest, apID), ""), http.StatusOK, "AP delete")
 			l.want(l.do(pu, http.MethodDelete, fmt.Sprintf("/admin/api/posts/%d", admID), ""), http.StatusNoContent, "admin delete")
 			l.want(l.do(pu, http.MethodGet, fmt.Sprintf("%s/%d", rest, restID), ""), http.StatusNotFound, "REST read after delete")
 		})

@@ -339,10 +339,12 @@ func loadPostNodes(ctx context.Context, r domain.PostNodeReader, postType string
 
 // slugTaken reports whether slug is used by a node other than selfID. For a
 // hierarchical type only nodes under the same parent count; a flat type scopes
-// by type alone (nodes are already of one type).
+// by type alone (nodes are already of one type). A node with status "trash"
+// never blocks a slug: only live rows count (M22 Req 6.11). Trashed nodes stay
+// in the loaded graph so permalinks and ancestry still see them.
 func slugTaken(nodes []domain.PostNode, slug string, hierarchical bool, parent, selfID int64) bool {
 	for _, n := range nodes {
-		if n.ID == selfID || n.Slug != slug {
+		if n.ID == selfID || n.Slug != slug || n.Status == "trash" {
 			continue
 		}
 		if hierarchical && n.ParentID != parent {

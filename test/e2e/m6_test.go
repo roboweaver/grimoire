@@ -350,9 +350,10 @@ func TestM6AdminCRUDFullLifecycleE2E(t *testing.T) {
 		t.Errorf("public page missing published title; body: %s", pubBody)
 	}
 
-	// Delete, then confirm 404 on both the public route and the admin
-	// detail endpoint.
-	deleteResp := env.adminJSON(http.MethodDelete, "/admin/api/posts/"+strconv.FormatInt(created.ID, 10), nil)
+	// Delete permanently (M22: a plain DELETE now trashes, and this server is
+	// wired without the trash service), then confirm 404 on both the public
+	// route and the admin detail endpoint.
+	deleteResp := env.adminJSON(http.MethodDelete, "/admin/api/posts/"+strconv.FormatInt(created.ID, 10)+"?force=true", nil)
 	deleteResp.Body.Close()
 	if deleteResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete post = %d, want 204", deleteResp.StatusCode)

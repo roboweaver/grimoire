@@ -702,7 +702,12 @@ Every other existing entry is byte-identical. Admin `post delete` (34) and `page
 `rest trash restore` (`PATCH {"status":"draft"}`, 200, slug without suffix),
 `rest trash force delete` (`DELETE ?force=true`, 200 `deleted`), `rest trash gone` (404).
 
-**PR 2: appended entries only:** `admin trash create` (201), `admin trash delete` (204),
+**PR 2: appended entries, plus one changed entry.** PR 1's appended entry `rest trash list status trash`
+(index 53) changes: the script's admin `post delete` step (34) now trashes its row instead of deleting it
+(still `204`, no body), so the list returns three trashed posts instead of two (`X-WP-Total` `3`). This
+was not predicted when the design was written. The check script allows exactly that entry to differ in
+mode `pr2`; every other entry that existed before PR 2 stays byte-identical. The nine appended entries
+are: `admin trash create` (201), `admin trash delete` (204),
 `admin trash get` (200, `status: "trash"`), `admin trash list` (`?status=trash&type=post`, one row),
 `admin trash restore` (200, `draft`), `admin trash delete again` (204), `admin trash force` (204),
 `admin trash gone` (404), `admin empty trash` (200 `{deleted, skipped, more}`).
@@ -711,7 +716,8 @@ Every other existing entry is byte-identical. Admin `post delete` (34) and `page
 `scripts/check-golden-parent.sh`, M16/M19; needs `jq`). For each of the two files:
 
 1. The first 49 entry names equal the base names in order.
-2. Mode `pr2`: the first 49 entries equal the base entries (`jq -S` equality). Mode `pr1`: the same for
+2. Mode `pr2`: the base entries (the 58 of PR 1) equal the new ones (`jq -S` equality), except `rest trash
+   list status trash`, which gains the admin-trashed post (see PR 2 above). Mode `pr1`: the same for
    every index except 7, 8, 13.
 3. Mode `pr1`, index 7 and 13: `.status == 200`; `.body | has("deleted") | not`; `.body.status ==
    "trash"`; `.body.slug == base.body.previous.slug + "__trashed"`; and `del(.status, .slug, .link,
@@ -1012,7 +1018,7 @@ Defaults are implemented as written; each is local to the task named.
    delete; its REST restore checks edit. Alternative: require both. Task 3.1.
 5. **Admin restore defaults to `draft`**, WordPress's default; `previous` is opt-in and used by the
    Undo notice. Task 7.1.
-6. **PR 1 ships with the admin `DELETE` still permanent.** Alternative: land PR 1 and PR 2 together.
+6. **PR 1 ships with the admin `DELETE` still permanent** (resolved: PR 2 made it trash by default). Alternative: land PR 1 and PR 2 together.
    The cost of the split is one release where REST and the admin disagree. Tasks 6.4 and 7.2.
 7. **Comments are trashed and restored with the post** in WordPress's representation, including the
    `post-trashed` status, and the admin and REST comment lists hide that status. Alternative: leave

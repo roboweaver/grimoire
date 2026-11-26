@@ -4,6 +4,7 @@ import type {
   AutosaveDetail,
   AutosaveWriteInput,
   CommentList,
+  EmptyTrashResult,
   MediaItem,
   MediaList,
   NavMenu,
@@ -231,8 +232,28 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
-  deletePost: (id: number | string) =>
-    send<void>(`/posts/${id}`, { method: "DELETE" }),
+  // deletePost trashes by default; {force: true} deletes permanently (Req 18.3-18.4).
+  deletePost: (id: number | string, opts?: { force?: boolean }) =>
+    send<void>(`/posts/${id}${opts?.force ? "?force=true" : ""}`, {
+      method: "DELETE",
+    }),
+  // restorePost un-trashes; status ("previous" or a status name) is optional.
+  restorePost: (id: number | string, status?: string) =>
+    send<PostDetail>(`/posts/${id}/restore`, {
+      method: "POST",
+      ...(status
+        ? {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status }),
+          }
+        : {}),
+    }),
+  emptyTrash: (type: string) =>
+    send<EmptyTrashResult>("/posts/empty-trash", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type }),
+    }),
   listTerms: (taxonomy: string, signal?: AbortSignal) =>
     get<TermList>(`/terms?taxonomy=${encodeURIComponent(taxonomy)}`, signal),
   createTerm: (body: TermWriteInput) =>

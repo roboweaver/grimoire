@@ -74,4 +74,36 @@ describe("PostsList filters", () => {
       ),
     );
   });
+
+  it("offers Trash after Scheduled in the status picker and requests status=trash (Req 18.1)", async () => {
+    vi.mocked(api.posts).mockResolvedValue({
+      items: [],
+      page: 1,
+      perPage: 10,
+      total: 0,
+      totalPages: 0,
+    });
+    vi.mocked(api.authors).mockResolvedValue({ authors: [] });
+    const user = userEvent.setup();
+    renderWithSpectrum(
+      <MemoryRouter initialEntries={["/posts"]}>
+        <PostsList />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(api.posts).toHaveBeenCalled());
+    await user.click(screen.getByRole("button", { name: /status/i }));
+    const options = (await screen.findAllByRole("option")).map((o) =>
+      (o.textContent ?? "").trim(),
+    );
+    const scheduled = options.indexOf("Scheduled");
+    expect(scheduled).toBeGreaterThanOrEqual(0);
+    expect(options[scheduled + 1]).toBe("Trash");
+    await user.click(screen.getByRole("option", { name: /^trash$/i }));
+    await waitFor(() =>
+      expect(api.posts).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "trash" }),
+        expect.anything(),
+      ),
+    );
+  });
 });

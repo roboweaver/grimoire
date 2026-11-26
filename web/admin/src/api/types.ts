@@ -8,6 +8,17 @@ export interface SessionInfo {
   roles: string[];
   capabilities: string[];
   csrfToken: string;
+  // trashEnabled mirrors the server's trash setting (Req 18.3); when false,
+  // delete is permanent and the list offers no Move to Trash.
+  trashEnabled?: boolean;
+}
+
+// EmptyTrashResult is the response of POST /posts/empty-trash (Req 18.2).
+export interface EmptyTrashResult {
+  deleted: number;
+  skipped: number;
+  failed?: number;
+  more: boolean;
 }
 
 export interface Stats {

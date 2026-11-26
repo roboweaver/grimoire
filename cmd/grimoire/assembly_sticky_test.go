@@ -153,7 +153,7 @@ func TestBuildHandlerStickyWriteFailure(t *testing.T) {
 	a := seedRawPost(t, env, "post", "publish", 0)
 	b := seedRawPost(t, env, "post", "publish", 0)
 	stickySeedOption(t, env, stickyList(a, b))
-	path := fmt.Sprintf("/admin/api/posts/%d", a)
+	path := fmt.Sprintf("/admin/api/posts/%d?force=true", a)
 
 	stickyDelete(t, env, &env.Admin, path, http.StatusInternalServerError)
 	if rowSnapshot(t, env, a) == "<missing>" {

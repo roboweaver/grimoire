@@ -183,6 +183,15 @@ export function PostEditor({ type }: PostEditorProps) {
     navigate(listPath);
   }
 
+  async function handleRestore() {
+    if (!id) return;
+    setSaveError(null);
+    try {
+      applyLoaded(await api.restorePost(id));
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Restore failed.");
+    }
+  }
   function reloadLatest() {
     setConflict(null);
     load();
@@ -193,6 +202,37 @@ export function PostEditor({ type }: PostEditorProps) {
   if (loadState === "error") return <ErrorState message={loadError} />;
 
   const kind = type === "post" ? "post" : "page";
+  // A trashed item is read-only until restored (Req 18.6).
+  if (!isNew && status === "trash") {
+    return (
+      <Flex direction="column" gap="size-300">
+        <ActionButton isQuiet alignSelf="start" onPress={() => navigate(listPath)} aria-label="Back to content">
+          <ChevronLeft />
+          <Text>Back to content</Text>
+        </ActionButton>
+        <Heading level={1} margin={0}>
+          {`View ${kind}`}
+        </Heading>
+        {saveError ? (
+          <View backgroundColor="negative" borderRadius="medium" padding="size-150">
+            <Text>{saveError}</Text>
+          </View>
+        ) : null}
+        <View backgroundColor="notice" borderRadius="medium" padding="size-150">
+          <Flex gap="size-150" alignItems="center" wrap>
+            <Text>This {kind} is in the trash. Restore it to edit.</Text>
+            <Button variant="accent" onPress={() => void handleRestore()}>
+              Restore
+            </Button>
+          </Flex>
+        </View>
+        <TextField label="Title" value={title} isReadOnly width="100%" />
+        <TextField label="Slug" value={slug} isReadOnly width="100%" />
+        <TextArea label="Excerpt" value={excerpt} isReadOnly width="100%" />
+        <TextArea label="Content" value={content} isReadOnly width="100%" />
+      </Flex>
+    );
+  }
 
   return (
     <Flex direction="column" gap="size-300">

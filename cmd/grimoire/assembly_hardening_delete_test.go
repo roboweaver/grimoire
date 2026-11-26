@@ -107,7 +107,7 @@ type hardeningDeleteSurface struct {
 }
 
 var hardeningDeleteSurfaces = []hardeningDeleteSurface{
-	{"admin", func(_ string, id int64) string { return fmt.Sprintf("/admin/api/posts/%d", id) }, http.StatusNoContent},
+	{"admin", func(_ string, id int64) string { return fmt.Sprintf("/admin/api/posts/%d?force=true", id) }, http.StatusNoContent},
 	{"rest", func(rest string, id int64) string { return fmt.Sprintf("/wp-json/wp/v2/%s/%d?force=true", rest, id) }, http.StatusOK},
 }
 
@@ -259,7 +259,7 @@ func TestBuildHandlerHardeningDeletePurgeFailure(t *testing.T) {
 
 	victim := seedRawPost(t, env, "post", "publish", 0)
 	deps := seedDependents(t, env, victim)
-	path := fmt.Sprintf("/admin/api/posts/%d", victim)
+	path := fmt.Sprintf("/admin/api/posts/%d?force=true", victim)
 
 	rec := doJSON(t, env.Handler, &env.Admin, http.MethodDelete, path, "")
 	if rec.Code != http.StatusInternalServerError {

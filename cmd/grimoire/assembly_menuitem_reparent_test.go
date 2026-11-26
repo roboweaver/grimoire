@@ -180,7 +180,7 @@ func TestBuildHandlerMenuItemReparentPageDelete(t *testing.T) {
 				t.Fatalf("seed theme mods: %v", err)
 			}
 
-			rec := doJSON(t, env.Handler, &env.Admin, http.MethodDelete, fmt.Sprintf("/admin/api/posts/%d", f.page), "")
+			rec := doJSON(t, env.Handler, &env.Admin, http.MethodDelete, fmt.Sprintf("/admin/api/posts/%d?force=true", f.page), "")
 			if rec.Code != http.StatusNoContent {
 				t.Fatalf("DELETE page: status = %d, want 204 (body %s)", rec.Code, rec.Body.String())
 			}
@@ -295,7 +295,7 @@ func TestBuildHandlerMenuItemReparentFailures(t *testing.T) {
 		ids := []int64{f.top, f.outer, f.deleted, f.childA, f.childB, f.grandchld, f.page}
 		before := reparentSnapshot(t, env, f.menu, f.menu, ids)
 
-		rec := doJSON(t, env.Handler, &env.Admin, http.MethodDelete, fmt.Sprintf("/admin/api/posts/%d", f.page), "")
+		rec := doJSON(t, env.Handler, &env.Admin, http.MethodDelete, fmt.Sprintf("/admin/api/posts/%d?force=true", f.page), "")
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("DELETE page: status = %d, want 500 (body %s)", rec.Code, rec.Body.String())
 		}

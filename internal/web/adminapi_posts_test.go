@@ -457,7 +457,7 @@ func TestAdminPostUpdateForbidden(t *testing.T) {
 func TestAdminPostDeleteHappyPath(t *testing.T) {
 	pw := &fakePostWrite{}
 	s := testWriteServer(&fakeAdmin{}, pw, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodDelete, "/admin/api/posts/3", nil).WithContext(principalCtx("edit_posts"))
+	req := httptest.NewRequest(http.MethodDelete, "/admin/api/posts/3?force=true", nil).WithContext(principalCtx("edit_posts"))
 	req = withURLParam(req, "id", "3")
 	rec := httptest.NewRecorder()
 	s.jsonHandler(s.adminPostDelete).ServeHTTP(rec, req)
@@ -476,7 +476,7 @@ func TestAdminPostDeleteHappyPath(t *testing.T) {
 func TestAdminPostDeleteMissingRecordIsForbidden(t *testing.T) {
 	pw := &fakePostWrite{del: func(domain.Post) error { return content.ErrForbidden }}
 	s := testWriteServer(&fakeAdmin{}, pw, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodDelete, "/admin/api/posts/999", nil).WithContext(principalCtx("edit_posts"))
+	req := httptest.NewRequest(http.MethodDelete, "/admin/api/posts/999?force=true", nil).WithContext(principalCtx("edit_posts"))
 	req = withURLParam(req, "id", "999")
 	rec := httptest.NewRecorder()
 	s.jsonHandler(s.adminPostDelete).ServeHTTP(rec, req)
@@ -959,7 +959,7 @@ func TestAdminPostWriteCapabilityMatrix(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				s, mem := seedServer()
-				req := httptest.NewRequest(http.MethodDelete, "/admin/api/posts/"+tc.id, nil).WithContext(tc.ctx)
+				req := httptest.NewRequest(http.MethodDelete, "/admin/api/posts/"+tc.id+"?force=true", nil).WithContext(tc.ctx)
 				req = withURLParam(req, "id", tc.id)
 				rec := httptest.NewRecorder()
 				s.jsonHandler(s.adminPostDelete).ServeHTTP(rec, req)

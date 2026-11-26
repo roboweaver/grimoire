@@ -1,6 +1,6 @@
 # Post-M10 Gap Analysis — Candidate Milestones (M11+)
 
-> **Status: 📝 Proposal (M11, M12 incl. write, M13, M14, M15, M16 ✅ shipped).** This document is a gap analysis, not a
+> **Status: 📝 Proposal (M11, M12 incl. write, M13, M14, M15, M16 ✅ shipped; M17-M22 shipped as follow-ups).** This document is a gap analysis, not a
 > committed roadmap. The WordPress-core-parity roadmap
 > ([`../wordpress-core-parity-roadmap`](../wordpress-core-parity-roadmap)) is
 > complete through its final group (M10.G). Each candidate below is a documented,
@@ -10,7 +10,12 @@
 > (sanitization backfill, PR #70) have since been specified and merged.** M12 is
 > fully shipped: the read half (12.A/12.B, PRs #75/#76/#77) and the write half
 > (12.C, spec `17-custom-types-write`), as are M15 (PR #72) and M16
-> (`21-archive-path-pagination`, both PRs). **No planned milestones remain.**
+> (`21-archive-path-pagination`, both PRs). Trash and restore shipped as M22
+> (`22-trash-and-restore`, 3 of 3). **No planned milestones remain.** Still open,
+> unscheduled: theme mods that reference a deleted attachment, intermediate image
+> sizes and files on disk, child attachments, term-side post meta, WordPress hooks
+> and the object cache, a comment Trash view, a per-type trash opt-out, a
+> configurable purge cadence, and the `?m=` hour/minute/second forms.
 
 Every gap is traced to where it is already acknowledged in
 [`../../docs/compatibility.md`](../../docs/compatibility.md) or the root
@@ -63,7 +68,7 @@ Delivered across PRs #75, #76, #77.
 delete for registered custom post types and taxonomies, with capabilities
 derived from `capability_type`, sanitization, slug and `parent` guards, term
 assignment and delete cleanup (`plans/17-custom-types-write`).
-**Still deferred after M17:** delete is permanent, with no trash. (M22 adds trash to REST delete in PR 1 and to the admin delete in PR 2; see `plans/22-trash-and-restore`.)
+**Deferred after M17, closed by M22:** delete was permanent, with no trash. M22 added trash and restore to REST (PR 1) and the admin (PR 2), and `content.trash_days` with the automatic purge (PR 3); see `plans/22-trash-and-restore`.
 **Shipped in M18 (PR 1, `plans/18-write-hardening`):** stored rows of types not
 registered under `content:` are unwritable (`403` on the admin API, `404` for
 revisions and autosave), the scheduler skips them, revisions and autosave honor
@@ -78,8 +83,8 @@ in `partial`, and assignment to the built-in taxonomies now checks term membersh
 detaches its terms (counts recounted), deletes its comments, commentmeta and
 postmeta, and re-points child pages and attachments to the deleted row's parent.
 Page `parent` is writable over REST and the admin API with a cycle and type
-guard, and a page's slug is suffixed on a parent change. Honest gap: trash remains
-unhandled (nav-menu items were closed in M19 PR 3).
+guard, and a page's slug is suffixed on a parent change. Honest gap at the time: trash was
+unhandled (nav-menu items were closed in M19 PR 3; trash in M22).
 **Shipped in M19 (PR 2, `plans/19-term-gate-and-delete-parity`):** REST page items
 always carry `parent`, including `0`. Deleting a post removes its id from
 `sticky_posts` (post rows only; a malformed option is left alone and, because the
@@ -91,7 +96,7 @@ postmeta and relationships, and recomputes the menu term counts from the true
 relationship count. WordPress counts only published and draft items, so a count for
 imported items in other statuses can differ until WordPress recomputes it. Child menu
 items were left pointing at the deleted id; M20 PR 1 closed that. The remaining open
-gap after M19 was trash, which remains open.
+gap after M19 was trash, which M22 closed.
 **Shipped in M20 (PR 1, `plans/20-delete-gap-closure`):** children of a deleted menu
 item are re-pointed to the item's own menu parent (nearest surviving ancestor for
 chains, `0` for a top-level item), in both the post-delete purge and the menu editor
@@ -191,6 +196,15 @@ and `?paged=N` still answer `200` with a relative canonical `Link` header;
 handler-built `PrevURL` and `NextURL`. Three rare shapes are shadowed, with no
 fallback (documented in compatibility.md, M16); the development real-database
 check found none. No schema change.
+**Shipped in M22 (PR 1, PR 2, PR 3, `plans/22-trash-and-restore`):** REST and admin
+`DELETE` of a post, page or registered-type row trashes by default, in the rows
+WordPress writes, and `?force=true` is the permanent delete; `PUT`/`PATCH` trash and
+restore; the admin has a Trash view with Restore, Undo and Empty Trash.
+`content.trash_days` (default 30, `0` turns trash off) and an hourly scheduler purge
+delete managed-type rows trashed longer than the window, with the full delete
+cleanup. Still open: no per-type opt-out, no comment Trash view, purge cadence not
+configurable, media and users have no trash (as in WordPress).
+
 **Shipped in M16 (PR 2):** `GET /?m=YYYY[MM[DD]]` serves the date archive in
 place with `200`. The first `m` wins, an invalid value is ignored (the home page
 renders as before, with no date read), and `m` is ignored on every other route.
@@ -212,7 +226,10 @@ second forms of `m`, and `?m=` on routes other than `/`.
    (read PRs #75/#76/#77; write via `17-custom-types-write`).
 6. ~~**M16 (pagination path form and `?m=`)**~~ — ✅ shipped
    (`21-archive-path-pagination`, 2 of 2).
-**Recommended next:** M22 (`22-trash-and-restore`) is in progress, 2 of 3 shipped:
-REST trash and restore (PR 1) and the admin API and SPA (PR 2) are done;
-`content.trash_days` with the automatic purge (PR 3) remains. After M22, what is
-left is the gaps listed in the milestone sections above.
+**Recommended next:** none. No planned milestones remain. M22
+(`22-trash-and-restore`) shipped in 3 of 3 PRs: REST trash and restore (PR 1),
+the admin API and SPA (PR 2), and `content.trash_days` with the automatic purge
+(PR 3). The trash gap is closed. What is still open is the unscheduled list in
+the status banner at the top and the "Honest gap" notes in the milestone sections
+above.
+

@@ -6,10 +6,12 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/auth"
+	"github.com/roboweaver/grimoire/internal/content"
 	"github.com/roboweaver/grimoire/internal/domain"
 )
 
@@ -33,6 +35,54 @@ type Scheduler struct {
 	// principal is the acting identity for every publish; it starts as a copy
 	// of systemPrincipal and gains capabilities per WithCapabilitySuffixes.
 	principal auth.Principal
+
+	// Trash purge (WithTrashPurge). Disabled while purgeDays is 0.
+	trashed   domain.TrashedPostLister
+	deleter   trashDeleter
+	purgeDays int
+	purgeTyps []string
+	lastPurge time.Time
+	now       func() time.Time
+}
+
+// purgeInterval is the minimum spacing between trash purges; purgeBatch is the
+// page size of the id-cursor walk.
+const (
+	purgeInterval = time.Hour
+	purgeBatch    = 100
+)
+
+// trashDeleter is the slice of content.PostWriteService the purge needs.
+type trashDeleter interface {
+	Delete(ctx context.Context, actor auth.Principal, p domain.Post) error
+	ByID(ctx context.Context, id int64) (domain.Post, error)
+}
+
+// WithTrashPurge enables the hourly permanent deletion of rows trashed more
+// than days days ago, among the given (managed) post types. days <= 0 disables it.
+func WithTrashPurge(l domain.TrashedPostLister, d trashDeleter, days int, types []string) Option {
+	return func(s *Scheduler) {
+		s.trashed, s.deleter, s.purgeDays, s.purgeTyps = l, d, days, types
+	}
+}
+
+// WithDeleteCapabilitySuffixes grants the scheduler's principal the four
+// delete capabilities for posts, pages and each given suffix. It does not
+// change the publish capabilities.
+func WithDeleteCapabilitySuffixes(suffixes ...string) Option {
+	return func(s *Scheduler) {
+		all := append([]string{"posts", "pages"}, suffixes...)
+		for _, suffix := range all {
+			for _, verb := range []string{"delete_", "delete_others_", "delete_published_", "delete_private_"} {
+				s.principal.Caps[verb+suffix] = true
+			}
+		}
+	}
+}
+
+// withClock replaces the purge clock (tests only).
+func withClock(now func() time.Time) Option {
+	return func(s *Scheduler) { s.now = now }
 }
 
 // Option customizes a Scheduler at construction.
@@ -61,7 +111,7 @@ func New(finder domain.ScheduledPostFinder, posts postUpdater, interval time.Dur
 	}
 	principal := systemPrincipal
 	principal.Caps = caps
-	s := &Scheduler{finder: finder, posts: posts, interval: interval, log: log, principal: principal}
+	s := &Scheduler{finder: finder, posts: posts, interval: interval, log: log, principal: principal, now: time.Now}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -104,6 +154,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 // (e.g. a concurrent edit already moved it out of "future") does not abort
 // the rest of the batch (Requirement 4.7).
 func (s *Scheduler) tick(ctx context.Context) {
+	defer s.purgeTrash(ctx)
 	due, err := s.finder.DueScheduled(ctx, time.Now())
 	if err != nil {
 		if s.log != nil {
@@ -131,5 +182,68 @@ func (s *Scheduler) tick(ctx context.Context) {
 			}
 			continue
 		}
+	}
+}
+
+// purgeTrash permanently deletes trashed rows older than the retention, at most
+// once per purgeInterval. A row without a recorded trash time, or trashed
+// exactly at the cutoff, stays. Failures are logged and the walk continues.
+func (s *Scheduler) purgeTrash(ctx context.Context) {
+	if s.purgeDays <= 0 || s.trashed == nil || s.deleter == nil {
+		return
+	}
+	now := s.now()
+	if !s.lastPurge.IsZero() && now.Sub(s.lastPurge) < purgeInterval {
+		return
+	}
+	s.lastPurge = now
+	cutoff := now.Add(-time.Duration(s.purgeDays) * 24 * time.Hour)
+	var after int64
+	purged := 0
+	for ctx.Err() == nil {
+		batch, err := s.trashed.TrashedPosts(ctx, s.purgeTyps, after, purgeBatch)
+		if err != nil {
+			s.logf(slog.LevelError, "scheduler: listing trashed posts failed", "error", err)
+			break
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, tp := range batch {
+			after = tp.Post.ID
+			if !tp.HasTrashedAt || !tp.TrashedAt.Before(cutoff) {
+				continue
+			}
+			cur, err := s.deleter.ByID(ctx, tp.Post.ID)
+			if err != nil {
+				s.logPurgeErr(tp.Post.ID, err)
+				continue
+			}
+			if cur.Status != "trash" {
+				continue
+			}
+			if err := s.deleter.Delete(ctx, s.principal, cur); err != nil {
+				s.logPurgeErr(tp.Post.ID, err)
+				continue
+			}
+			purged++
+		}
+	}
+	if purged > 0 {
+		s.logf(slog.LevelInfo, "scheduler: purged trashed posts", "count", purged)
+	}
+}
+
+func (s *Scheduler) logPurgeErr(id int64, err error) {
+	if errors.Is(err, content.ErrForbidden) || errors.Is(err, domain.ErrNotFound) {
+		s.logf(slog.LevelDebug, "scheduler: skipping trashed post", "post_id", id, "error", err)
+		return
+	}
+	s.logf(slog.LevelError, "scheduler: failed to purge trashed post", "post_id", id, "error", err)
+}
+
+func (s *Scheduler) logf(level slog.Level, msg string, args ...any) {
+	if s.log != nil {
+		s.log.Log(context.Background(), level, msg, args...)
 	}
 }

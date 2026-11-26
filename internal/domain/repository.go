@@ -750,3 +750,21 @@ type PostTrasher interface {
 	// It returns ErrNotFound when the post row is missing.
 	TrashInfo(ctx context.Context, id int64) (TrashInfo, error)
 }
+
+// TrashedPost is a trashed row with the time WordPress recorded when it was
+// trashed. HasTrashedAt is false when _wp_trash_meta_time is missing or is not
+// a number; such a row is never purged.
+type TrashedPost struct {
+	Post         Post
+	TrashedAt    time.Time
+	HasTrashedAt bool
+}
+
+// TrashedPostLister lists trashed rows for the scheduled purge.
+type TrashedPostLister interface {
+	// TrashedPosts returns up to limit rows whose post_status is trash and
+	// whose post_type is in types, ordered by ID ascending, with ID greater than
+	// afterID. Empty types returns no rows. TrashedAt comes from the lowest
+	// meta_id _wp_trash_meta_time row, parsed in Go.
+	TrashedPosts(ctx context.Context, types []string, afterID int64, limit int) ([]TrashedPost, error)
+}

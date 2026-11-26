@@ -36,3 +36,9 @@ rest:
   # Caps the REST API's "per_page" query parameter (default 100, matching
   # WordPress core's own ceiling).
   per_page_max: 100
+
+# content.trash_days: days a trashed post is kept before it is purged
+# permanently. Default 30; 0 disables Trash (deletes are immediate). Must be
+# a non-negative integer. Override with GRIMOIRE_CONTENT_TRASH_DAYS.
+# content:
+#   trash_days: 30

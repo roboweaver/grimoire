@@ -182,6 +182,11 @@ func (c *Config) applyEnv() {
 			c.Scheduler.IntervalSeconds = n
 		}
 	}
+	if v, ok := os.LookupEnv("GRIMOIRE_CONTENT_TRASH_DAYS"); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Content.TrashDays = &n
+		}
+	}
 }
 
 func (c *Config) applyDefaults() {
@@ -228,6 +233,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Database.DSN) == "" {
 		return fmt.Errorf("config: database.dsn is required for vendor %q", c.Database.Vendor)
+	}
+	if c.Content.TrashDays != nil && *c.Content.TrashDays < 0 {
+		return fmt.Errorf("config: content.trash_days must be a non-negative integer, got %d", *c.Content.TrashDays)
 	}
 	return nil
 }

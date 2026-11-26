@@ -61,3 +61,9 @@ rest:
   require_tls_for_application_passwords: false
   trusted_proxy_header: ""
   per_page_max: 100
+
+# content.trash_days: days a trashed post is kept before it is purged
+# permanently. Default 30; 0 disables Trash (deletes are immediate). Must be
+# a non-negative integer. Override with GRIMOIRE_CONTENT_TRASH_DAYS.
+# content:
+#   trash_days: 30

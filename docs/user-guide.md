@@ -100,7 +100,9 @@ session cookie.
 Deleting a post, page or registered-type item in the admin moves it to the
 trash instead of removing it, as in WordPress. Trashed items are deleted
 permanently by an automatic purge once they have been in the trash longer than
-`content.trash_days` days (default 30, checked hourly). Setting
+`content.trash_days` days (default 30, checked hourly by default; change the spacing with
+`scheduler.trash_purge_interval_seconds`, in seconds, or
+`GRIMOIRE_SCHEDULER_TRASH_PURGE_INTERVAL_SECONDS`). Setting
 `content.trash_days: 0` (or `GRIMOIRE_CONTENT_TRASH_DAYS=0`) turns the trash off:
 delete is then permanent, with a confirmation, and nothing is purged. The purge
 covers posts, pages and registered types only.

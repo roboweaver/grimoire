@@ -42,15 +42,17 @@ type Scheduler struct {
 	purgeDays int
 	purgeTyps []string
 	lastPurge time.Time
-	now       func() time.Time
+	// purgeInterval is the minimum spacing between trash purges (WithTrashPurge).
+	purgeInterval time.Duration
+	now           func() time.Time
 }
 
-// purgeInterval is the minimum spacing between trash purges; purgeBatch is the
-// page size of the id-cursor walk.
-const (
-	purgeInterval = time.Hour
-	purgeBatch    = 100
-)
+// purgeBatch is the page size of the id-cursor walk.
+const purgeBatch = 100
+
+// defaultPurgeInterval mirrors config.DefaultTrashPurgeIntervalSeconds (3600s);
+// duplicated as a literal to avoid importing internal/config here.
+const defaultPurgeInterval = 3600 * time.Second
 
 // trashDeleter is the slice of content.PostWriteService the purge needs.
 type trashDeleter interface {
@@ -58,11 +60,13 @@ type trashDeleter interface {
 	ByID(ctx context.Context, id int64) (domain.Post, error)
 }
 
-// WithTrashPurge enables the hourly permanent deletion of rows trashed more
-// than days days ago, among the given (managed) post types. days <= 0 disables it.
-func WithTrashPurge(l domain.TrashedPostLister, d trashDeleter, days int, types []string) Option {
+// WithTrashPurge enables the permanent deletion, at most once per interval, of
+// rows trashed more than days days ago, among the given (managed) post types.
+// days <= 0 disables it.
+func WithTrashPurge(l domain.TrashedPostLister, d trashDeleter, days int, types []string, interval time.Duration) Option {
 	return func(s *Scheduler) {
 		s.trashed, s.deleter, s.purgeDays, s.purgeTyps = l, d, days, types
+		s.purgeInterval = interval
 	}
 }
 
@@ -111,7 +115,7 @@ func New(finder domain.ScheduledPostFinder, posts postUpdater, interval time.Dur
 	}
 	principal := systemPrincipal
 	principal.Caps = caps
-	s := &Scheduler{finder: finder, posts: posts, interval: interval, log: log, principal: principal, now: time.Now}
+	s := &Scheduler{finder: finder, posts: posts, interval: interval, log: log, principal: principal, now: time.Now, purgeInterval: defaultPurgeInterval}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -193,7 +197,7 @@ func (s *Scheduler) purgeTrash(ctx context.Context) {
 		return
 	}
 	now := s.now()
-	if !s.lastPurge.IsZero() && now.Sub(s.lastPurge) < purgeInterval {
+	if !s.lastPurge.IsZero() && now.Sub(s.lastPurge) < s.purgeInterval {
 		return
 	}
 	s.lastPurge = now

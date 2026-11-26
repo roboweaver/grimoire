@@ -228,5 +228,5 @@ func buildScheduler(deps serverDeps, posts *content.PostWriteService) *scheduler
 	return scheduler.New(deps.Repos.Scheduled, posts, deps.Config.Scheduler.Interval(), deps.Log,
 		scheduler.WithCapabilitySuffixes(suffixes...),
 		scheduler.WithDeleteCapabilitySuffixes(suffixes...),
-		scheduler.WithTrashPurge(deps.Repos.TrashedPosts, posts, deps.Config.Content.EffectiveTrashDays(), registeredTypeNames(deps.Registry)))
+		scheduler.WithTrashPurge(deps.Repos.TrashedPosts, posts, deps.Config.Content.EffectiveTrashDays(), registeredTypeNames(deps.Registry), deps.Config.Scheduler.EffectiveTrashPurgeInterval()))
 }

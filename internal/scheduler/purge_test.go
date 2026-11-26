@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"reflect"
 	"sync"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/roboweaver/grimoire/internal/auth"
@@ -124,7 +126,7 @@ const prgDay = 24 * time.Hour
 
 // prgScheduler builds a scheduler over the fakes with the fake clock.
 func prgScheduler(l *prgLister, d *prgDeleter, clk *prgClock, days int, types []string, log *slog.Logger, opts ...Option) *Scheduler {
-	all := append([]Option{WithTrashPurge(l, d, days, types), withClock(clk.Now)}, opts...)
+	all := append([]Option{WithTrashPurge(l, d, days, types, time.Hour), withClock(clk.Now)}, opts...)
 	return New(&fakeFinder{}, &fakePostUpdater{}, time.Minute, log, all...)
 }
 
@@ -354,5 +356,86 @@ func TestPurgeDeleteSuffixesDoNotChangePublishCapabilities(t *testing.T) {
 		if !s.principal.Can(c) {
 			t.Errorf("principal lost %s", c)
 		}
+	}
+}
+
+// Task 2.1 (M23 PR 1): the purge cadence is the configured interval, not the
+// old fixed one-hour constant. These fail to compile until WithTrashPurge takes
+// the interval as a fifth argument.
+
+func TestTrashPurgeHonoursConfiguredInterval(t *testing.T) {
+	const interval = 5 * time.Minute
+	l := &prgLister{}
+	clk := &prgClock{now: prgNow}
+	s := New(&fakeFinder{}, &fakePostUpdater{}, time.Minute, testLogger(),
+		WithTrashPurge(l, &prgDeleter{}, 30, []string{"post"}, interval), withClock(clk.Now))
+	ctx := context.Background()
+
+	s.tick(ctx)
+	first := l.callCount()
+	if first == 0 {
+		t.Fatal("first tick did not scan (no prior scan)")
+	}
+
+	clk.Advance(2 * time.Minute)
+	s.tick(ctx)
+	if got := l.callCount(); got != first {
+		t.Fatalf("scan ran 2m after the last one with a 5m interval (calls = %d, want %d)", got, first)
+	}
+
+	clk.Advance(4 * time.Minute) // 6m since the last scan
+	s.tick(ctx)
+	second := l.callCount()
+	if second <= first {
+		t.Fatalf("scan did not run once the 5m interval elapsed (calls = %d)", second)
+	}
+
+	clk.Advance(4*time.Minute + 59*time.Second)
+	s.tick(ctx)
+	if got := l.callCount(); got != second {
+		t.Fatalf("scan ran 4m59s after the last one (calls = %d, want %d)", got, second)
+	}
+
+	clk.Advance(time.Second) // exactly 5m: elapsed >= interval scans
+	s.tick(ctx)
+	if got := l.callCount(); got <= second {
+		t.Fatalf("scan did not run at exactly the interval (calls = %d)", got)
+	}
+}
+
+// Feature: media-delete-and-purge-config, Property 5: The trash purge scan respects the configured interval
+// Validates: Requirements 8.1, 8.2, 8.3, 8.4
+func TestPropertyTrashPurgeRespectsInterval(t *testing.T) {
+	prop := func(intervalSecs uint16, gapSecs []uint16) bool {
+		interval := time.Duration(int(intervalSecs)%7200+1) * time.Second
+		l := &prgLister{}
+		clk := &prgClock{now: prgNow}
+		s := New(&fakeFinder{}, &fakePostUpdater{}, time.Minute, testLogger(),
+			WithTrashPurge(l, &prgDeleter{}, 30, []string{"post"}, interval), withClock(clk.Now))
+		ctx := context.Background()
+
+		var lastScan time.Time
+		scanned := false
+		for i := 0; i <= len(gapSecs); i++ {
+			if i > 0 {
+				// Strictly increasing timestamps: every gap is at least one second.
+				clk.Advance(time.Duration(int(gapSecs[i-1])%14400+1) * time.Second)
+			}
+			now := clk.Now()
+			want := !scanned || now.Sub(lastScan) >= interval
+			before := l.callCount()
+			s.tick(ctx)
+			if got := l.callCount() > before; got != want {
+				return false
+			}
+			if want {
+				scanned, lastScan = true, now
+			}
+		}
+		return true
+	}
+	cfg := &quick.Config{MaxCount: 100, Rand: rand.New(rand.NewSource(23))}
+	if err := quick.Check(prop, cfg); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -42,3 +42,9 @@ rest:
 # a non-negative integer. Override with GRIMOIRE_CONTENT_TRASH_DAYS.
 # content:
 #   trash_days: 30
+
+# scheduler.trash_purge_interval_seconds: how often the automatic trash purge
+# scan runs. Default 3600 (one hour). Must be a positive integer. Override
+# with GRIMOIRE_SCHEDULER_TRASH_PURGE_INTERVAL_SECONDS.
+# scheduler:
+#   trash_purge_interval_seconds: 3600

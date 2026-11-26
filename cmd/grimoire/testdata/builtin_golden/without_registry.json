@@ -1555,7 +1555,7 @@
     "status": 200,
     "headers": {
       "Content-Type": "application/json; charset=UTF-8",
-      "X-WP-Total": "2",
+      "X-WP-Total": "3",
       "X-WP-TotalPages": "1"
     },
     "body": [
@@ -1614,6 +1614,64 @@
         "tags": [],
         "title": {
           "rendered": "Golden Trash"
+        },
+        "type": "post"
+      },
+      {
+        "_links": {
+          "author": [
+            {
+              "embeddable": true,
+              "href": "http://example.com/wp-json/wp/v2/users/2"
+            }
+          ],
+          "collection": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts"
+            }
+          ],
+          "replies": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/comments?post=6"
+            }
+          ],
+          "self": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/posts/6"
+            }
+          ],
+          "wp:attachment": [
+            {
+              "href": "http://example.com/wp-json/wp/v2/media?parent=6"
+            }
+          ]
+        },
+        "author": 2,
+        "categories": [],
+        "comment_status": "",
+        "content": {
+          "protected": false,
+          "rendered": "\u003cp\u003ea2\u003c/p\u003e"
+        },
+        "date": "\u003cts\u003e",
+        "date_gmt": "\u003cts\u003e",
+        "excerpt": {
+          "rendered": "\u003cp\u003ea2\u003c/p\u003e"
+        },
+        "featured_media": 0,
+        "guid": {
+          "rendered": "http://example.com/"
+        },
+        "id": 6,
+        "link": "http://example.com/__trashed/",
+        "modified": "\u003cts\u003e",
+        "modified_gmt": "\u003cts\u003e",
+        "ping_status": "open",
+        "slug": "__trashed",
+        "status": "trash",
+        "tags": [],
+        "title": {
+          "rendered": "Admin Post 2"
         },
         "type": "post"
       },
@@ -1836,6 +1894,157 @@
         "status": 404
       },
       "message": "Invalid post ID."
+    }
+  },
+  {
+    "name": "admin trash create",
+    "status": 201,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "author": 2,
+      "commentStatus": "",
+      "content": "\u003cp\u003et\u003c/p\u003e",
+      "date": "\u003cts\u003e",
+      "excerpt": "",
+      "id": 12,
+      "modified": "\u003cts\u003e",
+      "slug": "",
+      "status": "publish",
+      "terms": {
+        "category": [],
+        "post_tag": []
+      },
+      "title": "Admin Trash",
+      "type": "post"
+    }
+  },
+  {
+    "name": "admin trash delete",
+    "status": 204
+  },
+  {
+    "name": "admin trash get",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "author": 2,
+      "commentStatus": "",
+      "content": "\u003cp\u003et\u003c/p\u003e",
+      "date": "\u003cts\u003e",
+      "excerpt": "",
+      "id": 12,
+      "modified": "\u003cts\u003e",
+      "slug": "__trashed",
+      "status": "trash",
+      "terms": {
+        "category": [],
+        "post_tag": []
+      },
+      "title": "Admin Trash",
+      "type": "post"
+    }
+  },
+  {
+    "name": "admin trash list",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "items": [
+        {
+          "author": 2,
+          "date": "\u003cts\u003e",
+          "id": 12,
+          "slug": "__trashed",
+          "status": "trash",
+          "title": "Admin Trash",
+          "type": "post"
+        },
+        {
+          "author": 2,
+          "date": "\u003cts\u003e",
+          "id": 6,
+          "slug": "__trashed",
+          "status": "trash",
+          "title": "Admin Post 2",
+          "type": "post"
+        },
+        {
+          "author": 2,
+          "date": "\u003cts\u003e",
+          "id": 1,
+          "slug": "golden-two__trashed",
+          "status": "trash",
+          "title": "Golden Post 2",
+          "type": "post"
+        }
+      ],
+      "page": 1,
+      "perPage": 10,
+      "total": 3,
+      "totalPages": 1
+    }
+  },
+  {
+    "name": "admin trash restore",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "author": 2,
+      "commentStatus": "",
+      "content": "\u003cp\u003et\u003c/p\u003e",
+      "date": "\u003cts\u003e",
+      "excerpt": "",
+      "id": 12,
+      "modified": "\u003cts\u003e",
+      "slug": "",
+      "status": "draft",
+      "terms": {
+        "category": [],
+        "post_tag": []
+      },
+      "title": "Admin Trash",
+      "type": "post"
+    }
+  },
+  {
+    "name": "admin trash delete again",
+    "status": 204
+  },
+  {
+    "name": "admin trash force",
+    "status": 204
+  },
+  {
+    "name": "admin trash gone",
+    "status": 404,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "error": {
+        "code": "not_found",
+        "message": "resource not found"
+      }
+    }
+  },
+  {
+    "name": "admin empty trash",
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    "body": {
+      "deleted": 2,
+      "more": false,
+      "skipped": 0
     }
   }
 ]

@@ -158,3 +158,10 @@ func TestSQLiteNavMenuTrashedTargetContract(t *testing.T) {
 		return repos, "sqlite", "wp_", cleanup
 	})
 }
+
+func TestSQLiteTrashedPostListerContract(t *testing.T) {
+	RunTrashedPostListerContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}

@@ -2,9 +2,12 @@ package e2e_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/roboweaver/grimoire/internal/scheduler"
 	"github.com/roboweaver/grimoire/internal/storage"
 	"github.com/roboweaver/grimoire/internal/storage/migrate"
+	"github.com/roboweaver/grimoire/internal/storage/seed"
 )
 
 // TestM7SchedulerWiring exercises the exact wiring cmd/grimoire/main.go uses
@@ -119,5 +123,143 @@ func TestM7SchedulerWiring(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("scheduler goroutine did not stop after context cancellation (leak)")
+	}
+}
+
+// TestM22BinaryTrashPurge builds the real ./cmd/grimoire binary with a short
+// content.trash_days and asserts that a trashed row whose _wp_trash_meta_time is
+// older than the window disappears after the first scheduler tick, while a
+// freshly trashed row stays (M22 Req 23.3). It catches a main.go or
+// buildScheduler omission that unit-level assembly tests cannot see.
+func TestM22BinaryTrashPurge(t *testing.T) {
+	if testing.Short() {
+		t.Skip("built-binary test skipped under -short")
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skip("go toolchain unavailable: ", err)
+	}
+	ctx := context.Background()
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	bin := filepath.Join(tmp, "grimoire")
+	build := exec.Command(goBin, "build", "-o", bin, "./cmd/grimoire")
+	build.Dir = repoRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build ./cmd/grimoire: %v\n%s", err, out)
+	}
+
+	dsn := "file:" + filepath.Join(tmp, "grimoire.db") + "?_pragma=busy_timeout(5000)"
+	dbCfg := config.DatabaseConfig{Vendor: "sqlite", DSN: dsn, TablePrefix: "wp_"}
+	repos, err := storage.New(dbCfg)
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	migFS, err := storage.MigrationsFS(dbCfg.Vendor)
+	if err != nil {
+		t.Fatalf("MigrationsFS: %v", err)
+	}
+	if _, err := migrate.Apply(ctx, repos.DB(), migFS, dbCfg.Vendor, dbCfg.TablePrefix); err != nil {
+		t.Fatalf("migrate.Apply: %v", err)
+	}
+	if err := seed.Run(ctx, repos.DB(), dbCfg.Vendor, dbCfg.TablePrefix); err != nil {
+		t.Fatalf("seed.Run: %v", err)
+	}
+	trashed := func(title, slug string, age time.Duration) int64 {
+		t.Helper()
+		id, err := repos.PostWriter.Create(ctx, domain.Post{
+			Author: 1, Title: title, Status: "trash", Type: "post", Slug: slug,
+			Date: time.Now(), DateGMT: time.Now(),
+		})
+		if err != nil {
+			t.Fatalf("create trashed %s: %v", slug, err)
+		}
+		at := time.Now().Add(-age).Unix()
+		if _, err := repos.DB().ExecContext(ctx,
+			"INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (?, '_wp_trash_meta_time', ?)", id, fmt.Sprint(at)); err != nil {
+			t.Fatalf("insert _wp_trash_meta_time for %s: %v", slug, err)
+		}
+		return id
+	}
+	expired := trashed("Expired", "expired", 3*24*time.Hour)
+	fresh := trashed("Fresh", "fresh", time.Hour)
+	exists := func(id int64) bool {
+		t.Helper()
+		var n int
+		if err := repos.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM wp_posts WHERE ID = ?", id).Scan(&n); err != nil {
+			t.Fatalf("count post %d: %v", id, err)
+		}
+		return n > 0
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	cfgPath := filepath.Join(tmp, "grimoire.yaml")
+	cfgYAML := fmt.Sprintf(`server:
+  addr: %q
+theme: default
+database:
+  vendor: sqlite
+  dsn: %q
+  table_prefix: wp_
+session:
+  cookie_name: grimoire_session
+media:
+  uploads_dir: %q
+scheduler:
+  interval_seconds: 1
+content:
+  trash_days: 1
+`, addr, dsn, filepath.Join(tmp, "uploads"))
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logs := &syncBuffer{}
+	cmd := exec.Command(bin, "-config", cfgPath, "-themes", filepath.Join(repoRoot, "themes"))
+	cmd.Dir = tmp
+	cmd.Stdout, cmd.Stderr = logs, logs
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start binary: %v", err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Signal(os.Interrupt)
+		select {
+		case <-exited:
+		case <-time.After(15 * time.Second):
+			_ = cmd.Process.Kill()
+			<-exited
+		}
+		repos.Close()
+		if t.Failed() {
+			t.Logf("binary output:\n%s", logs.String())
+		}
+	})
+
+	gone := false
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		select {
+		case err := <-exited:
+			t.Fatalf("binary exited early: %v\n%s", err, logs.String())
+		default:
+		}
+		if !exists(expired) {
+			gone = true
+			break
+		}
+	}
+	if !gone {
+		t.Fatalf("expired trashed row %d was not purged by the binary within 20s", expired)
+	}
+	if !exists(fresh) {
+		t.Errorf("fresh trashed row %d was purged", fresh)
 	}
 }

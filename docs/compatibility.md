@@ -681,8 +681,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     exist, so a dangling child would vanish from the rendered menu instead of
     showing at the top level.
   - **Known gaps.** The media-delete and unmanaged-taxonomy gaps were closed in
-    M20 PR 2 (below). Trash and restore, term-side post meta, WordPress hooks and
-    the object cache remain open.
+    M20 PR 2 (below). Trash and restore shipped in M22. Term-side post meta,
+    WordPress hooks and the object cache remain open.
 - **M20 — Delete gap closure (PR 2):** media delete cleanup and relationship
   cleanup. No schema change, no migration, no capability string. One additive
   storage port (`PostTermRelationshipPurger`, implemented by `PostRepo`) and one
@@ -932,11 +932,11 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   - **Migration note (behavior change for existing clients).** A REST client
     that used `DELETE` as a permanent delete now trashes the row instead: the
     row stays in the database, its URL stops resolving and its slug changes to
-    `…__trashed`. Send `?force=true` to keep the old behavior. Until
-    `content.trash_days` arrives in PR 3, trash is always on with a 30-day
-    window and `trash_days: 0` (disable trashing, restoring the old default)
-    is not yet available. Nothing is purged automatically in PR 1: trashed rows
-    stay until restored or force-deleted. Clients that read the delete
+    `…__trashed`. Send `?force=true` to keep the old behavior. Since M22 PR 3,
+    `content.trash_days: 0` turns trash off entirely and a non-force `DELETE`
+    then answers `501 rest_trash_not_supported` (see "M22 — Trash and restore
+    (PR 3)"); PR 1 and PR 2 alone had trash always on and purged nothing.
+    Clients that read the delete
     response should expect the post object rather than `deleted`/`previous`
     when `force` is absent, and `403` bodies now carry `rest_cannot_delete`.
   - **Admin API.** Superseded by M22 PR 2 (below): the admin `DELETE` now
@@ -950,8 +950,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     read.
   - **Known gaps (PR 1).** Attachments and users have no trash. WordPress
     hooks and the object cache are not involved. Trashing a page does not move
-    its children. `trash_days` and the purge are PR 3 (the admin API and SPA
-    shipped in PR 2).
+    its children. `trash_days` and the purge shipped in PR 3 (the admin API and
+    SPA in PR 2); the gaps that remain are listed under PR 3.
 
 - **M22 — Trash and restore (PR 2):** the admin API and the React admin now
   trash, restore and empty the trash. No schema change, no migration, no new
@@ -959,7 +959,7 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   service methods and the permanent delete that PR 1 shipped. The one-release
   disagreement of PR 1 (REST trashed while the admin `DELETE` was permanent) is
   resolved: both surfaces trash by default. `content.trash_days` and the
-  automatic purge are PR 3.
+  automatic purge shipped in PR 3.
   - **`DELETE /admin/api/posts/{id}`.** Without `force` the row is trashed and
     the response is `204` with no body. With `?force=true` (or `force=1`, the
     same parsing as REST) it is the permanent delete and answers `204`. Errors
@@ -1023,9 +1023,86 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     appears in the trashed list. `scripts/check-golden-trash.sh` mode `pr2`
     allows exactly that one entry to differ. The same change is in both golden
     files.
-  - **Known gaps (PR 2).** `trash_days` (turning trash off, changing the
-    window) and the automatic purge are PR 3: until then trash is always on
-    and nothing is purged automatically. Attachments and users have no trash.
+  - **Known gaps (PR 2).** Attachments and users have no trash. The retention
+    setting and the automatic purge shipped in PR 3 (below).
+- **M22 — Trash and restore (PR 3):** the retention setting and the automatic
+  purge. No schema change, no migration, no new storage table. One additive
+  storage port (`TrashedPostLister`, read-only), one scheduler option
+  (`WithTrashPurge`) and one config key.
+  - **`content.trash_days`.** Days a trashed row is kept before the purge
+    deletes it. Default `30` (WordPress's `EMPTY_TRASH_DAYS`). The environment
+    variable `GRIMOIRE_CONTENT_TRASH_DAYS` overrides the file. A negative value
+    or a value that is not an integer scalar in the file (`7.5`, `abc`, a
+    quoted `"7"`) fails startup with an error naming `content.trash_days`. In
+    the environment variable, a negative integer fails startup the same way
+    (the check runs after the override), but a value that does not parse as an
+    integer is silently ignored and the file value (or the default) applies.
+    The shipped `configs/grimoire.*.yaml` examples (sqlite, mysql, postgres,
+    podman) carry a commented `content.trash_days` block, added in task 10.2.
+  - **`trash_days: 0` turns trash off.** A non-force `DELETE` answers
+    `501 rest_trash_not_supported` on REST and `409 trash_unsupported` on the
+    admin API. A `PUT`/`PATCH` to `status: trash` is not mapped to the
+    delete codes and answers `500 rest_update_failed` on REST, as in PR 1. The purge is off. `?force=true`
+    delete still works. Restoring a row that is already in the trash still works
+    (the restore path checks that the trasher is wired, not the retention),
+    so rows trashed earlier are not stranded. `session.trashEnabled` is false and
+    the admin shows `Delete permanently`.
+  - **The automatic purge.** The scheduler runs it after each publish pass.
+    - *Cadence.* At most once per hour (a fixed constant, not configurable).
+      The first pass after startup purges at once, so a restart purges
+      without waiting an hour. It runs even when the publish lookup fails.
+    - *Which rows.* Rows with `post_status = 'trash'` whose
+      `_wp_trash_meta_time` is older than now minus `trash_days` days. A row
+      trashed exactly at the cutoff stays. A row with no `_wp_trash_meta_time`,
+      or one that is not a number, is never purged. When a row has several
+      such meta rows the lowest `meta_id` is used.
+    - *Which types.* Managed types only: `post`, `page` and the post types
+      registered under `content:`. Unmanaged types (and attachments) are never
+      purged, even when trashed in WordPress. A type removed from the
+      configuration is no longer purged.
+    - *Batching.* The walk pages by id, 100 rows per query, oldest id first.
+    - *What a purge does.* For each eligible row it re-reads the row and skips it
+      when it is no longer in the trash (it may have been restored since the
+      list), then runs the same permanent-delete sequence as `?force=true`
+      delete: revisions, term relationships in the managed taxonomies,
+      `sticky_posts` for a `post`, dependents (comments, commentmeta, postmeta,
+      child re-parenting), then the M18-M20 cleanup of nav-menu items with their
+      children and menu counts and of the remaining relationships, then the
+      row.
+    - *Errors.* A forbidden or not-found result for a row is logged at debug
+      level and skipped. Any other error is logged at error level and the walk
+      continues with the next row. A purge that deleted rows logs the count at
+      info level.
+    - *Scheduler principal.* The scheduler's internal identity gained the four
+      delete capabilities `delete_{s}`, `delete_others_{s}`, `delete_published_{s}`
+      and `delete_private_{s}` for `s` in `posts`, `pages` and the capability
+      suffix of every registered post type (for example `delete_products` for a
+      type with `capability_type: product`). It gained nothing else, and it is
+      not reachable from any HTTP route, session or Application Password.
+  - **Verified** by unit tests (config, scheduler with an injected clock,
+    including the cutoff boundary and a row restored between list and delete),
+    an assembly test (`cmd/grimoire/assembly_trash_purge_test.go`) that runs
+    the purge through the real wiring on SQLite for posts, pages and a
+    registered type, and the shared lister contract (MySQL and PostgreSQL run
+    when the `GRIMOIRE_TEST_*` DSNs are set, as CI does). The purge has not
+    been run against a live WordPress database.
+  - **Known gaps (remaining after M22).**
+    - Terms have no trash (WordPress has none either); deleting a term is
+      permanent. Not a gap against WordPress.
+    - Media and users have no trash. WordPress does not trash media by default
+      (`MEDIA_TRASH` is false) and never trashes users. Media delete requires
+      `force=true` (`400 rest_trash_not_supported` without it).
+    - Comments: the post-trashed state follows WordPress in storage, and the
+      admin's comment moderation can already move a comment to trash and back,
+      but there is no separate Trash view or empty-trash action for comments,
+      and the purge does not touch comments of rows that are not purged.
+    - Trash is on or off for the whole site. There is no per-type opt-out for
+      custom post types.
+    - The purge cadence (hourly) and batch size (100) are not configurable.
+    - Retention is counted in whole 24-hour periods from the Unix time stored in
+      `_wp_trash_meta_time`; there is no per-site timezone handling.
+    - WordPress hooks and the object cache are not involved. Trashing a page
+      does not move its children.
 ## Public read guarantees
 
 - The **public** rendering path (unauthenticated `GET` routes) filters to

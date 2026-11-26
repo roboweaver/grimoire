@@ -98,8 +98,12 @@ session cookie.
 
 ### Trash
 Deleting a post, page or registered-type item in the admin moves it to the
-trash instead of removing it, as in WordPress. Nothing is purged automatically
-yet.
+trash instead of removing it, as in WordPress. Trashed items are deleted
+permanently by an automatic purge once they have been in the trash longer than
+`content.trash_days` days (default 30, checked hourly). Setting
+`content.trash_days: 0` (or `GRIMOIRE_CONTENT_TRASH_DAYS=0`) turns the trash off:
+delete is then permanent, with a confirmation, and nothing is purged. The purge
+covers posts, pages and registered types only.
 - **Move to Trash.** The delete button on a row trashes it at once and shows a
   notice with **Undo**, which puts the item back with the status it had.
 - **Trash view.** Pick **Trash** in the status filter to list trashed items.
@@ -110,8 +114,9 @@ yet.
   delete are skipped.
 - **Trashed items are read-only.** Opening one shows a notice and a
   **Restore** button; edit it after restoring.
-- If trash is disabled on the server, the row button reads **Delete
-  permanently** and always asks for confirmation.
+- If trash is disabled on the server (`content.trash_days: 0`), the row button
+  reads **Delete permanently** and always asks for confirmation. Items already
+  in the trash can still be restored.
 ## The REST API
 
 grimoire exposes a WordPress-compatible REST API at **`/wp-json/wp/v2/*`** with
@@ -121,7 +126,8 @@ users, plus write endpoints for comments, posts/pages, categories/tags, media,
 and users — including `DELETE` for media and users (which require `force=true`,
 matching WordPress's no-trash semantics for those types). `DELETE` of a post,
 page or registered-type row moves it to the trash, as in WordPress, and
-`?force=true` deletes it permanently; a `PUT`/`PATCH` with a `status` other than
+`?force=true` deletes it permanently (with `content.trash_days: 0` a `DELETE`
+without `force` answers `501 rest_trash_not_supported` instead); a `PUT`/`PATCH` with a `status` other than
 `trash` restores a trashed row (a restore with no status given is a draft, as in
 WordPress). See the M22 section of [`compatibility.md`](./compatibility.md),
 including the note for clients that used `DELETE` as a permanent delete. The

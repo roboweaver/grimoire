@@ -489,7 +489,7 @@
       Files: `docs/compatibility.md`, `docs/user-guide.md`, `plans/README.md`
       Verify: `grep -n "admin.*still permanent" docs/compatibility.md` finds nothing. _(Req 28.1;
       sign-off 6)_
-- [-] 9.5 Final gate for PR 2. Confirm: no new file under `internal/storage/migrations`; `git diff main
+- [x] 9.5 Final gate for PR 2. Confirm: no new file under `internal/storage/migrations`; `git diff main
       -- internal/domain` empty; no new capability string; `go.mod` and `go.sum` unchanged; the
       built-in golden diff against the PR 1 base is additions only (`scripts/check-golden-trash.sh <PR 1
       base> pr2`). Run `gofmt -l .` (empty), `go vet ./...`, `go build ./...`, `go test ./...`,
@@ -499,7 +499,7 @@
       Files: (verification only)
       Verify: all gate commands green; the git checks show no violation. _(Req 19.3, 26.3, 26.6)_
 ## Phase 10 — Configuration (`internal/config`, TDD) — PR 3
-- [~] 10.1 Write the failing config tests first, in `internal/config/config_test.go`: a file without
+- [x] 10.1 Write the failing config tests first, in `internal/config/config_test.go`: a file without
       `content.trash_days` loads as 30; `trash_days: 0` loads as 0 (not defaulted to 30);
       `trash_days: 7` loads as 7; `-1` and `abc` and `1.5` fail with an error containing
       `content.trash_days`; an unknown key under `content:` still fails; `GRIMOIRE_CONTENT_TRASH_DAYS=14`
@@ -509,7 +509,7 @@
       Files: `internal/config/config_test.go`
       Verify: `go test ./internal/config` — fails (the key is rejected as unknown). _(Req 20.1-20.6;
       D6; sign-off 3)_
-- [~] 10.2 Implement. In `internal/config/content.go` add `TrashDays *int` (`yaml:"trash_days"`), the
+- [x] 10.2 Implement. In `internal/config/content.go` add `TrashDays *int` (`yaml:"trash_days"`), the
       pre-decode check that produces `content.trash_days must be a non-negative integer`, and
       `EffectiveTrashDays()`; in `config.go` apply the default 30, validate non-negative, and add the
       env override beside `GRIMOIRE_SCHEDULER_INTERVAL_SECONDS`. Add a commented `trash_days` example to
@@ -520,7 +520,7 @@
       Verify: `go test ./internal/config ./cmd/grimoire` — 10.1 passes; with `trash_days: 0` the
       assembly test of 6.1(g) behavior holds through the real config path. _(Req 20; D6)_
 ## Phase 11 — Trashed-row lister and the purge (`internal/storage`, `internal/scheduler`, TDD) — PR 3
-- [~] 11.1 Write the failing tests first. (a) `RunTrashedPostListerContract(t, newRepos
+- [x] 11.1 Write the failing tests first. (a) `RunTrashedPostListerContract(t, newRepos
       NewReposWithPrefixFunc)` in `internal/storage/storagetest/trashedposts_contract.go`, registered in
       the three vendor files: managed and unmanaged types; a row without the meta; a row with a
       non-numeric meta (`HasTrashedAt` false, no error on any vendor); duplicate meta rows (lowest
@@ -539,7 +539,7 @@
       Verify: `go test ./internal/storage/... ./internal/scheduler -run 'TrashedPost|Purge'` — fails
       (compile: the lister, `WithTrashPurge` and `WithDeleteCapabilitySuffixes` do not exist). _(Req
       21.1-21.5, 22.1-22.7; D7)_
-- [~] 11.2 Implement the lister. Add `TrashedPost` and `TrashedPostLister` to
+- [x] 11.2 Implement the lister. Add `TrashedPost` and `TrashedPostLister` to
       `internal/domain/repository.go`, `(*PostRepo) TrashedPosts` in `internal/storage/wprepo/trashed.go`
       per `design.md` "Lister", the assertion in `writers.go`, and `TrashedPosts
       domain.TrashedPostLister` on `storage.Set`. **Cross-vendor verification** as in task 2.5 (names
@@ -548,7 +548,7 @@
       `internal/storage/wprepo/writers.go`, `internal/storage/factory.go`
       Verify: `go test ./internal/storage/...` — the lister contract passes on SQLite, MySQL 8.0 and
       PostgreSQL 16; no leftover container. _(Req 21; D7)_
-- [~] 11.3 Implement the purge. In `internal/scheduler/scheduler.go` add `WithTrashPurge`,
+- [x] 11.3 Implement the purge. In `internal/scheduler/scheduler.go` add `WithTrashPurge`,
       `WithDeleteCapabilitySuffixes`, `withClock`, `purgeTrash` and its call at the end of `tick`
       (`lastPurge` zero on start, one-hour spacing), the `trashDeleter` interface (`Delete`, `ByID`),
       and the log lines of `design.md` "Scheduler". Do not change the publish loop or the
@@ -557,7 +557,7 @@
       Verify: `go test ./internal/scheduler` — 11.1(b) passes and the existing scheduler tests are
       unchanged and green. _(Req 22; D7; sign-off 10, 11)_
 ## Phase 12 — Wiring, end-to-end, final documentation and PR 3 gate — PR 3
-- [~] 12.1 Write the failing tests first. (a) `cmd/grimoire/assembly_trash_purge_test.go`: through
+- [x] 12.1 Write the failing tests first. (a) `cmd/grimoire/assembly_trash_purge_test.go`: through
       `buildHandler`, `buildScheduler` and one `tick` with a fixed clock: an expired trashed post, page
       and registered-type row are purged with the M18-M20 cleanup (relationships, comments, menu items,
       revisions, meta); a fresh trashed row, an expired trashed row of an unmanaged type
@@ -569,7 +569,7 @@
       Files: `cmd/grimoire/assembly_trash_purge_test.go`, `test/e2e/m7_scheduler_test.go`
       Verify: `go test ./cmd/grimoire -run TrashPurge` and `go test ./test/e2e -run Scheduler` — fail:
       nothing is purged because the options are not wired. _(Req 20.2, 22, 23)_
-- [~] 12.2 Wire and prove the wiring. In `buildScheduler` pass `scheduler.WithTrashPurge(
+- [x] 12.2 Wire and prove the wiring. In `buildScheduler` pass `scheduler.WithTrashPurge(
       deps.Repos.TrashedPosts, postWrite, deps.Config.Content.EffectiveTrashDays(), managedTypes)` and
       `scheduler.WithDeleteCapabilitySuffixes("posts", "pages", registeredSuffixes(deps.Registry)...)`,
       with `managedTypes` built from `post`, `page` and `deps.Registry.PostTypes()` names.
@@ -579,7 +579,7 @@
       purged); restore. Remove `WithDeleteCapabilitySuffixes`: `TrashPurge` fails (every delete is
       forbidden); restore. Pass an empty `managedTypes`: `TrashPurge` fails; restore. _(Req 23.1;
       D7)_
-- [~] 12.3 Final documentation. `docs/compatibility.md`: add `M22 — Trash and restore (PR 3)`
+- [x] 12.3 Final documentation. `docs/compatibility.md`: add `M22 — Trash and restore (PR 3)`
       (`content.trash_days`, `0` meaning trash off and the `501`, the hourly purge, what it skips, the
       migration note updated with the config key), replace the M22 PR 1 sentence "trash_days arrives in
       PR 3", and list the remaining gaps of Requirement 28.3. `docs/user-guide.md`: update the REST
@@ -594,7 +594,7 @@
       Files: `docs/compatibility.md`, `docs/user-guide.md`, `plans/README.md`,
       `plans/post-m10-gap-analysis/README.md`, `plans/wordpress-core-parity-roadmap/tasks.md`
       Verify: the greps find nothing stale; the plans README row reads Implemented. _(Req 24.4, 28.1-28.3)_
-- [~] 12.4 Final gate for PR 3, with explicit cross-vendor verification. Confirm: no new file under
+- [x] 12.4 Final gate for PR 3, with explicit cross-vendor verification. Confirm: no new file under
       `internal/storage/migrations`; `git diff main -- internal/domain/repository.go` adds exactly one
       interface (`TrashedPostLister`) and one type (`TrashedPost`); no new capability string (the
       scheduler principal's delete verbs are granted per suffix, not new names); `go.mod` and `go.sum`

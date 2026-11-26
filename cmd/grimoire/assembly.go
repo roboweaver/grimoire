@@ -103,9 +103,9 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	autosave := content.NewAutosaveService(repos.Revisions, repos.PostWriter,
 		content.WithAutosaveRegistry(deps.Registry))
 	// trashDays is the retention window, in days, before a trashed post is
-	// eligible for purge. It is a constant until task 10.2 replaces it with a
-	// configuration key.
-	trashDays := 30
+	// eligible for purge (content.trash_days; 0 turns Trash off). It reaches
+	// buildHandler through deps.Config like the rest of the content settings.
+	trashDays := cfg.Content.EffectiveTrashDays()
 	postWrite := content.NewPostWriteService(repos.PostWriter, content.WithRevisionSnapshotter(revisionWrite), content.WithContentPolicy(contentPolicy),
 		content.WithPostRegistry(deps.Registry),
 		content.WithPostNodeReader(repos.PostNodeReader),
@@ -221,8 +221,12 @@ func registeredSuffixes(reg *registry.Registry) []string {
 
 // buildScheduler constructs the publish scheduler over the same PostWriteService
 // the server uses, granting it the capabilities of every registered custom type
-// so due custom-type rows publish (Req 7.6, 17.2).
+// so due custom-type rows publish (Req 7.6, 17.2). It also enables the trash
+// purge over the built-in and registered types (M22 Req 23.1).
 func buildScheduler(deps serverDeps, posts *content.PostWriteService) *scheduler.Scheduler {
+	suffixes := registeredSuffixes(deps.Registry)
 	return scheduler.New(deps.Repos.Scheduled, posts, deps.Config.Scheduler.Interval(), deps.Log,
-		scheduler.WithCapabilitySuffixes(registeredSuffixes(deps.Registry)...))
+		scheduler.WithCapabilitySuffixes(suffixes...),
+		scheduler.WithDeleteCapabilitySuffixes(suffixes...),
+		scheduler.WithTrashPurge(deps.Repos.TrashedPosts, posts, deps.Config.Content.EffectiveTrashDays(), registeredTypeNames(deps.Registry)))
 }

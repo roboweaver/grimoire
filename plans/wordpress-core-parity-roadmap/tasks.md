@@ -932,6 +932,7 @@ ticked with a shipped-via note.
       removal in one transaction. Both return `{"deleted":true,"previous":<object>}`;
       collection-level `DELETE` stays `501`.
       (Shipped via the `11-rest-delete-parity` spec (PR #64, `d40671b`): `MediaWriter.Delete`/`UserRepository.Delete` domain ports + wprepo impls, `MediaWriteService.Delete`/`UserService.Delete`, and the two REST handlers — media per-attachment `CanDeletePost` gate with on-disk file unlink, user `reassign` (id or `false`) with self-delete/`delete_users` guards and transactional reassign-or-delete, the `{"deleted":true,"previous":...}` envelope; collection-level DELETE left `501`. Capability-matrix + behavior + storage-round-trip tests, SQLite-only, no new dependency.)
+      _(Note: M22 (`22-trash-and-restore`) later changed `DELETE` of posts, pages and registered types to trash by default, with `?force=true` for the permanent delete; media and users are unchanged.)_
 
 ---
 

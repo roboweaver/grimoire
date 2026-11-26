@@ -15,6 +15,43 @@ import (
 type ContentConfig struct {
 	PostTypes  []PostTypeConfig `yaml:"post_types"`
 	Taxonomies []TaxonomyConfig `yaml:"taxonomies"`
+	// TrashDays is how many days a trashed post is kept before the purger
+	// deletes it. nil means the default (DefaultTrashDays); 0 disables Trash.
+	TrashDays *int `yaml:"trash_days"`
+}
+
+// DefaultTrashDays is the retention applied when content.trash_days is unset.
+const DefaultTrashDays = 30
+
+// EffectiveTrashDays returns the configured retention in days, or
+// DefaultTrashDays when unset. Zero is a real value, not "unset".
+func (c ContentConfig) EffectiveTrashDays() int {
+	if c.TrashDays == nil {
+		return DefaultTrashDays
+	}
+	return *c.TrashDays
+}
+
+// TrashEnabled reports whether Trash is on (retention greater than zero).
+func (c ContentConfig) TrashEnabled() bool { return c.EffectiveTrashDays() > 0 }
+
+// checkTrashDaysNode rejects a content.trash_days that is not a non-negative
+// integer scalar, with an error naming the key.
+func checkTrashDaysNode(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value != "trash_days" {
+			continue
+		}
+		v := node.Content[i+1]
+		var n int
+		if v.Kind != yaml.ScalarNode || v.Tag != "!!int" || v.Decode(&n) != nil || n < 0 {
+			return fmt.Errorf("content.trash_days (line %d): must be a non-negative integer", v.Line)
+		}
+	}
+	return nil
 }
 
 // PostTypeConfig declares one custom post type.
@@ -51,6 +88,9 @@ type HasArchive struct {
 // UnmarshalYAML decodes the content section strictly: any key not declared on
 // the config types is an error naming the field.
 func (c *ContentConfig) UnmarshalYAML(node *yaml.Node) error {
+	if err := checkTrashDaysNode(node); err != nil {
+		return err
+	}
 	raw, err := yaml.Marshal(node)
 	if err != nil {
 		return fmt.Errorf("content: re-encode: %w", err)

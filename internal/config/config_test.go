@@ -362,3 +362,166 @@ func TestShippedConfigsLoadAndDocumentUploadsDir(t *testing.T) {
 		})
 	}
 }
+
+// --- content.trash_days (M22, Req 20.1-20.6; D6) ---
+
+const trashDaysBase = `
+database:
+  vendor: sqlite
+  dsn: "file:grimoire.db"
+`
+
+func loadTrashDays(t *testing.T, contentBlock string) (Config, error) {
+	t.Helper()
+	return Load(writeTempConfig(t, trashDaysBase+contentBlock))
+}
+
+func TestLoadTrashDaysDefaultsTo30(t *testing.T) {
+	cfg, err := loadTrashDays(t, "")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Content.EffectiveTrashDays(); got != 30 {
+		t.Errorf("EffectiveTrashDays() = %d, want default 30", got)
+	}
+	if !cfg.Content.TrashEnabled() {
+		t.Error("TrashEnabled() = false, want true for the default")
+	}
+}
+
+func TestLoadTrashDaysZeroIsNotDefaulted(t *testing.T) {
+	cfg, err := loadTrashDays(t, "content:\n  trash_days: 0\n")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Content.TrashDays == nil || *cfg.Content.TrashDays != 0 {
+		t.Fatalf("TrashDays = %v, want pointer to 0", cfg.Content.TrashDays)
+	}
+	if got := cfg.Content.EffectiveTrashDays(); got != 0 {
+		t.Errorf("EffectiveTrashDays() = %d, want 0", got)
+	}
+	if cfg.Content.TrashEnabled() {
+		t.Error("TrashEnabled() = true, want false when trash_days is 0")
+	}
+}
+
+func TestLoadTrashDaysExplicit(t *testing.T) {
+	cfg, err := loadTrashDays(t, "content:\n  trash_days: 7\n")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Content.EffectiveTrashDays(); got != 7 {
+		t.Errorf("EffectiveTrashDays() = %d, want 7", got)
+	}
+	if !cfg.Content.TrashEnabled() {
+		t.Error("TrashEnabled() = false, want true")
+	}
+}
+
+func TestLoadTrashDaysInvalidValuesFail(t *testing.T) {
+	for _, v := range []string{"-1", "abc", "1.5"} {
+		v := v
+		t.Run(v, func(t *testing.T) {
+			_, err := loadTrashDays(t, "content:\n  trash_days: "+v+"\n")
+			if err == nil {
+				t.Fatalf("Load with trash_days %s: want error, got nil", v)
+			}
+			if !strings.Contains(err.Error(), "content.trash_days") {
+				t.Errorf("error %q does not name content.trash_days", err)
+			}
+		})
+	}
+}
+
+func TestLoadContentUnknownKeyStillFails(t *testing.T) {
+	_, err := loadTrashDays(t, "content:\n  trash_dayz: 7\n")
+	if err == nil {
+		t.Fatal("Load with unknown content key: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "trash_dayz") {
+		t.Errorf("error %q does not name the unknown key", err)
+	}
+}
+
+func TestLoadTrashDaysEnvOverridesFile(t *testing.T) {
+	t.Setenv("GRIMOIRE_CONTENT_TRASH_DAYS", "14")
+	cfg, err := loadTrashDays(t, "content:\n  trash_days: 7\n")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Content.EffectiveTrashDays(); got != 14 {
+		t.Errorf("EffectiveTrashDays() = %d, want env override 14", got)
+	}
+}
+
+func TestLoadTrashDaysEnvUnparsableIsIgnored(t *testing.T) {
+	t.Setenv("GRIMOIRE_CONTENT_TRASH_DAYS", "soon")
+	cfg, err := loadTrashDays(t, "content:\n  trash_days: 7\n")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Content.EffectiveTrashDays(); got != 7 {
+		t.Errorf("EffectiveTrashDays() = %d, want file value 7 when env is unparsable", got)
+	}
+}
+
+func TestContentConfigTrashHelpers(t *testing.T) {
+	seven, zero := 7, 0
+	cases := []struct {
+		name    string
+		days    *int
+		want    int
+		enabled bool
+	}{
+		{"nil is the default 30", nil, 30, true},
+		{"zero disables", &zero, 0, false},
+		{"seven", &seven, 7, true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c := ContentConfig{TrashDays: tc.days}
+			if got := c.EffectiveTrashDays(); got != tc.want {
+				t.Errorf("EffectiveTrashDays() = %d, want %d", got, tc.want)
+			}
+			if got := c.TrashEnabled(); got != tc.enabled {
+				t.Errorf("TrashEnabled() = %v, want %v", got, tc.enabled)
+			}
+		})
+	}
+}
+
+// TestShippedConfigsDocumentTrashDays requires every file under configs/ to
+// load and to mention content.trash_days in a comment.
+func TestShippedConfigsDocumentTrashDays(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "configs", "*.yaml"))
+	if err != nil {
+		t.Fatalf("glob configs: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no shipped configs found under configs/*.yaml")
+	}
+	for _, path := range paths {
+		path := path
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			documented := false
+			for _, line := range strings.Split(string(raw), "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "#") && strings.Contains(trimmed, "trash_days") {
+					documented = true
+					break
+				}
+			}
+			if !documented {
+				t.Errorf("%s has no comment documenting trash_days", path)
+			}
+			if _, err := Load(path); err != nil {
+				t.Fatalf("Load(%s): %v", path, err)
+			}
+		})
+	}
+}

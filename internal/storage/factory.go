@@ -77,6 +77,8 @@ type Set struct {
 	PostRelationships domain.PostTermRelationshipPurger
 	// Plan 22 additive port: moves a post to and from the trash in WordPress's representation.
 	PostTrash domain.PostTrasher
+	// Plan 22 additive port: lists trashed rows for the scheduled purge.
+	TrashedPosts domain.TrashedPostLister
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -217,6 +219,7 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			PostMenuItems:     posts,
 			PostRelationships: posts,
 			PostTrash:         posts,
+			TrashedPosts:      posts,
 		},
 		db:    db,
 		bunDB: bunDB,

@@ -4,8 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
+	"log/slog"
 	"strings"
 
 	"github.com/roboweaver/grimoire/internal/auth"
@@ -41,6 +40,11 @@ type MediaWriteService struct {
 	// holds even for a call site that forgets WithMediaContentPolicy, matching
 	// PostWriteService/CommentService/Server.
 	policy *sanitize.Policy
+	// meta is the optional postmeta reader Delete uses to find an attachment's
+	// size/backup/thumb files. Nil means main-file-only cleanup.
+	meta domain.PostMetaRepository
+	// log receives best-effort file-cleanup warnings; nil means no logging.
+	log *slog.Logger
 }
 
 // MediaWriteOption configures optional MediaWriteService dependencies, mirroring
@@ -54,6 +58,17 @@ type MediaWriteOption func(*MediaWriteService)
 // the service never silently skips sanitization (fail closed).
 func WithMediaContentPolicy(p *sanitize.Policy) MediaWriteOption {
 	return func(s *MediaWriteService) { s.policy = p }
+}
+
+// WithMediaMetaReader wires the postmeta reader Delete uses to resolve every
+// file belonging to an attachment. Without it Delete removes only the main file.
+func WithMediaMetaReader(r domain.PostMetaRepository) MediaWriteOption {
+	return func(s *MediaWriteService) { s.meta = r }
+}
+
+// WithMediaLogger wires the logger for best-effort file-cleanup warnings.
+func WithMediaLogger(l *slog.Logger) MediaWriteOption {
+	return func(s *MediaWriteService) { s.log = l }
 }
 
 // NewMediaWriteService constructs a MediaWriteService over a MediaService (for
@@ -204,17 +219,14 @@ func baseMimeForMedia(s string) string {
 }
 
 // Delete hard-deletes an attachment. It loads the stored row (bubbling
-// domain.ErrNotFound), authorizes the delete against the stored post_author via
-// CanDeletePost (delete_posts for own, delete_others_posts for others';
-// ErrForbidden on failure, nothing deleted), removes the database rows through
-// MediaWriter.Delete, then best-effort unlinks the on-disk file. It returns the
-// attachment as it existed immediately before deletion so the caller can
-// envelope it as "previous". The order is DB-delete-first then file unlink: a
-// missing or unremovable file is non-fatal once the rows are gone, whereas
-// unlinking first could strand a live row pointing at absent bytes if the DB
-// delete then failed. The relative file path is read from the loaded row
-// (cur.Filename, the _wp_attached_file value) BEFORE the delete removes that
-// postmeta.
+// domain.ErrNotFound) and authorizes against the stored post_author via
+// CanDeletePost (ErrForbidden on failure; nothing is consulted or deleted).
+// Before the delete it reads the attachment's metadata and backup sizes (the
+// database delete removes that postmeta) and resolves the extra files,
+// dropping a thumb another attachment still uses. It then deletes the rows
+// through MediaWriter.Delete and, only on success, removes the files
+// best-effort. A failed database delete therefore leaves every file in place.
+// It returns the attachment as it existed immediately before deletion.
 func (s *MediaWriteService) Delete(ctx context.Context, actor auth.Principal, id int64) (domain.Media, error) {
 	cur, err := s.reader.ByID(ctx, id)
 	if err != nil {
@@ -223,16 +235,41 @@ func (s *MediaWriteService) Delete(ctx context.Context, actor auth.Principal, id
 	if !auth.CanDeletePost(actor, "post", "inherit", cur.AuthorID) {
 		return domain.Media{}, ErrForbidden
 	}
+	var candidates []string
+	if s.meta != nil {
+		candidates = s.deleteCandidates(ctx, id)
+	}
 	if err := s.writer.Delete(ctx, id); err != nil {
 		return domain.Media{}, err
 	}
-	if rel := cur.Filename; rel != "" {
-		full := filepath.Join(s.media.Config().UploadsDir, filepath.FromSlash(rel))
-		if rmErr := os.Remove(full); rmErr != nil && !os.IsNotExist(rmErr) {
-			// The DB delete has committed; a leftover/locked file is a cleanup
-			// nuisance, not a correctness break (missing file is non-fatal).
-			_ = rmErr
-		}
-	}
+	deleteMediaFiles(s.media.Config(), cur.Filename, candidates, s.log)
 	return cur, nil
+}
+
+// deleteCandidates reads the attachment's metadata and backup sizes and returns
+// the extra files to remove. A read error contributes nothing for that payload
+// (leaving files is the safe failure) and is logged.
+func (s *MediaWriteService) deleteCandidates(ctx context.Context, id int64) []string {
+	metaRaw, err := s.meta.AttachmentMetadata(ctx, id)
+	if err != nil {
+		s.warn("media delete: reading attachment metadata failed", id, err)
+		metaRaw = ""
+	}
+	backupRaw, err := s.meta.BackupSizes(ctx, id)
+	if err != nil {
+		s.warn("media delete: reading backup sizes failed", id, err)
+		backupRaw = ""
+	}
+	candidates := mediaFileCandidates(metaRaw, backupRaw)
+	var checker thumbSharedChecker
+	if c, ok := s.meta.(thumbSharedChecker); ok {
+		checker = c
+	}
+	return filterSharedThumb(ctx, checker, id, mediaThumbName(metaRaw), candidates)
+}
+
+func (s *MediaWriteService) warn(msg string, id int64, err error) {
+	if s.log != nil {
+		s.log.Warn(msg, "id", id, "err", err)
+	}
 }

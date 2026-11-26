@@ -335,6 +335,10 @@ type PostMetaRepository interface {
 	// AttachmentMetadata returns the raw (PHP-serialized) value of an
 	// attachment post's "_wp_attachment_metadata" postmeta, or "" if unset.
 	AttachmentMetadata(ctx context.Context, postID int64) (string, error)
+	// BackupSizes returns the raw (PHP-serialized) value of an attachment
+	// post's "_wp_attachment_backup_sizes" postmeta, or "" if unset. When the
+	// key is duplicated the row with the lowest meta_id wins.
+	BackupSizes(ctx context.Context, postID int64) (string, error)
 }
 
 // UserRepository reads and writes users ({prefix}users).

@@ -161,7 +161,7 @@
 
 ## Phase 4 — Backup-sizes read and pure candidate logic (`internal/domain`, `internal/storage/wprepo`, `internal/content`, TDD) — PR 2
 
-- [~] 4.1 Write the failing tests first. (a) `internal/storage/storagetest/postmeta_contract.go`:
+- [x] 4.1 Write the failing tests first. (a) `internal/storage/storagetest/postmeta_contract.go`:
       extend `runPostMetaContract` with a case seeding `_wp_attachment_backup_sizes` on an
       attachment and asserting `PostMetaRepository.BackupSizes` returns the raw value, and a case
       asserting `""` when unset — same shape as the existing `AttachmentMetadata` cases in the same
@@ -184,7 +184,7 @@
       (`BackupSizes`, `mediaFileCandidates`, `filterSharedThumb` do not exist).
       _(Req 2.1-2.8, 6.2, 26.1, 26.2)_
 
-- [~] 4.2 Implement `BackupSizes` and the pure candidate functions. In `internal/domain/repository.go`,
+- [x] 4.2 Implement `BackupSizes` and the pure candidate functions. In `internal/domain/repository.go`,
       add `BackupSizes(ctx context.Context, postID int64) (string, error)` to the
       `PostMetaRepository` interface (no new port; Requirement 6.1). In
       `internal/storage/wprepo/postmeta.go`, implement it with the existing private `get` helper,
@@ -200,7 +200,7 @@
 
 ## Phase 5 — Uploads-dir containment and best-effort deletion (`internal/content`, TDD) — PR 2
 
-- [~] 5.1 Write the failing tests first. In `internal/content/mediafiles_test.go`: unit examples
+- [x] 5.1 Write the failing tests first. In `internal/content/mediafiles_test.go`: unit examples
       over a `t.TempDir()` tree (a plain relative candidate deletes; a candidate containing `..`
       that would escape is skipped and the file is untouched; an absolute-path candidate pointing
       outside the tree is skipped; a candidate reached only through a symlink planted inside the
@@ -223,7 +223,7 @@
       to compile (`deleteMediaFiles` does not exist).
       _(Req 3.1-3.3, 4.2-4.4, 26.1, 26.2)_
 
-- [~] 5.2 Implement `deleteMediaFiles`. In `internal/content/mediafiles.go`, add
+- [x] 5.2 Implement `deleteMediaFiles`. In `internal/content/mediafiles.go`, add
       `deleteMediaFiles(cfg MediaConfig, mainFile string, candidates []string, log *slog.Logger)`,
       reusing the exact real-path containment check `internal/web/uploads.go`'s
       `resolveWithinRoot`/`evalSymlinksLenient` already implements (export those two functions from
@@ -240,7 +240,7 @@
 
 ## Phase 6 — Wire file cleanup into `MediaWriteService.Delete` (`internal/content`, `cmd/grimoire`, TDD) — PR 2
 
-- [~] 6.1 Write the failing tests first. In `internal/content/mediawriteservice_test.go`: the full
+- [x] 6.1 Write the failing tests first. In `internal/content/mediawriteservice_test.go`: the full
       Requirement 5.1 fixture matrix against a `t.TempDir()`-backed `MediaConfig.UploadsDir` wired
       through a fake `domain.PostMetaRepository` and a fake `domain.MediaRepository`/`MediaWriter`:
       an attachment with no metadata (only the main file is removed); an attachment with `sizes`,
@@ -259,7 +259,7 @@
       assertions on their absence fail).
       _(Req 2.1-2.8, 3.1-3.3, 4.1-4.4, 5.1, 5.2, 26.1, 26.2)_
 
-- [~] 6.2 Extend `MediaWriteService.Delete`. In `internal/content/mediawriteservice.go`: add an
+- [x] 6.2 Extend `MediaWriteService.Delete`. In `internal/content/mediawriteservice.go`: add an
       optional `meta domain.PostMetaRepository` field and a `log *slog.Logger` field to
       `MediaWriteService`, with `WithMediaMetaReader(r domain.PostMetaRepository)` and
       `WithMediaLogger(l *slog.Logger)` `MediaWriteOption`s (both nil-safe: `Delete` falls back to
@@ -273,7 +273,7 @@
       Verify: `go test ./internal/content` — 6.1 passes; `go build ./...` green. _(Req 2.1-2.8,
       3.1-3.3, 4.1-4.4)_
 
-- [~] 6.3 Write the failing assembly wiring test first. In `cmd/grimoire`, add a test (e.g.
+- [x] 6.3 Write the failing assembly wiring test first. In `cmd/grimoire`, add a test (e.g.
       `assembly_media_file_cleanup_test.go`) that, through `buildHandler`, creates an attachment with
       seeded `_wp_attachment_metadata` naming a real size-variant file written into the test's
       uploads temp dir, issues a REST `DELETE ?force=true` (or the admin API delete), and asserts
@@ -283,7 +283,7 @@
       present (the `WithMediaMetaReader` wiring is not yet added to `cmd/grimoire/assembly.go`).
       _(Req 9.1-equivalent wiring proof for PR 2)_
 
-- [~] 6.4 Wire the metadata reader into the real binary. In `cmd/grimoire/assembly.go`, pass
+- [x] 6.4 Wire the metadata reader into the real binary. In `cmd/grimoire/assembly.go`, pass
       `content.WithMediaMetaReader(repos.PostMeta)` to the existing
       `content.NewMediaWriteService(...)` call.
       Files: `cmd/grimoire/assembly.go`
@@ -291,7 +291,7 @@
       PR description:** remove `WithMediaMetaReader(repos.PostMeta)`: `MediaFileCleanup` fails (the
       size-variant file is never removed); restore.
 
-- [~] 6.5 Cross-vendor verification for PR 2, before the final gate. Run the whole storage suite
+- [x] 6.5 Cross-vendor verification for PR 2, before the final gate. Run the whole storage suite
       against throwaway MySQL 8.0 and PostgreSQL 16 containers (the `design.md` "Testing Strategy"
       command block for PR 2), confirming the new `BackupSizes` contract cases pass under both
       vendors, not skipped, alongside every pre-existing contract. Record the commands and output in
@@ -303,7 +303,7 @@
 
 ## Phase 7 — Documentation and final gate for PR 2
 
-- [~] 7.1 Final documentation for PR 2. `docs/compatibility.md`: in the M20 PR 2 entry's "Known
+- [x] 7.1 Final documentation for PR 2. `docs/compatibility.md`: in the M20 PR 2 entry's "Known
       gaps" list, remove "The intermediate image-size files and the original file on disk are not
       removed by the repository (the on-disk unlink is outside the transaction)." and replace it
       with a short description of what is now removed (sizes, original image, backup sizes, a
@@ -318,7 +318,7 @@
       docs plans` finds nothing stale (outside the historical M20 entry's own corrected wording).
       _(Req 10-equivalent documentation requirement; Req 11.1 recorded alongside)_
 
-- [~] 7.2 Final gate for PR 2, with explicit cross-vendor verification. Confirm: no new file under
+- [x] 7.2 Final gate for PR 2, with explicit cross-vendor verification. Confirm: no new file under
       `internal/storage/migrations`; `git diff main -- internal/domain/repository.go` adds exactly
       one method (`BackupSizes`) to an existing interface, no new interface; no new capability
       string; `go.mod`/`go.sum` unchanged; no new `GRIMOIRE_TEST_*` variable. Run `gofmt -l .`

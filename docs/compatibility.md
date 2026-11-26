@@ -1,4 +1,4 @@
-# WordPress Compatibility (M1-M12, M16-M20, M22)
+# WordPress Compatibility (M1-M12, M16-M20, M22, M23)
 
 grimoire replicates the WordPress **database schema, authentication model,
 and REST API surface** — not its GPL PHP source — so it can read, render,
@@ -737,8 +737,10 @@ Type mappings from the WordPress MySQL schema are translated per vendor
       pages and registered types. Attachments have no trash (WordPress `MEDIA_TRASH` is false).
     - Theme mods that reference the attachment (`custom_logo`, `header_image` and
       similar) are not cleared.
-    - The intermediate image-size files and the original file on disk are not
-      removed by the repository (the on-disk unlink is outside the transaction).
+    - *(Closed in M23 PR 2.)* Media delete now also removes the image-size
+      files, `original_image`, backup sizes and sideload companions, guarded to
+      the uploads directory; see the M23 media file cleanup entry. The
+      repository itself still removes only database rows.
     - Child attachments keep their `post_parent` pointing at the deleted
       attachment; they are not re-pointed.
     - WordPress hooks and the object cache are not involved.
@@ -1124,6 +1126,67 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     migration, no new capability, no response-shape change.
   - The shipped `configs/grimoire.*.yaml` examples carry a commented
     `scheduler.trash_purge_interval_seconds` block.
+
+- **M23 — Media file cleanup (PR 2):** deleting an attachment now removes its
+  files from disk as well as its rows. No schema change, no migration, no new
+  capability, no new config key, no response-shape change.
+  - **What is removed.** The main file (`_wp_attached_file`), every
+    `sizes[*].file`, `original_image`, every `_wp_attachment_backup_sizes[*].file`,
+    and, forward-compatibly, `source_image`, `animated_video`,
+    `animated_video_poster` and `thumb` when present. Entries are resolved
+    relative to the main file's directory. A malformed or empty metadata value
+    contributes nothing and is not an error.
+  - **Order.** The metadata and backup sizes are read before the database delete
+    (that delete removes the postmeta). Files are removed only after the database
+    delete succeeds, so a failed delete leaves every file in place. File cleanup
+    never aborts or fails the delete.
+  - **Containment.** Every path is resolved through symlinks and must stay inside
+    the uploads directory; a path that escapes (`..`, an absolute path outside,
+    or a symlink out) is skipped with a warning. The check lives in the new
+    `internal/safepath` package, which the uploads file server
+    (`internal/web/uploads.go`) now shares instead of keeping its own copy.
+  - **Failure handling.** A missing file is fine. Any other unlink error is
+    logged as a warning and does not fail the delete. A failed read of the
+    metadata or backup sizes is logged and treated as empty (files are left, the
+    main file is still removed).
+  - **Shared thumb.** Like WordPress, only the `thumb` entry is checked for
+    sharing: it is kept when another attachment's `_wp_attachment_metadata` names
+    the same file as its `thumb`. The lookup (`ThumbSharedElsewhere`) narrows
+    rows with an escaped `LIKE` and confirms each in Go with a case-sensitive
+    match, so a case-insensitive MySQL collation cannot cause a false positive.
+    A lookup error keeps the thumb on disk. Size files and the other named
+    entries are not checked for sharing.
+  - **REST.** `DELETE /wp-json/wp/v2/media/{id}` still requires `?force=true`
+    (`400 rest_trash_not_supported` without it); nothing changes for clients.
+  - **Verified on** SQLite by unit tests, the `BackupSizes` and
+    `ThumbSharedElsewhere` storage contracts, and an assembly test
+    (`cmd/grimoire/assembly_media_file_cleanup_test.go`) that runs a forced REST
+    delete through `buildHandler` and checks which files remain. The contracts
+    are written to also run on MySQL 8.0 and PostgreSQL 16 when the
+    `GRIMOIRE_TEST_*` DSNs are set, as CI does.
+  - **Not verified, stated plainly.**
+    - `WithMediaLogger` is wired in `buildHandler` by convention. No test proves
+      the logger reaches the service, so a dropped option would silently lose
+      the warnings only; no test would fail.
+    - `ThumbSharedElsewhere` is a method on the concrete `wprepo.PostMetaRepo`,
+      not on the `domain.PostMetaRepository` port. `MediaWriteService` finds it
+      by type assertion, so a repository without it (or a wrapper that hides it)
+      silently skips the sharing check and the thumb is deleted. The
+      `BackupSizes` method, by contrast, is on the port.
+    - The `ThumbSharedElsewhere` contract has no subtest with filenames that
+      differ only by case; the case-sensitive confirmation in Go is not covered
+      by a contract case.
+    - The development WordPress database census (how many real attachments carry
+      `sizes`, `original_image` or `backup_sizes`, and whether any metadata shape
+      is not handled) was not run; it needs access the build sandbox lacks.
+    - The cleanup has not been run against a live WordPress uploads directory.
+    - A MySQL 8.0 / PostgreSQL 16 run of the new contracts is recorded in task
+      6.5 of the plan; this documentation task did not re-run it.
+  - **Known gaps (M23 PR 2).** Theme mods that reference the attachment
+    (`custom_logo`, `header_image`, `background_image`, `site_icon`) are still
+    not cleared (PR 3). Child attachments keep their `post_parent` pointing at
+    the deleted attachment. WordPress hooks and the object cache are not
+    involved. Attachments have no trash.
 
 ## Public read guarantees
 

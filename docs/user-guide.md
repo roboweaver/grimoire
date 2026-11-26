@@ -133,7 +133,12 @@ without `force` answers `501 rest_trash_not_supported` instead); a `PUT`/`PATCH`
 `trash` restores a trashed row (a restore with no status given is a draft, as in
 WordPress). See the M22 section of [`compatibility.md`](./compatibility.md),
 including the note for clients that used `DELETE` as a permanent delete. The
-admin's own delete trashes too (see "Trash" under the embedded admin). Every write passes
+admin's own delete trashes too (see "Trash" under the embedded admin). Deleting
+a media item removes its files from the uploads directory as well as its
+database rows: the original, every resized version, the pre-edit backups and
+the original image kept alongside a scaled one. Files outside the uploads
+directory are never touched, and a file that is already missing is not an
+error. Every write passes
 through a capability-aware HTML sanitizer at the write boundary (see
 [`compatibility.md`](./compatibility.md) for the tier model).
 

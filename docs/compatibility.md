@@ -1048,7 +1048,8 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     so rows trashed earlier are not stranded. `session.trashEnabled` is false and
     the admin shows `Delete permanently`.
   - **The automatic purge.** The scheduler runs it after each publish pass.
-    - *Cadence.* At most once per hour (a fixed constant, not configurable).
+    - *Cadence.* At most once per hour by default. Since M23 PR 1 the spacing is
+      `scheduler.trash_purge_interval_seconds` (see the M23 entry below).
       The first pass after startup purges at once, so a restart purges
       without waiting an hour. It runs even when the publish lookup fails.
     - *Which rows.* Rows with `post_status = 'trash'` whose
@@ -1098,11 +1099,32 @@ Type mappings from the WordPress MySQL schema are translated per vendor
       and the purge does not touch comments of rows that are not purged.
     - Trash is on or off for the whole site. There is no per-type opt-out for
       custom post types.
-    - The purge cadence (hourly) and batch size (100) are not configurable.
+    - The purge batch size (100) is not configurable. The cadence became
+      configurable in M23 PR 1 (`scheduler.trash_purge_interval_seconds`, default
+      3600, override `GRIMOIRE_SCHEDULER_TRASH_PURGE_INTERVAL_SECONDS`).
     - Retention is counted in whole 24-hour periods from the Unix time stored in
       `_wp_trash_meta_time`; there is no per-site timezone handling.
     - WordPress hooks and the object cache are not involved. Trashing a page
       does not move its children.
+- **M23 — Configurable purge cadence (PR 1):** the automatic trash purge no
+  longer runs on a fixed one-hour spacing.
+  - **Key.** `scheduler.trash_purge_interval_seconds`, a positive integer
+    number of seconds. Default `3600` when absent. Override with
+    `GRIMOIRE_SCHEDULER_TRASH_PURGE_INTERVAL_SECONDS`; an override that is not an
+    integer is ignored and the file value (or default) stands.
+  - **Validation.** `0`, a negative integer, `7.5` and a quoted `"30"` fail
+    startup with an error naming `scheduler.trash_purge_interval_seconds`, as
+    does an environment override that parses to `<= 0`.
+  - **Behavior.** The first scheduler pass after startup still purges at once;
+    later passes purge only after the configured interval has elapsed. The
+    interval is a minimum spacing, so the effective cadence is the larger of the
+    interval and the scheduler tick (`scheduler.interval_seconds`). The
+    default behavior is unchanged.
+  - **Not changed.** The batch size (100) stays fixed. No schema change, no
+    migration, no new capability, no response-shape change.
+  - The shipped `configs/grimoire.*.yaml` examples carry a commented
+    `scheduler.trash_purge_interval_seconds` block.
+
 ## Public read guarantees
 
 - The **public** rendering path (unauthenticated `GET` routes) filters to

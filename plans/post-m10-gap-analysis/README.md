@@ -14,8 +14,7 @@
 > (`22-trash-and-restore`, 3 of 3). **No planned milestones remain.** Still open,
 > unscheduled: theme mods that reference a deleted attachment, intermediate image
 > sizes and files on disk, child attachments, term-side post meta, WordPress hooks
-> and the object cache, a comment Trash view, a per-type trash opt-out, a
-> configurable purge cadence, and the `?m=` hour/minute/second forms.
+> and the object cache, a comment Trash view, a per-type trash opt-out, and the `?m=` hour/minute/second forms.
 
 Every gap is traced to where it is already acknowledged in
 [`../../docs/compatibility.md`](../../docs/compatibility.md) or the root
@@ -202,8 +201,7 @@ WordPress writes, and `?force=true` is the permanent delete; `PUT`/`PATCH` trash
 restore; the admin has a Trash view with Restore, Undo and Empty Trash.
 `content.trash_days` (default 30, `0` turns trash off) and an hourly scheduler purge
 delete managed-type rows trashed longer than the window, with the full delete
-cleanup. Still open: no per-type opt-out, no comment Trash view, purge cadence not
-configurable, media and users have no trash (as in WordPress).
+cleanup. Still open: no per-type opt-out, no comment Trash view, media and users have no trash (as in WordPress).
 
 **Shipped in M16 (PR 2):** `GET /?m=YYYY[MM[DD]]` serves the date archive in
 place with `200`. The first `m` wins, an invalid value is ignored (the home page
@@ -231,5 +229,7 @@ second forms of `m`, and `?m=` on routes other than `/`.
 the admin API and SPA (PR 2), and `content.trash_days` with the automatic purge
 (PR 3). The trash gap is closed. What is still open is the unscheduled list in
 the status banner at the top and the "Honest gap" notes in the milestone sections
-above.
+above. M23 PR 1 closed the purge cadence gap
+(`scheduler.trash_purge_interval_seconds`); M23 PRs 2 and 3 (media file and theme-mod
+cleanup) are planned in `23-media-delete-and-purge-config`.
 

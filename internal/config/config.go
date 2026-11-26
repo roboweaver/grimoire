@@ -103,6 +103,23 @@ type SchedulerConfig struct {
 	// IntervalSeconds is how often the scheduler polls for due posts
 	// (default 60, Req 4.2).
 	IntervalSeconds int `yaml:"interval_seconds"`
+	// TrashPurgeIntervalSeconds is how often the automatic trash purge scan
+	// runs. nil means unset (default 3600); a non-nil value must be > 0.
+	TrashPurgeIntervalSeconds *int `yaml:"trash_purge_interval_seconds"`
+}
+
+// DefaultTrashPurgeIntervalSeconds is the trash purge cadence used when
+// scheduler.trash_purge_interval_seconds is unset.
+const DefaultTrashPurgeIntervalSeconds = 3600
+
+// EffectiveTrashPurgeInterval returns the configured trash purge cadence,
+// or the default when unset. Zero is rejected at load, so it is never
+// a valid effective value.
+func (s SchedulerConfig) EffectiveTrashPurgeInterval() time.Duration {
+	if s.TrashPurgeIntervalSeconds == nil {
+		return DefaultTrashPurgeIntervalSeconds * time.Second
+	}
+	return time.Duration(*s.TrashPurgeIntervalSeconds) * time.Second
 }
 
 // Interval returns the scheduler poll interval as a time.Duration.
@@ -126,6 +143,9 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("config: read %s: %w", path, err)
 	}
+	if err := checkTrashPurgeIntervalYAML(raw); err != nil {
+		return Config{}, err
+	}
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return Config{}, fmt.Errorf("config: parse %s: %w", path, err)
 	}
@@ -137,6 +157,26 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// checkTrashPurgeIntervalYAML rejects a scheduler.trash_purge_interval_seconds
+// file value that is not a plain YAML integer (e.g. 7.5, "30", abc). yaml.v3
+// would otherwise truncate a fractional float into the int field silently, and
+// report a type mismatch that does not name the key.
+func checkTrashPurgeIntervalYAML(raw []byte) error {
+	var probe struct {
+		Scheduler struct {
+			V yaml.Node `yaml:"trash_purge_interval_seconds"`
+		} `yaml:"scheduler"`
+	}
+	if err := yaml.Unmarshal(raw, &probe); err != nil {
+		return nil // structural errors are reported by the main parse
+	}
+	n := probe.Scheduler.V
+	if n.Kind == 0 || n.Tag == "!!null" || n.Tag == "!!int" {
+		return nil
+	}
+	return fmt.Errorf("config: scheduler.trash_purge_interval_seconds must be a positive integer, got %q", n.Value)
 }
 
 func (c *Config) applyEnv() {
@@ -180,6 +220,11 @@ func (c *Config) applyEnv() {
 	if v, ok := os.LookupEnv("GRIMOIRE_SCHEDULER_INTERVAL_SECONDS"); ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.Scheduler.IntervalSeconds = n
+		}
+	}
+	if v, ok := os.LookupEnv("GRIMOIRE_SCHEDULER_TRASH_PURGE_INTERVAL_SECONDS"); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.Scheduler.TrashPurgeIntervalSeconds = &n
 		}
 	}
 	if v, ok := os.LookupEnv("GRIMOIRE_CONTENT_TRASH_DAYS"); ok {
@@ -236,6 +281,9 @@ func (c Config) Validate() error {
 	}
 	if c.Content.TrashDays != nil && *c.Content.TrashDays < 0 {
 		return fmt.Errorf("config: content.trash_days must be a non-negative integer, got %d", *c.Content.TrashDays)
+	}
+	if c.Scheduler.TrashPurgeIntervalSeconds != nil && *c.Scheduler.TrashPurgeIntervalSeconds <= 0 {
+		return fmt.Errorf("config: scheduler.trash_purge_interval_seconds must be a positive integer, got %d", *c.Scheduler.TrashPurgeIntervalSeconds)
 	}
 	return nil
 }

@@ -245,4 +245,14 @@ describe("PostEditor", () => {
       expect(segment.textContent ?? "").not.toMatch(/\d/);
     }
   });
+
+  it("renders a trashed post read-only with a notice and Restore, and no Save (Req 18.6)", async () => {
+    apiPost.mockResolvedValue(detail({ status: "trash" }));
+    renderEditor("/posts/7");
+    await screen.findByDisplayValue("Existing title");
+    expect(screen.getByText(/in the trash/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /restore/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^save/i })).toBeNull();
+    expect(screen.getByDisplayValue("Existing title")).toHaveAttribute("readonly");
+  });
 });

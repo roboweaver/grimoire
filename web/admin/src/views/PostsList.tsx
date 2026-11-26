@@ -12,12 +12,15 @@ import {
   DialogTrigger,
   AlertDialog,
   StatusLight,
+  Text,
+  View,
   Item,
   Picker,
   SearchField,
 } from "@adobe/react-spectrum";
 import Delete from "@spectrum-icons/workflow/Delete";
 import Edit from "@spectrum-icons/workflow/Edit";
+import Refresh from "@spectrum-icons/workflow/Refresh";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
@@ -27,13 +30,14 @@ import { Empty, ErrorState, Forbidden, Loading } from "../components/States";
 
 const STATUS_VARIANT: Record<
   string,
-  "positive" | "neutral" | "notice" | "info"
+  "positive" | "neutral" | "notice" | "info" | "negative"
 > = {
   publish: "positive",
   draft: "neutral",
   pending: "notice",
   private: "info",
   future: "info",
+  trash: "negative",
 };
 
 interface PostsListProps {
@@ -55,6 +59,13 @@ export function PostsList({ type = "post" }: PostsListProps) {
   const [reloadToken, setReloadToken] = useState(0);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [undo, setUndo] = useState<{ id: number; title: string } | null>(null);
+  const [isEmptying, setEmptying] = useState(false);
+  // The session says whether delete moves to Trash or is permanent (Req 18.3).
+  const sessionState = useAsync((signal) => api.session(signal), []);
+  const trashEnabled =
+    sessionState.status === "success" && sessionState.data.trashEnabled === true;
+  const inTrash = status === "trash";
   const authorsState = useAsync((signal) => api.authors(signal), []);
   const authorOptions =
     authorsState.status === "success" ? authorsState.data.authors : [];
@@ -103,13 +114,54 @@ export function PostsList({ type = "post" }: PostsListProps) {
     });
   }
 
-  async function handleDelete(id: number) {
+  async function handleDelete(id: number, force = false) {
     setDeleteError(null);
     try {
-      await api.deletePost(id);
+      if (force) await api.deletePost(id, { force: true });
+      else await api.deletePost(id);
       setReloadToken((t) => t + 1);
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Delete failed.");
+    }
+  }
+  async function handleTrash(id: number, title: string) {
+    setDeleteError(null);
+    setUndo(null);
+    try {
+      await api.deletePost(id);
+      setUndo({ id, title });
+      setReloadToken((t) => t + 1);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Move to Trash failed.");
+    }
+  }
+  async function handleRestore(id: number, previous = false) {
+    setDeleteError(null);
+    try {
+      if (previous) await api.restorePost(id, "previous");
+      else await api.restorePost(id);
+      setUndo(null);
+      setReloadToken((t) => t + 1);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Restore failed.");
+    }
+  }
+  // Empty Trash repeats while the server reports more and made progress
+  // (deleted > 0), so a batch that only skips cannot loop forever (Req 18.2).
+  async function handleEmptyTrash() {
+    setDeleteError(null);
+    setEmptying(true);
+    try {
+      let more = true;
+      while (more) {
+        const res = await api.emptyTrash(type);
+        more = res.more && res.deleted > 0;
+      }
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Empty Trash failed.");
+    } finally {
+      setEmptying(false);
+      setReloadToken((t) => t + 1);
     }
   }
 
@@ -144,6 +196,7 @@ export function PostsList({ type = "post" }: PostsListProps) {
           <Item key="pending">Pending</Item>
           <Item key="private">Private</Item>
           <Item key="future">Scheduled</Item>
+          <Item key="trash">Trash</Item>
         </Picker>
         <Picker
           label="Author"
@@ -157,6 +210,42 @@ export function PostsList({ type = "post" }: PostsListProps) {
         </Picker>
       </Flex>
 
+      {inTrash && state.status === "success" && state.data.items.length > 0 && (
+        <Flex>
+          <DialogTrigger>
+            <Button variant="negative" isDisabled={isEmptying}>
+              Empty Trash
+            </Button>
+            {(close) => (
+              <AlertDialog
+                title={`Empty the ${label} trash?`}
+                variant="destructive"
+                primaryActionLabel="Empty Trash"
+                cancelLabel="Cancel"
+                onPrimaryAction={() => {
+                  void handleEmptyTrash();
+                  close();
+                }}
+              >
+                This permanently deletes every trashed {label} and cannot be undone.
+              </AlertDialog>
+            )}
+          </DialogTrigger>
+        </Flex>
+      )}
+      {undo && (
+        <View backgroundColor="notice" borderRadius="medium" padding="size-150">
+          <Flex gap="size-150" alignItems="center" wrap>
+            <Text>{`Moved "${undo.title || "item"}" to Trash.`}</Text>
+            <Button variant="secondary" onPress={() => void handleRestore(undo.id, true)}>
+              Undo
+            </Button>
+            <ActionButton isQuiet onPress={() => setUndo(null)} aria-label="Dismiss notice">
+              Dismiss
+            </ActionButton>
+          </Flex>
+        </View>
+      )}
       {deleteError && <ErrorState message={deleteError} />}
 
       {state.status === "loading" && <Loading label="Loading content" />}
@@ -164,10 +253,14 @@ export function PostsList({ type = "post" }: PostsListProps) {
       {state.status === "error" && <ErrorState message={state.message} />}
       {state.status === "success" &&
         (state.data.items.length === 0 ? (
-          <Empty
-            heading={`No ${label}s`}
-            message="Nothing has been published or drafted yet."
-          />
+          inTrash ? (
+            <Empty heading="Trash is empty" message={`No trashed ${label}s.`} />
+          ) : (
+            <Empty
+              heading={`No ${label}s`}
+              message="Nothing has been published or drafted yet."
+            />
+          )
         ) : (
           <>
             <TableView
@@ -182,7 +275,7 @@ export function PostsList({ type = "post" }: PostsListProps) {
                 <Column key="date" width={200}>
                   Date
                 </Column>
-                <Column key="actions" width={140} align="end">
+                <Column key="actions" width={160} align="end">
                   Actions
                 </Column>
               </TableHeader>
@@ -200,35 +293,55 @@ export function PostsList({ type = "post" }: PostsListProps) {
                     <Cell>{formatDate(item.date)}</Cell>
                     <Cell>
                       <Flex gap="size-100" justifyContent="end">
-                        <ActionButton
-                          isQuiet
-                          aria-label={`Edit ${item.title || "item"}`}
-                          onPress={() => navigate(`${basePath}/${item.id}`)}
-                        >
-                          <Edit />
-                        </ActionButton>
-                        <DialogTrigger>
+                        {item.status === "trash" ? (
                           <ActionButton
                             isQuiet
-                            aria-label={`Delete ${item.title || "item"}`}
+                            aria-label={`Restore ${item.title || "item"}`}
+                            onPress={() => void handleRestore(item.id)}
+                          >
+                            <Refresh />
+                          </ActionButton>
+                        ) : (
+                          <ActionButton
+                            isQuiet
+                            aria-label={`Edit ${item.title || "item"}`}
+                            onPress={() => navigate(`${basePath}/${item.id}`)}
+                          >
+                            <Edit />
+                          </ActionButton>
+                        )}
+                        {trashEnabled && item.status !== "trash" ? (
+                          <ActionButton
+                            isQuiet
+                            aria-label={`Move to Trash ${item.title || "item"}`}
+                            onPress={() => void handleTrash(item.id, item.title)}
                           >
                             <Delete />
                           </ActionButton>
-                          {(close) => (
-                            <AlertDialog
-                              title={`Delete this ${label}?`}
-                              variant="destructive"
-                              primaryActionLabel="Delete"
-                              cancelLabel="Cancel"
-                              onPrimaryAction={() => {
-                                void handleDelete(item.id);
-                                close();
-                              }}
+                        ) : (
+                          <DialogTrigger>
+                            <ActionButton
+                              isQuiet
+                              aria-label={`Delete permanently ${item.title || "item"}`}
                             >
-                              This cannot be undone.
-                            </AlertDialog>
-                          )}
-                        </DialogTrigger>
+                              <Delete />
+                            </ActionButton>
+                            {(close) => (
+                              <AlertDialog
+                                title={`Delete this ${label} permanently?`}
+                                variant="destructive"
+                                primaryActionLabel="Delete permanently"
+                                cancelLabel="Cancel"
+                                onPrimaryAction={() => {
+                                  void handleDelete(item.id, true);
+                                  close();
+                                }}
+                              >
+                                This cannot be undone.
+                              </AlertDialog>
+                            )}
+                          </DialogTrigger>
+                        )}
                       </Flex>
                     </Cell>
                   </Row>

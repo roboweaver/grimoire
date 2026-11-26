@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -100,6 +101,13 @@ var validPostStatuses = map[string]bool{
 // post's existing stored record (only supplied for updates) and backs the
 // Req 5.2 unchanged-date exception. It never touches the write service.
 func (s *Server) parsePostWrite(body postWriteRequest, current *domain.Post) (domain.Post, error) {
+	return s.parsePostWriteStatuses(body, current, validPostStatuses)
+}
+
+// parsePostWriteStatuses is parsePostWrite with the accepted status
+// vocabulary supplied by the caller: create uses validPostStatuses, update
+// uses validUpdateStatuses (which adds "trash").
+func (s *Server) parsePostWriteStatuses(body postWriteRequest, current *domain.Post, valid map[string]bool) (domain.Post, error) {
 	typ := body.Type
 	if typ == "" {
 		typ = "post"
@@ -111,10 +119,10 @@ func (s *Server) parsePostWrite(body postWriteRequest, current *domain.Post) (do
 	if status == "" {
 		status = "draft"
 	}
-	if !validPostStatuses[status] {
+	if !valid[status] {
 		return domain.Post{}, badRequestError{msg: "invalid status"}
 	}
-	if body.Title == "" && status != "draft" {
+	if body.Title == "" && status != "draft" && status != "trash" {
 		return domain.Post{}, badRequestError{msg: "title is required unless status is draft"}
 	}
 	var date time.Time
@@ -332,7 +340,7 @@ func (s *Server) adminPostUpdate(w http.ResponseWriter, r *http.Request) error {
 	if cur, err := s.admin.Detail(r.Context(), id); err == nil {
 		current = &cur
 	}
-	p, err := s.parsePostWrite(body, current)
+	p, err := s.parsePostWriteStatuses(body, current, validUpdateStatuses)
 	if err != nil {
 		return err
 	}
@@ -365,16 +373,162 @@ func (s *Server) adminPostUpdate(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, resp)
 }
 
-// adminPostDelete handles DELETE /admin/api/posts/{id} (Req 1.3).
+// adminPostDelete handles DELETE /admin/api/posts/{id} (Req 1.3, 15). Without
+// ?force=true the row moves to the trash; with it the row is deleted
+// permanently.
 func (s *Server) adminPostDelete(w http.ResponseWriter, r *http.Request) error {
 	principal, _ := PrincipalFrom(r.Context())
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		return badRequestError{msg: "invalid post id"}
 	}
-	if err := s.postWrite.Delete(r.Context(), principal, domain.Post{ID: id}); err != nil {
+	if restForceDelete(r) {
+		if err := s.postWrite.Delete(r.Context(), principal, domain.Post{ID: id}); err != nil {
+			return err
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	if s.postTrash == nil {
+		writeTrashUnsupported(w)
+		return nil
+	}
+	if err := s.postTrash.Trash(r.Context(), principal, id); err != nil {
+		switch {
+		case errors.Is(err, content.ErrTrashUnsupported):
+			writeTrashUnsupported(w)
+			return nil
+		case errors.Is(err, domain.ErrAlreadyTrashed):
+			writeJSONError(w, http.StatusConflict, "already_trashed", "post is already in the trash")
+			return nil
+		}
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+func writeTrashUnsupported(w http.ResponseWriter) {
+	writeJSONError(w, http.StatusConflict, "trash_unsupported", "trash is disabled; use force=true")
+}
+
+// postRestoreRequest is the optional JSON body of POST /admin/api/posts/{id}/restore.
+// Status is "" (draft), "previous" or a restore status; the service resolves it.
+type postRestoreRequest struct {
+	Status string `json:"status"`
+}
+
+// emptyTrashRequest is the JSON body of POST /admin/api/posts/empty-trash.
+type emptyTrashRequest struct {
+	Type string `json:"type"`
+}
+
+// emptyTrashResponse reports one empty-trash call. More is true when the type
+// still had trashed rows beyond the emptyTrashCap examined.
+type emptyTrashResponse struct {
+	Deleted int  `json:"deleted"`
+	Skipped int  `json:"skipped"`
+	More    bool `json:"more"`
+}
+
+const (
+	emptyTrashCap      = 1000
+	emptyTrashPageSize = 100
+)
+
+// adminPostRestore handles POST /admin/api/posts/{id}/restore (Req 16).
+func (s *Server) adminPostRestore(w http.ResponseWriter, r *http.Request) error {
+	principal, _ := PrincipalFrom(r.Context())
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		return badRequestError{msg: "invalid post id"}
+	}
+	var body postRestoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		return badRequestError{msg: "invalid request body"}
+	}
+	if s.postTrash == nil {
+		writeTrashUnsupported(w)
+		return nil
+	}
+	if err := s.postTrash.Restore(r.Context(), principal, id, body.Status); err != nil {
+		switch {
+		case errors.Is(err, domain.ErrNotTrashed):
+			return badRequestError{msg: "post is not in the trash"}
+		case errors.Is(err, content.ErrRestoreStatusInvalid):
+			return badRequestError{msg: "invalid status"}
+		}
+		return err
+	}
+	stored, err := s.admin.Detail(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	resp, err := s.postDetail(r.Context(), stored)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, resp)
+}
+
+// adminPostEmptyTrash handles POST /admin/api/posts/empty-trash (Req 17). It
+// collects up to emptyTrashCap trashed ids of one type (100 per page, oldest
+// first), then deletes them one by one. ErrForbidden counts as skipped; any
+// other error stops the call with a 500, leaving earlier deletes in place.
+func (s *Server) adminPostEmptyTrash(w http.ResponseWriter, r *http.Request) error {
+	principal, _ := PrincipalFrom(r.Context())
+	var body emptyTrashRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		return badRequestError{msg: "type must be \"post\", \"page\" or a registered post type"}
+	}
+	typ := body.Type
+	if typ != "post" && typ != "page" && !s.isRegisteredPostType(typ) {
+		return badRequestError{msg: "type must be \"post\", \"page\" or a registered post type"}
+	}
+	if s.restPosts == nil {
+		return errors.New("web: empty-trash has no post lister")
+	}
+	// Collect ids first: deleting while paging by offset would skip rows.
+	// One id beyond the cap tells whether more remain.
+	var ids []int64
+	for len(ids) <= emptyTrashCap {
+		limit := emptyTrashPageSize
+		if rest := emptyTrashCap + 1 - len(ids); rest < limit {
+			limit = rest
+		}
+		page, err := s.restPosts.ListForAdmin(r.Context(), domain.AdminPostFilter{
+			Types:    []string{typ},
+			Statuses: []string{"trash"},
+			OrderBy:  "id",
+			Order:    "asc",
+			Limit:    limit,
+			Offset:   len(ids),
+		})
+		if err != nil {
+			return err
+		}
+		for _, p := range page {
+			ids = append(ids, p.ID)
+		}
+		if len(page) < limit {
+			break
+		}
+	}
+	resp := emptyTrashResponse{}
+	if len(ids) > emptyTrashCap {
+		resp.More = true
+		ids = ids[:emptyTrashCap]
+	}
+	for _, id := range ids {
+		err := s.postWrite.Delete(r.Context(), principal, domain.Post{ID: id})
+		switch {
+		case err == nil:
+			resp.Deleted++
+		case errors.Is(err, content.ErrForbidden):
+			resp.Skipped++
+		default:
+			return err
+		}
+	}
+	return writeJSON(w, http.StatusOK, resp)
 }

@@ -105,6 +105,7 @@ type sessionResponse struct {
 	Roles        []string `json:"roles"`
 	Capabilities []string `json:"capabilities"`
 	CSRFToken    string   `json:"csrfToken"`
+	TrashEnabled bool     `json:"trashEnabled"`
 }
 
 type statsResponse struct {
@@ -192,6 +193,7 @@ func (s *Server) adminSession(w http.ResponseWriter, r *http.Request) error {
 		Roles:        nonNil(p.Roles),
 		Capabilities: sortedCaps(p),
 		CSRFToken:    csrf,
+		TrashEnabled: s.postTrash != nil && s.postTrash.TrashEnabled(),
 	})
 }
 
@@ -218,9 +220,9 @@ func (s *Server) adminPosts(w http.ResponseWriter, r *http.Request) error {
 	status := q.Get("status")
 	if status != "" {
 		switch status {
-		case "publish", "draft", "pending", "private", "future":
+		case "publish", "draft", "pending", "private", "future", "trash":
 		default:
-			writeJSONError(w, http.StatusBadRequest, "invalid_status", "status must be one of publish, draft, pending, private, future")
+			writeJSONError(w, http.StatusBadRequest, "invalid_status", "status must be one of publish, draft, pending, private, future, trash")
 			return nil
 		}
 	}

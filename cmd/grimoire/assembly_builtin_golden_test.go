@@ -157,6 +157,17 @@ func builtinGoldenScript() []goldenReq {
 		{name: "rest trash restore", actor: "editor", method: "PATCH", path: "/wp-json/wp/v2/posts/{rtrash}", body: `{"status":"draft"}`},
 		{name: "rest trash force delete", actor: "editor", method: "DELETE", path: "/wp-json/wp/v2/posts/{rtrash}?force=true"},
 		{name: "rest trash gone", actor: "editor", method: "GET", path: "/wp-json/wp/v2/posts/{rtrash}"},
+		// M22 PR 2: admin trash, restore, force delete and empty-trash.
+		{name: "admin trash create", actor: "editor", method: "POST", path: "/admin/api/posts",
+			body: `{"title":"Admin Trash","content":"<p>t</p>","status":"publish","type":"post"}`, save: "atrash"},
+		{name: "admin trash delete", actor: "editor", method: "DELETE", path: "/admin/api/posts/{atrash}"},
+		{name: "admin trash get", actor: "editor", method: "GET", path: "/admin/api/posts/{atrash}"},
+		{name: "admin trash list", actor: "editor", method: "GET", path: "/admin/api/posts?status=trash&type=post"},
+		{name: "admin trash restore", actor: "editor", method: "POST", path: "/admin/api/posts/{atrash}/restore", body: `{"status":"draft"}`},
+		{name: "admin trash delete again", actor: "editor", method: "DELETE", path: "/admin/api/posts/{atrash}"},
+		{name: "admin trash force", actor: "editor", method: "DELETE", path: "/admin/api/posts/{atrash}?force=true"},
+		{name: "admin trash gone", actor: "editor", method: "GET", path: "/admin/api/posts/{atrash}"},
+		{name: "admin empty trash", actor: "editor", method: "POST", path: "/admin/api/posts/empty-trash", body: `{"type":"post"}`},
 	}
 }
 

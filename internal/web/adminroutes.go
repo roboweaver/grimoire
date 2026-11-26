@@ -102,6 +102,10 @@ func (s *Server) adminAPIRouter() http.Handler {
 				wgr.Method(http.MethodPost, "/posts", s.jsonHandler(s.adminPostCreate))
 				wgr.Method(http.MethodPut, "/posts/{id}", s.jsonHandler(s.adminPostUpdate))
 				wgr.Method(http.MethodDelete, "/posts/{id}", s.jsonHandler(s.adminPostDelete))
+				if s.postTrash != nil {
+					wgr.Method(http.MethodPost, "/posts/empty-trash", s.jsonHandler(s.adminPostEmptyTrash))
+					wgr.Method(http.MethodPost, "/posts/{id}/restore", s.jsonHandler(s.adminPostRestore))
+				}
 			})
 		}
 		if s.revisions != nil {

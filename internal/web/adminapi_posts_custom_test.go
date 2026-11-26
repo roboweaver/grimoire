@@ -242,7 +242,7 @@ func TestAdminPostCustomUpdateKeepsStoredType(t *testing.T) {
 func TestAdminPostCustomDelete(t *testing.T) {
 	h, repos := newAPCRouter(t, apcShopManager(), true)
 	id := apcID(t, apcCreateProduct(t, h, `{"title":"Gone","type":"product","status":"draft"}`))
-	rec := apcDo(t, h, http.MethodDelete, "/admin/api/posts/"+apcItoa(id), "", true)
+	rec := apcDo(t, h, http.MethodDelete, "/admin/api/posts/"+apcItoa(id)+"?force=true", "", true)
 	apcWant(t, rec, http.StatusNoContent)
 	if _, _, _, _, ok := apcRow(t, repos, id); ok {
 		t.Fatal("row still present after DELETE")
@@ -269,7 +269,7 @@ func TestAdminPostCustomForbiddenWithoutProductCaps(t *testing.T) {
 	rec = apcDo(t, h, http.MethodPut, "/admin/api/posts/"+apcItoa(id),
 		`{"title":"Hacked","type":"product","status":"draft","modified":"`+m["modified"].(string)+`"}`, true)
 	apcWant(t, rec, http.StatusForbidden)
-	rec = apcDo(t, h, http.MethodDelete, "/admin/api/posts/"+apcItoa(id), "", true)
+	rec = apcDo(t, h, http.MethodDelete, "/admin/api/posts/"+apcItoa(id)+"?force=true", "", true)
 	apcWant(t, rec, http.StatusForbidden)
 
 	if after := apcCountType(t, repos, "product"); after != before {

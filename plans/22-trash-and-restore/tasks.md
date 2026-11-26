@@ -365,7 +365,7 @@
       Verify: the e2e test skips without the variable and passes with it; `grep -n "DELETE.*permanent
       delete with no trash" docs/compatibility.md` finds nothing. _(Req 3.8, 24.1-24.4, 27, 28.1; D2;
       sign-off 1)_
-- [-] 6.5 Final gate for PR 1, with explicit cross-vendor verification. Confirm: no new file under
+- [x] 6.5 Final gate for PR 1, with explicit cross-vendor verification. Confirm: no new file under
       `internal/storage/migrations`; `git diff main -- internal/domain/repository.go` adds exactly one
       interface (`PostTrasher`) and two types (`TrashInfo`, `RestoreRequest`), changes no method of an
       existing interface, and only doc comments of `AdminPostFilter` and `PostCounter`; no new
@@ -385,7 +385,7 @@
       Verify: all gate commands green on SQLite, MySQL and PostgreSQL; the git checks show no
       violation; `docker ps -a` shows no leftover container. _(Req 3, 26.3, 26.6; sign-off 12)_
 ## Phase 7 — Admin API (`internal/web`, TDD) — PR 2
-- [~] 7.1 Write the failing handler tests first, in `internal/web/adminapi_trash_test.go` over fakes.
+- [x] 7.1 Write the failing handler tests first, in `internal/web/adminapi_trash_test.go` over fakes.
       (a) `DELETE /admin/api/posts/{id}` without force calls `Trash` and answers `204`; with
       `?force=true` calls `Delete` and answers `204`; `409 already_trashed`; `409 trash_unsupported`
       with the message `trash is disabled; use force=true`; `403`; `404`/`400` as before (Req 15.1-15.5).
@@ -404,7 +404,7 @@
       Files: `internal/web/adminapi_trash_test.go`
       Verify: `go test ./internal/web -run AdminTrash` — fails (the routes do not exist; `DELETE` calls
       `Delete`; `trash` is an invalid status). _(Req 10.2, 15, 16, 17; D1; sign-off 5, 6)_
-- [~] 7.2 Implement the admin routes. In `adminapi_posts.go`: `adminPostDelete` reads `force` with
+- [x] 7.2 Implement the admin routes. In `adminapi_posts.go`: `adminPostDelete` reads `force` with
       `restForceDelete`, calls `Trash` or `Delete`, maps `ErrTrashUnsupported` and
       `domain.ErrAlreadyTrashed` to `409` with codes `trash_unsupported` and `already_trashed`; add
       `adminPostRestore` and `adminPostEmptyTrash`; use `validUpdateStatuses` in the update parser only.
@@ -417,7 +417,7 @@
       Verify: `go test ./internal/web` — 7.1 passes, every existing test green; golden unchanged.
       _(Req 10.2, 15, 16, 17; D1)_
 ## Phase 8 — React admin: the Trash view (`web/admin`, TDD) — PR 2
-- [~] 8.1 Write the failing Vitest tests first. In `web/admin/src/views/PostsList.test.tsx` and a new
+- [x] 8.1 Write the failing Vitest tests first. In `web/admin/src/views/PostsList.test.tsx` and a new
       `PostsList.trash.test.tsx` (mocking `api`): the status picker offers `Trash` after `Scheduled` and
       selecting it requests `status=trash`; in the Trash view each row shows `Restore` and `Delete
       permanently` and no Edit; `Restore` calls `api.restorePost(id)` with no status and reloads;
@@ -433,7 +433,7 @@
       `web/admin/src/views/PostEditor.test.tsx`
       Verify: `cd web/admin && npm test -- --run PostsList PostEditor` — fails (no Trash option, no
       Restore action, `deletePost` takes no options). _(Req 18.1-18.7)_
-- [~] 8.2 Implement the SPA. In `api/client.ts`: `deletePost(id, opts?: {force?: boolean})` appends
+- [x] 8.2 Implement the SPA. In `api/client.ts`: `deletePost(id, opts?: {force?: boolean})` appends
       `?force=true`; add `restorePost(id, status?)` and `emptyTrash(type)`; in `api/types.ts` add
       `trashEnabled` to the session type and the empty-trash response type. In `PostsList.tsx`: the
       `Trash` picker item, `STATUS_VARIANT.trash`, the row actions by status, the `Move to Trash` inline
@@ -448,7 +448,7 @@
       `go build ./...` embeds the new bundle; `git status internal/admin/dist` shows the rebuilt files.
       _(Req 18.1-18.8)_
 ## Phase 9 — Assembly, goldens, documentation and PR 2 gate — PR 2
-- [~] 9.1 Write the failing assembly tests first. Add `cmd/grimoire/assembly_trash_admin_test.go` over
+- [x] 9.1 Write the failing assembly tests first. Add `cmd/grimoire/assembly_trash_admin_test.go` over
       `newCustomWriteHandler`: through the real `buildHandler`, `DELETE /admin/api/posts/{id}` trashes a
       post, a page and a registered-type row (rows as in task 6.1, `204`), the admin list omits them
       and `?status=trash` lists them, `GET /admin/api/posts/{id}` returns `status: "trash"`; `POST
@@ -462,14 +462,14 @@
       Files: `cmd/grimoire/assembly_trash_admin_test.go`
       Verify: `go test ./cmd/grimoire -run TrashAdmin` — fails: the admin `DELETE` is permanent, the
       restore and empty-trash routes answer `404`. _(Req 15-17, 19.1)_
-- [~] 9.2 Prove the wiring. PR 2 needs no new `assembly.go` option because `WithPostTrash` and the
+- [x] 9.2 Prove the wiring. PR 2 needs no new `assembly.go` option because `WithPostTrash` and the
       write service are already wired by task 6.2; this is a verification task. Remove
       `srv.WithPostTrash` locally: the `TrashAdmin` subtests fail on `409 trash_unsupported` and `404`
       on the new routes; restore. Remove `WithPostTrasher`: the same subtests fail; restore. Record both
       in the PR description. `go test ./cmd/grimoire` green.
       Files: (verification only)
       Verify: both removals fail the named tests; the final tree is green. _(Req 19.1, 26.5)_
-- [~] 9.3 Append the PR 2 golden steps. Append the nine PR 2 steps of `design.md` to
+- [x] 9.3 Append the PR 2 golden steps. Append the nine PR 2 steps of `design.md` to
       `builtinGoldenScript()` after the PR 1 steps (actor `editor`), regenerate in **its own commit**
       (`-update`), and run `scripts/check-golden-trash.sh main pr2`, which must print `ok` for both
       files and prove that no existing entry changed against the PR 1 base (use the PR 1 merge commit
@@ -480,7 +480,7 @@
       `cmd/grimoire/testdata/builtin_golden/without_registry.json`
       Verify: `go test ./cmd/grimoire -run TestBuiltinGolden` green; the script passes in `pr2` mode.
       _(Req 19.2)_
-- [~] 9.4 PR 2 documentation. `docs/compatibility.md`: add `M22 — Trash and restore (PR 2)` (admin
+- [x] 9.4 PR 2 documentation. `docs/compatibility.md`: add `M22 — Trash and restore (PR 2)` (admin
       `DELETE` trashes by default and `?force=true` deletes; the restore and empty-trash routes and
       their bodies; `trashEnabled`; the status vocabulary; the Trash view and Undo; the capability on
       restore) and remove the sentence of PR 1 that says the admin `DELETE` is still permanent.
@@ -489,7 +489,7 @@
       Files: `docs/compatibility.md`, `docs/user-guide.md`, `plans/README.md`
       Verify: `grep -n "admin.*still permanent" docs/compatibility.md` finds nothing. _(Req 28.1;
       sign-off 6)_
-- [~] 9.5 Final gate for PR 2. Confirm: no new file under `internal/storage/migrations`; `git diff main
+- [-] 9.5 Final gate for PR 2. Confirm: no new file under `internal/storage/migrations`; `git diff main
       -- internal/domain` empty; no new capability string; `go.mod` and `go.sum` unchanged; the
       built-in golden diff against the PR 1 base is additions only (`scripts/check-golden-trash.sh <PR 1
       base> pr2`). Run `gofmt -l .` (empty), `go vet ./...`, `go build ./...`, `go test ./...`,

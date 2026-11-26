@@ -165,3 +165,17 @@ func TestSQLiteTrashedPostListerContract(t *testing.T) {
 		return repos, "sqlite", "wp_", cleanup
 	})
 }
+
+func TestSQLitePostMetaBackupSizesContract(t *testing.T) {
+	RunPostMetaBackupSizesContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}
+
+func TestSQLitePostMetaThumbSharedContract(t *testing.T) {
+	RunPostMetaThumbSharedContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}

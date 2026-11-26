@@ -101,3 +101,6 @@ func (f *viewTestMediaRepo) ByID(ctx context.Context, id int64) (domain.Media, e
 	}
 	return m, nil
 }
+
+// BackupSizes satisfies domain.PostMetaRepository; this fake has no backup sizes.
+func (f *viewTestPostMetaRepo) BackupSizes(context.Context, int64) (string, error) { return "", nil }

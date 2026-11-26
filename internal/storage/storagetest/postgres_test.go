@@ -170,3 +170,25 @@ func TestPostgresTrashedPostListerContract(t *testing.T) {
 		return repos, "postgres", prefix, cleanup
 	})
 }
+
+func TestPostgresPostMetaBackupSizesContract(t *testing.T) {
+	dsn := os.Getenv("GRIMOIRE_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set GRIMOIRE_TEST_POSTGRES_DSN to run the PostgreSQL contract suite")
+	}
+	RunPostMetaBackupSizesContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, prefix, cleanup := newReposFromDSNWithPrefix(t, "postgres", dsn)
+		return repos, "postgres", prefix, cleanup
+	})
+}
+
+func TestPostgresPostMetaThumbSharedContract(t *testing.T) {
+	dsn := os.Getenv("GRIMOIRE_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set GRIMOIRE_TEST_POSTGRES_DSN to run the PostgreSQL contract suite")
+	}
+	RunPostMetaThumbSharedContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, prefix, cleanup := newReposFromDSNWithPrefix(t, "postgres", dsn)
+		return repos, "postgres", prefix, cleanup
+	})
+}

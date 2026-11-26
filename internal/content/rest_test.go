@@ -925,3 +925,6 @@ func TestRESTCustomParentPins(t *testing.T) {
 		t.Errorf("flat custom type carries parent = %s, want key omitted", v)
 	}
 }
+
+// BackupSizes satisfies domain.PostMetaRepository; this fake has no backup sizes.
+func (f *fakeRESTPostMeta) BackupSizes(context.Context, int64) (string, error) { return "", nil }

@@ -12,8 +12,8 @@
 > (12.C, spec `17-custom-types-write`), as are M15 (PR #72) and M16
 > (`21-archive-path-pagination`, both PRs). Trash and restore shipped as M22
 > (`22-trash-and-restore`, 3 of 3). **No planned milestones remain.** Still open,
-> unscheduled: theme mods that reference a deleted attachment, intermediate image
-> sizes and files on disk, child attachments, term-side post meta, WordPress hooks
+> unscheduled: theme mods that reference a deleted attachment (M23 PR 3 is next; image
+> size files closed in M23 PR 2), child attachments, term-side post meta, WordPress hooks
 > and the object cache, a comment Trash view, a per-type trash opt-out, and the `?m=` hour/minute/second forms.
 
 Every gap is traced to where it is already acknowledged in
@@ -112,8 +112,8 @@ and commentmeta, `_thumbnail_id` references on other posts and relationships, pl
 orphan `term_relationships` rows with no `term_taxonomy`, and the row delete is
 guarded by `post_type = 'attachment'` (any other id is not found). WordPress itself
 removes relationships only for taxonomies registered for the object type. Still open:
-trash and restore, theme mods (`custom_logo`, `header_image`), intermediate image
-sizes, re-pointing child attachments, hooks and the object cache.
+trash and restore, theme mods (`custom_logo`, `header_image`), re-pointing child
+attachments, hooks and the object cache.
 **M15 follow-up (found while building M12) — fixed in PR #79.** M15's
 `PageService.Resolve` confirmed the leaf with `BySlug(leaf.Slug)`, which was
 ambiguous for same-slug leaves under different parents, and its recovery path

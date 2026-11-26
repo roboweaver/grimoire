@@ -121,7 +121,7 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	// existing media read/write service and the Media reader / MediaWriter ports,
 	// sharing the process-wide contentPolicy so metadata fields sanitize at the
 	// write boundary like every other write path (Req 8.3, 11.1).
-	mediaWrite := content.NewMediaWriteService(media, repos.Media, repos.MediaWriter, content.WithMediaContentPolicy(contentPolicy))
+	mediaWrite := content.NewMediaWriteService(media, repos.Media, repos.MediaWriter, content.WithMediaContentPolicy(contentPolicy), content.WithMediaMetaReader(repos.PostMeta), content.WithMediaLogger(log))
 	// userWrite backs the REST user write surface (POST/PATCH/DELETE
 	// /wp-json/wp/v2/users and .../users/me). It layers capability-checked
 	// profile writes over the Users / UserMeta ports and the table prefix,

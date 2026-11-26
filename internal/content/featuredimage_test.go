@@ -73,3 +73,6 @@ func TestFeaturedImageServiceURLAbsentAsEmpty(t *testing.T) {
 		}
 	})
 }
+
+// BackupSizes satisfies domain.PostMetaRepository; this fake has no backup sizes.
+func (f *fakePostMetaRepo) BackupSizes(context.Context, int64) (string, error) { return "", nil }

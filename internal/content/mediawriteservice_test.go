@@ -3,6 +3,8 @@ package content
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -604,4 +606,340 @@ func (r *rereadMediaRepo) List(_ context.Context, _ domain.MediaFilter) ([]domai
 
 func (r *rereadMediaRepo) Count(_ context.Context, _ domain.MediaFilter) (int, error) {
 	return 0, nil
+}
+
+// ---- Delete: full file cleanup (plans/23 task 6.1, Req 2.1-2.8, 3, 4, 5) ----
+
+// mwdState is shared between the fake writer and fake metadata reader so a
+// test can tell what happened before and after the database delete.
+type mwdState struct {
+	deleted     bool            // writer.Delete has run
+	existedAtDB map[string]bool // watched path -> existed when writer.Delete ran
+	watch       []string
+	metaReads   int
+	readAfterDB int // metadata reads that happened after writer.Delete
+}
+
+// mwdWriter wraps the shared fakeMediaWriter and snapshots the watched paths
+// at the moment the database delete runs.
+type mwdWriter struct {
+	*fakeMediaWriter
+	st *mwdState
+}
+
+func (w *mwdWriter) Delete(ctx context.Context, id int64) error {
+	w.st.existedAtDB = map[string]bool{}
+	for _, p := range w.st.watch {
+		_, err := os.Lstat(p)
+		w.st.existedAtDB[p] = err == nil
+	}
+	err := w.fakeMediaWriter.Delete(ctx, id)
+	if err == nil {
+		w.st.deleted = true
+	}
+	return err
+}
+
+// mwdMeta is a metadata reader that, like the real storage, stops returning
+// the attachment's rows once the database delete has run.
+type mwdMeta struct {
+	st     *mwdState
+	meta   string
+	backup string
+	shared map[string]bool
+}
+
+func (m *mwdMeta) read(v string) (string, error) {
+	m.st.metaReads++
+	if m.st.deleted {
+		m.st.readAfterDB++
+		return "", nil
+	}
+	return v, nil
+}
+func (m *mwdMeta) FeaturedMediaID(context.Context, int64) (int64, error) { return 0, nil }
+func (m *mwdMeta) AttachmentMetadata(context.Context, int64) (string, error) {
+	return m.read(m.meta)
+}
+func (m *mwdMeta) BackupSizes(context.Context, int64) (string, error) { return m.read(m.backup) }
+func (m *mwdMeta) ThumbSharedElsewhere(_ context.Context, _ int64, name string) (bool, error) {
+	m.st.metaReads++
+	return m.shared[name], nil
+}
+
+type mwdEnv struct {
+	svc    *MediaWriteService
+	repo   *fakeMediaRepo
+	writer *mwdWriter
+	meta   *mwdMeta
+	st     *mwdState
+	root   string // resolved uploads dir
+	outDir string // directory beside the uploads dir
+}
+
+const mwdMain = "2024/05/photo.jpg"
+
+func newMWDEnv(t *testing.T, wireMeta bool) *mwdEnv {
+	t.Helper()
+	base := t.TempDir()
+	root := filepath.Join(base, "uploads")
+	out := filepath.Join(base, "outside")
+	for _, d := range []string{root, out} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &mwdState{}
+	repo := &fakeMediaRepo{}
+	writer := &mwdWriter{fakeMediaWriter: &fakeMediaWriter{}, st: st}
+	meta := &mwdMeta{st: st, shared: map[string]bool{}}
+	media := NewMediaService(repo, writer, MediaConfig{UploadsDir: resolved, BaseURL: "/wp-content/uploads"})
+	opts := []MediaWriteOption{WithMediaLogger(nil)}
+	if wireMeta {
+		opts = append(opts, WithMediaMetaReader(meta))
+	}
+	svc := NewMediaWriteService(media, repo, writer, opts...)
+	stageStoredMedia(repo, 70, 7, domain.Media{ID: 70, AuthorID: 7, Filename: mwdMain})
+	return &mwdEnv{svc: svc, repo: repo, writer: writer, meta: meta, st: st, root: resolved, outDir: out}
+}
+
+// put creates a file under the uploads dir (rel to the main file's directory
+// unless it contains a slash-rooted year path) and watches it.
+func (e *mwdEnv) put(t *testing.T, rel string) string {
+	t.Helper()
+	p := filepath.Join(e.root, filepath.FromSlash(rel))
+	e.putAbs(t, p)
+	return p
+}
+
+func (e *mwdEnv) putAbs(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.st.watch = append(e.st.watch, p)
+}
+
+func (e *mwdEnv) sibling(t *testing.T, name string) string {
+	t.Helper()
+	return e.put(t, "2024/05/"+name)
+}
+
+func (e *mwdEnv) del(t *testing.T) domain.Media {
+	t.Helper()
+	prev, err := e.svc.Delete(context.Background(), actor(auth.RoleAuthor, 7), 70)
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	return prev
+}
+
+func mwdGone(t *testing.T, p string) {
+	t.Helper()
+	if _, err := os.Lstat(p); !os.IsNotExist(err) {
+		t.Errorf("%s should have been removed (stat err = %v)", p, err)
+	}
+}
+
+func mwdKept(t *testing.T, p string) {
+	t.Helper()
+	if _, err := os.Lstat(p); err != nil {
+		t.Errorf("%s should have been kept: %v", p, err)
+	}
+}
+
+func mwdSerialize(t *testing.T, v any) string { return mfSerialize(t, v) }
+
+// No metadata: only the main file goes; an unrelated sibling stays.
+func TestMediaWriteServiceDeleteNoMetadataRemovesOnlyMainFile(t *testing.T) {
+	e := newMWDEnv(t, true)
+	main := e.put(t, mwdMain)
+	other := e.sibling(t, "unrelated.jpg")
+	prev := e.del(t)
+	if prev.ID != 70 || prev.Filename != mwdMain {
+		t.Errorf("previous = %+v, want the pre-delete snapshot", prev)
+	}
+	mwdGone(t, main)
+	mwdKept(t, other)
+}
+
+// Every file named by the metadata goes, after the database delete, using
+// metadata read before it.
+func TestMediaWriteServiceDeleteRemovesEveryNamedFileAfterDBDelete(t *testing.T) {
+	e := newMWDEnv(t, true)
+	e.meta.meta = mwdSerialize(t, map[string]any{
+		"file": mwdMain,
+		"sizes": map[string]any{
+			"thumbnail": map[string]any{"file": "photo-150x150.jpg"},
+			"medium":    map[string]any{"file": "photo-300x200.jpg"},
+		},
+		"original_image":        "photo-orig.jpg",
+		"thumb":                 "photo-thumb.jpg",
+		"source_image":          "photo-src.jpg",
+		"animated_video":        "photo.mp4",
+		"animated_video_poster": "photo-poster.jpg",
+	})
+	var all []string
+	all = append(all, e.put(t, mwdMain))
+	for _, n := range []string{"photo-150x150.jpg", "photo-300x200.jpg", "photo-orig.jpg", "photo-thumb.jpg", "photo-src.jpg", "photo.mp4", "photo-poster.jpg"} {
+		all = append(all, e.sibling(t, n))
+	}
+	keep := e.sibling(t, "unrelated.jpg")
+	e.del(t)
+	for _, p := range all {
+		mwdGone(t, p)
+		if !e.st.existedAtDB[p] {
+			t.Errorf("%s was already gone when the database delete ran; files must be removed after it", p)
+		}
+	}
+	mwdKept(t, keep)
+	if e.st.readAfterDB != 0 {
+		t.Errorf("metadata was read %d time(s) after the database delete; it must be read before", e.st.readAfterDB)
+	}
+	if e.st.metaReads == 0 {
+		t.Error("metadata was never read")
+	}
+}
+
+// Backup-size files are removed too.
+func TestMediaWriteServiceDeleteRemovesBackupSizeFiles(t *testing.T) {
+	e := newMWDEnv(t, true)
+	e.meta.backup = mwdSerialize(t, map[string]any{
+		"thumbnail-orig": map[string]any{"file": "photo-150x150-old.jpg"},
+		"medium-orig":    map[string]any{"file": "photo-300x200-old.jpg"},
+	})
+	main := e.put(t, mwdMain)
+	b1 := e.sibling(t, "photo-150x150-old.jpg")
+	b2 := e.sibling(t, "photo-300x200-old.jpg")
+	e.del(t)
+	mwdGone(t, main)
+	mwdGone(t, b1)
+	mwdGone(t, b2)
+}
+
+// A thumb another attachment still names survives; everything else goes.
+func TestMediaWriteServiceDeleteKeepsSharedThumb(t *testing.T) {
+	e := newMWDEnv(t, true)
+	e.meta.meta = mwdSerialize(t, map[string]any{
+		"thumb": "shared-thumb.jpg",
+		"sizes": map[string]any{"medium": map[string]any{"file": "photo-300x200.jpg"}},
+	})
+	e.meta.shared["shared-thumb.jpg"] = true
+	main := e.put(t, mwdMain)
+	thumb := e.sibling(t, "shared-thumb.jpg")
+	size := e.sibling(t, "photo-300x200.jpg")
+	e.del(t)
+	mwdGone(t, main)
+	mwdGone(t, size)
+	mwdKept(t, thumb)
+}
+
+// A named file that is not on disk is not an error, and the rest still go.
+func TestMediaWriteServiceDeleteMissingNamedFileIsNotAnError(t *testing.T) {
+	e := newMWDEnv(t, true)
+	e.meta.meta = mwdSerialize(t, map[string]any{
+		"sizes": map[string]any{
+			"thumbnail": map[string]any{"file": "photo-150x150.jpg"},
+			"medium":    map[string]any{"file": "never-existed.jpg"},
+		},
+	})
+	main := e.put(t, mwdMain)
+	thumb := e.sibling(t, "photo-150x150.jpg")
+	prev := e.del(t)
+	if prev.ID != 70 || prev.Filename != mwdMain {
+		t.Errorf("previous = %+v, want the pre-delete snapshot", prev)
+	}
+	mwdGone(t, main)
+	mwdGone(t, thumb)
+}
+
+// A name escaping the uploads dir (.. or absolute) is skipped; others still go.
+func TestMediaWriteServiceDeleteSkipsPathsEscapingUploadsDir(t *testing.T) {
+	e := newMWDEnv(t, true)
+	victimRel := filepath.Join(e.outDir, "victim-rel.jpg")
+	victimAbs := filepath.Join(e.outDir, "victim-abs.jpg")
+	e.putAbs(t, victimRel)
+	e.putAbs(t, victimAbs)
+	relEscape, err := filepath.Rel(filepath.Join(e.root, "2024", "05"), victimRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.meta.meta = mwdSerialize(t, map[string]any{
+		"original_image": filepath.ToSlash(relEscape),
+		"source_image":   victimAbs,
+		"sizes":          map[string]any{"thumbnail": map[string]any{"file": "photo-150x150.jpg"}},
+	})
+	main := e.put(t, mwdMain)
+	size := e.sibling(t, "photo-150x150.jpg")
+	e.del(t)
+	mwdGone(t, main)
+	mwdGone(t, size)
+	mwdKept(t, victimRel)
+	mwdKept(t, victimAbs)
+}
+
+// A failed database delete leaves every file alone and returns its error.
+func TestMediaWriteServiceDeleteDBFailureLeavesAllFiles(t *testing.T) {
+	e := newMWDEnv(t, true)
+	e.meta.meta = mwdSerialize(t, map[string]any{
+		"sizes": map[string]any{"thumbnail": map[string]any{"file": "photo-150x150.jpg"}},
+	})
+	main := e.put(t, mwdMain)
+	size := e.sibling(t, "photo-150x150.jpg")
+	boom := errors.New("db boom")
+	e.writer.deleteErr = boom
+	_, err := e.svc.Delete(context.Background(), actor(auth.RoleAuthor, 7), 70)
+	if !errors.Is(err, boom) {
+		t.Fatalf("Delete error = %v, want the storage error unchanged", err)
+	}
+	mwdKept(t, main)
+	mwdKept(t, size)
+}
+
+// Req 5.2: a not-found id deletes no file and never consults the metadata reader.
+func TestMediaWriteServiceDeleteNotFoundConsultsNothing(t *testing.T) {
+	e := newMWDEnv(t, true)
+	main := e.put(t, mwdMain)
+	_, err := e.svc.Delete(context.Background(), actor(auth.RoleAdministrator, 1), 99999)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Delete error = %v, want domain.ErrNotFound", err)
+	}
+	if e.st.metaReads != 0 {
+		t.Errorf("metadata reader consulted %d time(s) for a not-found id", e.st.metaReads)
+	}
+	mwdKept(t, main)
+}
+
+// A forbidden caller removes nothing and never reaches the metadata reader.
+func TestMediaWriteServiceDeleteForbiddenConsultsNothing(t *testing.T) {
+	e := newMWDEnv(t, true)
+	main := e.put(t, mwdMain)
+	_, err := e.svc.Delete(context.Background(), actor(auth.RoleContributor, 8), 70)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("Delete error = %v, want ErrForbidden", err)
+	}
+	if e.st.metaReads != 0 {
+		t.Errorf("metadata reader consulted %d time(s) for a forbidden delete", e.st.metaReads)
+	}
+	mwdKept(t, main)
+}
+
+// Without a metadata reader wired, behavior is today's: main file only.
+func TestMediaWriteServiceDeleteWithoutMetaReaderRemovesOnlyMainFile(t *testing.T) {
+	e := newMWDEnv(t, false)
+	e.meta.meta = mwdSerialize(t, map[string]any{
+		"sizes": map[string]any{"thumbnail": map[string]any{"file": "photo-150x150.jpg"}},
+	})
+	main := e.put(t, mwdMain)
+	size := e.sibling(t, "photo-150x150.jpg")
+	e.del(t)
+	mwdGone(t, main)
+	mwdKept(t, size)
 }

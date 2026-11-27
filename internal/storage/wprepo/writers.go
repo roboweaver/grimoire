@@ -265,4 +265,5 @@ var (
 	_ domain.TermWriter                 = (*TermRepo)(nil)
 	_ domain.TermReader                 = (*TermRepo)(nil)
 	_ domain.OptionWriter               = (*OptionRepo)(nil)
+	_ domain.ThemeModCleaner            = (*OptionRepo)(nil)
 )

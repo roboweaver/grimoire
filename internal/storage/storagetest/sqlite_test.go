@@ -179,3 +179,10 @@ func TestSQLitePostMetaThumbSharedContract(t *testing.T) {
 		return repos, "sqlite", "wp_", cleanup
 	})
 }
+
+func TestSQLiteThemeModCleanerContract(t *testing.T) {
+	RunThemeModCleanerContract(t, func(t *testing.T) (*storage.Repositories, string, string, func()) {
+		repos, cleanup := newSQLiteRepos(t)
+		return repos, "sqlite", "wp_", cleanup
+	})
+}

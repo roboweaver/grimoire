@@ -271,8 +271,10 @@ func (s *MediaWriteService) Delete(ctx context.Context, actor auth.Principal, id
         deleteMediaFiles(s.media.Config(), rel, candidates, s.log)
     }
     if s.themeMods != nil {
-        if err := s.themeMods.CleanAttachmentReferences(ctx, id, cur.Filename, s.media.Config()); err != nil && s.log != nil {
-            s.log.Error("mediawriteservice: theme-mod cleanup failed", "attachment_id", id, "error", err)
+        cfg := s.media.Config()
+        url := strings.TrimRight(cfg.BaseURL, "/") + "/" + cur.Filename // as MediaService.Store builds it
+        if err := s.themeMods.CleanAttachmentReferences(ctx, id, url, cfg.Theme); err != nil {
+            s.warn("media delete: theme-mod cleanup failed", id, err) // nil-safe logger; never alters cur/err
         }
     }
     return cur, nil
@@ -308,8 +310,8 @@ type ThemeModCleaner interface {
     //  - the custom_logo and header_text keys of theme_mods_{stylesheet}
     //    when custom_logo's numeric value equals attachmentID;
     //  - the header_image and header_image_data keys when header_image's
-    //    value equals attachmentURL;
-    //  - the background_image key when background_image's value equals
+    //    value refers to attachmentURL (same path; see below);
+    //  - the background_image key when background_image's value refers to
     //    attachmentURL;
     //  - option site_logo when its numeric value equals attachmentID;
     //  - option site_icon when its numeric value equals attachmentID.
@@ -321,59 +323,60 @@ type ThemeModCleaner interface {
 }
 ```
 
-Implemented by `wprepo.OptionRepo` (it already implements `domain.OptionWriter` and has `r.db`,
-`r.prefix`; it does not yet read `stylesheet`, but `wprepo.NavMenuRepo.MenuByLocation` already
-shows the exact `theme_mods_{stylesheet}` read/decode pattern to follow). `stylesheet` is passed in
-by the caller (`MediaWriteService`, via `MediaConfig` gaining a `Theme string` field populated from
-`cfg.Theme` the same way `content.NewNavMenuService(repos.NavMenus, cfg.Theme)` already receives
-it in `cmd/grimoire/assembly.go`) rather than read by the port itself, so the port has no dependency
-on `internal/config` and stays a pure storage operation parameterized by its caller, consistent
-with `NavMenuRepo.MenuByLocation(ctx, theme, location)`'s existing shape.
+Implemented by `wprepo.OptionRepo`. `stylesheet` is passed in by the caller (`MediaWriteService`,
+via `MediaConfig` gaining a `Theme string` field populated from `cfg.Theme` the same way
+`content.NewNavMenuService(repos.NavMenus, cfg.Theme)` already receives it in
+`cmd/grimoire/assembly.go`) rather than read by the port itself, so the port has no dependency on
+`internal/config`. The row is selected by exact `option_name` equality through a bound parameter
+(no `LIKE`, so `%` and `_` in the stylesheet are literal); an empty stylesheet skips theme mods.
+The port is also exposed as `storage.Set.ThemeMods`, wired to the `OptionRepo` in the factory.
+
+**Surgical edit, not decode/re-encode (decision recorded in task 9.2).** The theme_mods value is
+shared with WordPress and is not safely round-trippable through `internal/php`: integer-keyed
+nested arrays decode with string keys, and floats and objects (WordPress stores `header_image_data`
+as `O:8:"stdClass"`) cannot be decoded at all, so re-serializing would corrupt the row and a decode
+failure would silently skip cleaning. Instead `wprepo/phpscan.go` scans the serialized text by byte
+span:
+
+- `scanPHPArray(raw)` walks the top-level entries of `a:N:{...}`, skipping each value (`N;`,
+  `b:`, `i:`, `d:`, `s:` with its length prefix, nested `a:`, `O:`, `r:`/`R:`) with correct
+  nesting and string-length awareness, so braces and semicolons inside strings are harmless. The
+  input must be exactly one well-formed array; anything else (truncated, trailing bytes, bad
+  length, unsupported marker, count mismatch) is "unscannable" and is skipped without error
+  (Requirement 1.8).
+- The decision logic reads only the scalars it needs: `header_image` / `background_image` as `s:`
+  strings, `custom_logo` as `i:` or a numeric `s:`. A non-matching type never matches.
+- **URL matching compares paths.** WordPress stores the absolute URL (`https://host/wp-content/
+  uploads/...`) in `header_image`/`background_image`; grimoire's attachment URL is relative. Both
+  sides are reduced to their path (a lower-case `http://`/`https://` scheme and authority are
+  stripped, the path kept byte for byte, no case folding or percent-decoding) and compared. A value
+  with a query or fragment, a protocol-relative value, another scheme, a non-URL or an empty
+  string never matches. The host is ignored, so databases shared by sites with an identical
+  uploads path can cross-match; this is accepted.
+- Matched keys are removed as whole key+value byte spans (`custom_logo` + `header_text`;
+  `header_image` + `header_image_data`; `background_image`). Only the `a:N:` count is rewritten.
+  Every other byte is preserved. When no entries remain the row is deleted.
+- The edited value is written with a `database/sql` bound argument (`?`, or `$N` on PostgreSQL),
+  not through Bun's builder, because Bun inlines string arguments and drops NUL bytes that PHP uses
+  in protected and private property names.
 
 ```go
+// pure, DB-free; rawMods "" means absent
+func decideThemeModCleanup(rawMods string, optionValues map[string]string,
+    attachmentID int64, attachmentURL string) themeModDecision
+
+type themeModDecision struct {
+    Mods          string   // new value; equals the input byte for byte unless ModsChanged; "" when DeleteModsRow
+    ModsChanged   bool
+    DeleteModsRow bool
+    DeleteOptions []string // subset of "site_icon", "site_logo", ascending
+}
+
 func (r *OptionRepo) CleanAttachmentReferences(ctx context.Context, attachmentID int64, attachmentURL, stylesheet string) error {
-    return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-        modsOptionName := "theme_mods_" + stylesheet
-        raw, mods, err := readOptionMapTx(ctx, tx, r.prefix, modsOptionName) // "", nil on absent/malformed
-        if err == nil && mods != nil {
-            changed := false
-            if logoID, ok := asInt64(mods["custom_logo"]); ok && logoID == attachmentID {
-                delete(mods, "custom_logo")
-                delete(mods, "header_text")
-                changed = true
-            }
-            if hdr, ok := mods["header_image"].(string); ok && hdr != "" && hdr == attachmentURL {
-                delete(mods, "header_image")
-                delete(mods, "header_image_data")
-                changed = true
-            }
-            if bg, ok := mods["background_image"].(string); ok && bg != "" && bg == attachmentURL {
-                delete(mods, "background_image")
-                changed = true
-            }
-            if changed {
-                if err := writeOrDeleteOptionMapTx(ctx, tx, r.prefix, modsOptionName, mods); err != nil {
-                    return err
-                }
-            }
-        }
-        for _, name := range []string{"site_logo", "site_icon"} {
-            if id, ok := optionIntValueTx(ctx, tx, r.prefix, name); ok && id == attachmentID {
-                if err := deleteOptionTx(ctx, tx, r.prefix, name); err != nil && !errors.Is(err, domain.ErrNotFound) {
-                    return err
-                }
-            }
-        }
-        return nil
-    })
+    // one RunInTx: read theme_mods_{stylesheet} (unless stylesheet == ""), site_icon, site_logo;
+    // d := decideThemeModCleanup(...); then DELETE or UPDATE the mods row and DELETE matching options.
 }
 ```
-
-`asInt64` already exists in `wprepo` (used by `MenuByLocation`). `readOptionMapTx`,
-`writeOrDeleteOptionMapTx`, `optionIntValueTx` and `deleteOptionTx` are small new private helpers
-in `wprepo/options.go` (or added to the existing option-writer file), each a thin wrapper over one
-`SELECT`/`UPDATE`/`DELETE` inside the passed transaction — no new exported surface beyond the one
-port method.
 
 ### `content.MediaConfig`, extended
 
@@ -530,7 +533,7 @@ combination of `custom_logo`, `header_text`, `header_image`, `header_image_data`
 `background_image` and unrelated keys, plus generated `site_logo` and `site_icon` option values:
 after `ThemeModCleaner.CleanAttachmentReferences` runs, a key or option is absent afterward if and
 only if its matching rule (numeric `custom_logo`/`site_logo`/`site_icon` equals the attachment id,
-or string `header_image`/`background_image` equals the attachment URL) held before the call; every
+or string `header_image`/`background_image` has the same URL path as the attachment URL) held before the call; every
 non-matching key and option is unchanged; and if removing matched keys leaves `theme_mods_` with no
 remaining keys, no `theme_mods_{stylesheet}` option row exists afterward.
 

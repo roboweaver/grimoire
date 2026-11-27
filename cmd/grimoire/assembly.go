@@ -69,7 +69,7 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	// endpoint's BaseURL and the REST mapper's srcset fallback anchor read this
 	// same value, so they can never drift apart.
 	const uploadsBaseURL = "/wp-content/uploads"
-	media := content.NewMediaService(repos.Media, repos.MediaWriter, content.MediaConfig{UploadsDir: cfg.Media.UploadsDir, BaseURL: uploadsBaseURL, AllowedMIMEs: cfg.Media.AllowedMIMEs, MaxUploadSize: cfg.Media.MaxUploadSize})
+	media := content.NewMediaService(repos.Media, repos.MediaWriter, content.MediaConfig{UploadsDir: cfg.Media.UploadsDir, BaseURL: uploadsBaseURL, AllowedMIMEs: cfg.Media.AllowedMIMEs, MaxUploadSize: cfg.Media.MaxUploadSize, Theme: cfg.Theme})
 
 	// One PageService serves both the web handlers (the nested /{slug}/* route and
 	// the flat-leaf 301) and the REST mapper (a page's nested "link"), so the
@@ -121,7 +121,7 @@ func buildHandler(deps serverDeps) (http.Handler, *content.PostWriteService, err
 	// existing media read/write service and the Media reader / MediaWriter ports,
 	// sharing the process-wide contentPolicy so metadata fields sanitize at the
 	// write boundary like every other write path (Req 8.3, 11.1).
-	mediaWrite := content.NewMediaWriteService(media, repos.Media, repos.MediaWriter, content.WithMediaContentPolicy(contentPolicy), content.WithMediaMetaReader(repos.PostMeta), content.WithMediaLogger(log))
+	mediaWrite := content.NewMediaWriteService(media, repos.Media, repos.MediaWriter, content.WithMediaContentPolicy(contentPolicy), content.WithMediaMetaReader(repos.PostMeta), content.WithMediaLogger(log), content.WithMediaThemeModCleaner(repos.ThemeMods))
 	// userWrite backs the REST user write surface (POST/PATCH/DELETE
 	// /wp-json/wp/v2/users and .../users/me). It layers capability-checked
 	// profile writes over the Users / UserMeta ports and the table prefix,

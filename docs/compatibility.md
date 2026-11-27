@@ -735,8 +735,11 @@ Type mappings from the WordPress MySQL schema are translated per vendor
   - **Known gaps (M20 PR 2).**
     - Trash and restore arrived in M22 PR 1 (REST) and PR 2 (admin) for posts,
       pages and registered types. Attachments have no trash (WordPress `MEDIA_TRASH` is false).
-    - Theme mods that reference the attachment (`custom_logo`, `header_image` and
-      similar) are not cleared.
+    - *(Closed in M23 PR 3.)* Media delete now also clears the theme mods and
+      options that reference the attachment (`custom_logo` with `header_text`,
+      `header_image` with `header_image_data`, `background_image`, and the
+      `site_logo` and `site_icon` options); see the M23 theme-mod cleanup entry,
+      including its stylesheet and URL-form limits.
     - *(Closed in M23 PR 2.)* Media delete now also removes the image-size
       files, `original_image`, backup sizes and sideload companions, guarded to
       the uploads directory; see the M23 media file cleanup entry. The
@@ -1182,11 +1185,108 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     - The cleanup has not been run against a live WordPress uploads directory.
     - A MySQL 8.0 / PostgreSQL 16 run of the new contracts is recorded in task
       6.5 of the plan; this documentation task did not re-run it.
-  - **Known gaps (M23 PR 2).** Theme mods that reference the attachment
-    (`custom_logo`, `header_image`, `background_image`, `site_icon`) are still
-    not cleared (PR 3). Child attachments keep their `post_parent` pointing at
-    the deleted attachment. WordPress hooks and the object cache are not
-    involved. Attachments have no trash.
+  - **Known gaps (M23 PR 2).** *(Theme-mod references closed in M23 PR 3, below.)*
+    Child attachments keep their `post_parent` pointing at the deleted
+    attachment. WordPress hooks and the object cache are not involved.
+    Attachments have no trash.
+- **M23 — Theme-mod cleanup on media delete (PR 3):** deleting an attachment now
+  also removes the theme mods and options that point at it, as WordPress does.
+  No schema change, no migration, no new capability, no new config key, no
+  response-shape change.
+  - **What is cleaned.** The rules follow core's `_delete_attachment_theme_mod`
+    and the site-icon handling, and nothing else is touched. In the
+    `theme_mods_{stylesheet}` option (a top-level key only):
+    - `custom_logo` equal to the attachment id (an integer or a numeric string)
+      removes `custom_logo` and `header_text`.
+    - `header_image` equal to the attachment URL removes `header_image` and
+      `header_image_data`.
+    - `background_image` equal to the attachment URL removes `background_image`.
+    - URL equality compares paths: each side is reduced to its path (a leading
+      lower-case `http://` or `https://` plus host and optional port is
+      stripped) and the paths must be byte-equal, so
+      `https://example.com/wp-content/uploads/a.jpg` matches
+      `/wp-content/uploads/a.jpg`. The path is not case-folded or
+      percent-decoded. A value or URL with a query or fragment, a
+      protocol-relative `//host/...` value, any other scheme, or a non-URL
+      never matches.
+    - An empty value or an empty URL matches nothing, and an
+      object-valued `custom_logo` or `header_image` never matches. For a
+      duplicated key the last entry wins, as in PHP's `unserialize`.
+    - Separately, the `site_logo` and `site_icon` options are deleted when their
+      value is the attachment id (a plain decimal or a serialized integer such as
+      `i:7;`). A `site_logo` or `site_icon` key inside the theme mods, and a
+      `custom_logo` or `header_image` option, are not touched (a storage contract
+      case pins this).
+  - **Byte-preserving edit.** The serialized value is not decoded and
+    re-encoded. A decode and re-encode is lossy for what real WordPress writes:
+    integer-keyed arrays, floats and `stdClass` objects (such as
+    `header_image_data`) do not round-trip. Instead the top-level entries are
+    located by byte span, the scalar values the rules need are read, and only the
+    removed key/value spans and the `a:N:` count change. Every other byte,
+    including NUL-delimited object property names, is preserved.
+  - **Skipped without error.** An absent `theme_mods_{stylesheet}` row, a value
+    that is not exactly one well-formed serialized array, and an absent or
+    non-integer `site_logo` or `site_icon` are left alone and are not errors. A
+    second call after a match is a no-op.
+  - **Empty result.** When every top-level key is removed, the row is deleted
+    rather than rewritten as `a:0:{}`. A row that was already an empty array and
+    matches nothing is left as it is.
+  - **Row lookup.** The row is found by exact equality on `option_name` through a
+    bound parameter (no `LIKE`, so `%` and `_` in a stylesheet are literal) and
+    every write targets the row's `option_id`. MySQL's default collation compares
+    `option_name` case-insensitively, so the query can return a row whose name
+    differs in case; those rows are filtered out in Go, and the update and delete
+    use `option_id`, so another theme's row cannot be edited.
+  - **Write path and NUL bytes.** The edited value is written through
+    `database/sql` with a bound argument, not through Bun's query builder. Bun
+    inlines string arguments into the SQL text and drops NUL bytes, which PHP uses
+    in protected and private property names. PostgreSQL text columns cannot store
+    NUL, so the NUL-byte fixture runs on SQLite and MySQL only.
+  - **Stylesheet.** The row looked up is `theme_mods_` plus `cfg.Theme`, the same
+    convention as `NavMenuRepo.MenuByLocation`. The row is found only when
+    grimoire's `theme:` setting equals the WordPress stylesheet slug (the
+    directory name of the active theme, or the child theme's). When it does not,
+    the mods row is silently not found and left alone, while `site_logo` and
+    `site_icon` are still cleaned. An empty stylesheet skips theme mods.
+  - **Ordering and failure.** The cleanup runs after the database delete
+    succeeds, in its own transaction. An error is logged as a warning and does not
+    fail the delete or change its response. With no cleaner wired, nothing runs.
+  - **Verified on** SQLite by the shared contract
+    (`internal/storage/storagetest/thememod_contract.go`), the decision-logic unit
+    tests, the service tests, and an assembly test
+    (`cmd/grimoire/assembly_media_thememod_cleanup_test.go`) that runs a forced
+    REST delete through `buildHandler` and checks the options. The contract is
+    written to also run on MySQL 8.0 and PostgreSQL 16 when the `GRIMOIRE_TEST_*`
+    DSNs are set, as CI does; the cross-vendor run is recorded in the plan's gate
+    task 10.6, and this documentation task did not re-run it.
+  - **Not verified, stated plainly.**
+    - **URL form.** The attachment URL grimoire builds is relative (the uploads
+      base `/wp-content/uploads` plus the file path), while WordPress stores the
+      absolute URL from `wp_get_attachment_url` in `header_image` and
+      `background_image`. Both sides are therefore reduced to their path
+      (scheme and authority stripped, path kept byte for byte) before comparing;
+      see the matching rule above. The host is ignored, so on a database shared
+      by several sites with the same uploads path a deleted attachment can clear
+      a mod that names another site's identical path. Tested with absolute
+      http and https values, ports, relative values and the negative cases; not
+      tested against a real WordPress-written `theme_mods` row.
+    - **Cleaner error path.** The service unit tests cover a failing cleaner, but
+      no assembly-level test makes the real cleaner fail and observes that the
+      REST delete still answers 200 with a logged warning.
+    - **Background mod variants.** Only `background_image` is handled. Other
+      custom-background keys (for example `background_image_thumb`) are not
+      cleared, and this entry does not claim they match core's behavior.
+    - **Census.** The development WordPress database census (what real
+      `theme_mods` and `site_logo` values look like) was not run; the build
+      sandbox lacks the access.
+    - **Case-differing subtest.** The MySQL case-differing-stylesheet contract
+      subtest was not observed failing against the earlier implementation, so it
+      is not proven to catch that regression.
+  - **Still open after M23.** Child attachments keep their `post_parent` pointing
+    at the deleted attachment; the REST media `DELETE` without `force=true`
+    still answers `400` where WordPress answers `501`; WordPress hooks and the
+    object cache are not involved; the purge batch size (100) is fixed; attachments
+    have no trash.
 
 ## Public read guarantees
 

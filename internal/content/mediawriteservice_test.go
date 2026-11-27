@@ -1,8 +1,10 @@
 package content
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -942,4 +944,120 @@ func TestMediaWriteServiceDeleteWithoutMetaReaderRemovesOnlyMainFile(t *testing.
 	e.del(t)
 	mwdGone(t, main)
 	mwdKept(t, size)
+}
+
+// ---- Delete: theme-mod cleanup (plans/23 task 10.1, Req 1.10-1.12, 26.1, 26.2) ----
+
+type mwtmCall struct {
+	id         int64
+	url        string
+	stylesheet string
+	dbDeleted  bool // writer.Delete had already succeeded when the cleaner ran
+}
+
+// mwtmCleaner is a domain.ThemeModCleaner double recording every call.
+type mwtmCleaner struct {
+	st    *mwdState
+	calls []mwtmCall
+	err   error
+}
+
+func (c *mwtmCleaner) CleanAttachmentReferences(_ context.Context, id int64, url, stylesheet string) error {
+	c.calls = append(c.calls, mwtmCall{id: id, url: url, stylesheet: stylesheet, dbDeleted: c.st.deleted})
+	return c.err
+}
+
+var _ domain.ThemeModCleaner = (*mwtmCleaner)(nil)
+
+// mwtmEnv rebuilds the mwd service with a Theme-bearing MediaConfig and,
+// when wire is true, a recording cleaner and a buffer-backed logger.
+func mwtmEnv(t *testing.T, wire bool, cleanErr error) (*mwdEnv, *mwtmCleaner, *bytes.Buffer) {
+	t.Helper()
+	e := newMWDEnv(t, true)
+	cl := &mwtmCleaner{st: e.st, err: cleanErr}
+	buf := &bytes.Buffer{}
+	media := NewMediaService(e.repo, e.writer, MediaConfig{
+		UploadsDir: e.root, BaseURL: "/wp-content/uploads/", Theme: "twentytwentyfour",
+	})
+	opts := []MediaWriteOption{
+		WithMediaMetaReader(e.meta),
+		WithMediaLogger(slog.New(slog.NewTextHandler(buf, nil))),
+	}
+	if wire {
+		opts = append(opts, WithMediaThemeModCleaner(cl))
+	}
+	e.svc = NewMediaWriteService(media, e.repo, e.writer, opts...)
+	return e, cl, buf
+}
+
+func TestMediaWriteServiceDeleteCallsThemeModCleanerWithIDURLAndStylesheet(t *testing.T) {
+	e, cl, _ := mwtmEnv(t, true, nil)
+	e.put(t, mwdMain)
+	prev := e.del(t)
+	if len(cl.calls) != 1 {
+		t.Fatalf("cleaner called %d times, want 1", len(cl.calls))
+	}
+	want := mwtmCall{id: 70, url: "/wp-content/uploads/" + mwdMain, stylesheet: "twentytwentyfour", dbDeleted: true}
+	if cl.calls[0] != want {
+		t.Errorf("cleaner call = %+v, want %+v (URL = BaseURL + filename, as Store builds it; after DB delete)", cl.calls[0], want)
+	}
+	if prev.ID != 70 || prev.Filename != mwdMain {
+		t.Errorf("returned snapshot = %+v, want the pre-delete attachment", prev)
+	}
+}
+
+func TestMediaWriteServiceDeleteSwallowsAndLogsThemeModCleanerError(t *testing.T) {
+	e, cl, buf := mwtmEnv(t, true, errors.New("theme boom"))
+	main := e.put(t, mwdMain)
+	prev := e.del(t) // must not fail
+	if len(cl.calls) != 1 {
+		t.Fatalf("cleaner called %d times, want 1", len(cl.calls))
+	}
+	if prev.ID != 70 || prev.Filename != mwdMain {
+		t.Errorf("returned snapshot = %+v, want the pre-delete attachment", prev)
+	}
+	if !e.st.deleted {
+		t.Error("database delete did not run")
+	}
+	mwdGone(t, main)
+	if !strings.Contains(buf.String(), "theme boom") {
+		t.Errorf("cleaner error not logged; log = %q", buf.String())
+	}
+}
+
+func TestMediaWriteServiceDeleteWithoutThemeModCleanerBehavesAsBefore(t *testing.T) {
+	e, cl, _ := mwtmEnv(t, false, nil)
+	main := e.put(t, mwdMain)
+	prev := e.del(t)
+	if len(cl.calls) != 0 {
+		t.Errorf("unwired cleaner was called %d time(s)", len(cl.calls))
+	}
+	if prev.ID != 70 {
+		t.Errorf("returned snapshot = %+v", prev)
+	}
+	mwdGone(t, main)
+}
+
+func TestMediaWriteServiceDeleteThemeModCleanerSkippedOnDBFailure(t *testing.T) {
+	e, cl, _ := mwtmEnv(t, true, nil)
+	e.writer.deleteErr = errors.New("db boom")
+	if _, err := e.svc.Delete(context.Background(), actor(auth.RoleAuthor, 7), 70); err == nil {
+		t.Fatal("Delete error = nil, want the storage error")
+	}
+	if len(cl.calls) != 0 {
+		t.Errorf("cleaner called %d time(s) after a failed DB delete", len(cl.calls))
+	}
+}
+
+func TestMediaWriteServiceDeleteNotFoundAndForbiddenSkipThemeModCleaner(t *testing.T) {
+	e, cl, _ := mwtmEnv(t, true, nil)
+	if _, err := e.svc.Delete(context.Background(), actor(auth.RoleAdministrator, 1), 99999); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("not-found Delete error = %v", err)
+	}
+	if _, err := e.svc.Delete(context.Background(), actor(auth.RoleContributor, 8), 70); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("forbidden Delete error = %v", err)
+	}
+	if len(cl.calls) != 0 {
+		t.Errorf("cleaner called %d time(s) for not-found/forbidden", len(cl.calls))
+	}
 }

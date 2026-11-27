@@ -1179,9 +1179,17 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     - The `ThumbSharedElsewhere` contract has no subtest with filenames that
       differ only by case; the case-sensitive confirmation in Go is not covered
       by a contract case.
-    - The development WordPress database census (how many real attachments carry
-      `sizes`, `original_image` or `backup_sizes`, and whether any metadata shape
-      is not handled) was not run; it needs access the build sandbox lacks.
+    - **Real-data check (run after merge).** `TestRealWordPressMediaMetadata`
+      (`internal/content`, gated on `GRIMOIRE_TEST_WP_DSN`, read-only) ran over
+      the 1,733 attachments of the development WordPress database. It found a
+      bug: 80 attachments store a dimension as a PHP double (`d:1600;`), which
+      `php.Unserialize` did not decode, so their whole metadata failed to parse
+      and a delete left every size file on disk. `php.Unserialize` now decodes
+      doubles (`Serialize` still rejects `float64`; no write path re-serializes
+      a decoded value). After the fix 1,720 decode; the remaining 13 have a
+      string whose declared length does not match its bytes, which PHP cannot
+      read either, so they are skipped. No candidate contains a path separator
+      or `..`. 10 attachments have backup sizes; 7 have `original_image`.
     - The cleanup has not been run against a live WordPress uploads directory.
     - A MySQL 8.0 / PostgreSQL 16 run of the new contracts is recorded in task
       6.5 of the plan; this documentation task did not re-run it.
@@ -1276,9 +1284,23 @@ Type mappings from the WordPress MySQL schema are translated per vendor
     - **Background mod variants.** Only `background_image` is handled. Other
       custom-background keys (for example `background_image_thumb`) are not
       cleared, and this entry does not claim they match core's behavior.
-    - **Census.** The development WordPress database census (what real
-      `theme_mods` and `site_logo` values look like) was not run; the build
-      sandbox lacks the access.
+    - **Real-data check (run after merge).** `TestRealWordPressThemeMods`
+      (`internal/storage/wprepo`, gated on `GRIMOIRE_TEST_WP_DSN`, read-only)
+      ran over the 11 `theme_mods_*` rows of the development WordPress
+      database. Nine scan cleanly, including top-level integer keys
+      (`i:0;b:0;`) and a slash in `theme_mods_pub/minileven`. Two
+      (`theme_mods_decode`, `theme_mods_the-bootstrap`) hold the real
+      `O:8:"stdClass"` `header_image_data`, but their `header_image` strings
+      declare the wrong length (a host search-and-replace from
+      `wordpress.com` left `s:67:` on a 65-byte URL), so PHP cannot read them
+      either and the cleaner correctly leaves them byte-identical. On copies
+      with the lengths repaired in memory, the header cleanup removed exactly
+      `header_image` and `header_image_data`, kept the object-valued
+      neighbours, and left the value well-formed. The non-URL sentinel
+      `remove-header` and an empty `background_image` never match. The site
+      has no `site_logo` option and `site_icon` is `0`. Real attachment URLs
+      are absolute (`https://accuweaver.com/wp-content/uploads/...`), which
+      the path match handles.
     - **Case-differing subtest.** The MySQL case-differing-stylesheet contract
       subtest was not observed failing against the earlier implementation, so it
       is not proven to catch that regression.

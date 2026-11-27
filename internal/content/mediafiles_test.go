@@ -704,3 +704,14 @@ func TestPropertyFileDeletionFailuresAreNonFatal(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestMediaFileCandidatesWithDouble covers real WordPress metadata that stores
+// a dimension as a PHP double (`d:1600;`). Before php.Unserialize decoded
+// doubles, the whole value failed to decode and no size file was deleted.
+func TestMediaFileCandidatesWithDouble(t *testing.T) {
+	meta := `a:4:{s:5:"width";i:1600;s:6:"height";d:1600;s:4:"file";s:13:"2024/02/a.jpg";s:5:"sizes";a:1:{s:9:"thumbnail";a:3:{s:4:"file";s:11:"a-150x1.jpg";s:5:"width";i:150;s:6:"height";d:150;}}}`
+	got := mediaFileCandidates(meta, "")
+	if len(got) != 1 || got[0] != "a-150x1.jpg" {
+		t.Fatalf("mediaFileCandidates = %v, want [a-150x1.jpg]", got)
+	}
+}

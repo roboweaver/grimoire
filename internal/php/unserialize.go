@@ -2,16 +2,22 @@ package php
 
 import (
 	"fmt"
+	"math"
+	"regexp"
 	"strconv"
 )
 
 // Unserialize decodes a PHP serialize() string into a Go value.
 //
-// It returns nil, bool, int, string, or map[string]any (for PHP associative
-// arrays). Array keys are decoded as strings; integer PHP keys are rendered in
-// their decimal form. The entire input must be consumed, otherwise an error is
-// returned. Unsupported type markers (objects, floats, references) yield an
+// It returns nil, bool, int, float64, string, or map[string]any (for PHP
+// associative arrays). Array keys are decoded as strings; integer PHP keys are
+// rendered in their decimal form. The entire input must be consumed, otherwise
+// an error is returned. Unsupported type markers (objects, references) yield an
 // error rather than a partial decode.
+//
+// Doubles (d:) are decoded because WordPress itself writes them, for example
+// `s:6:"height";d:1600;` in _wp_attachment_metadata. Serialize does not accept
+// float64; decoding them does not imply any write path supports them.
 func Unserialize(s string) (any, error) {
 	p := &parser{s: s}
 	v, err := p.value()
@@ -38,6 +44,8 @@ func (p *parser) value() (any, error) {
 		return p.boolean()
 	case 'i':
 		return p.integer()
+	case 'd':
+		return p.double()
 	case 's':
 		return p.string()
 	case 'a':
@@ -101,6 +109,38 @@ func (p *parser) integer() (any, error) {
 		return nil, fmt.Errorf("php: invalid int %q: %w", digits, err)
 	}
 	return n, nil
+}
+
+// phpDouble matches the literal forms PHP's serialize() writes for a finite
+// double: an optional sign, digits with an optional fraction, and an optional
+// exponent. Go-only forms (hex floats, underscores, lower-case inf/nan) are
+// rejected so the decoder stays as strict as PHP's.
+var phpDouble = regexp.MustCompile(`^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
+
+func (p *parser) double() (any, error) {
+	if err := p.expect("d:"); err != nil {
+		return nil, err
+	}
+	lit, err := p.readUntil(';')
+	if err != nil {
+		return nil, err
+	}
+	switch lit {
+	case "INF":
+		return math.Inf(1), nil
+	case "-INF":
+		return math.Inf(-1), nil
+	case "NAN":
+		return math.NaN(), nil
+	}
+	if !phpDouble.MatchString(lit) {
+		return nil, fmt.Errorf("php: invalid double %q", lit)
+	}
+	f, err := strconv.ParseFloat(lit, 64)
+	if err != nil {
+		return nil, fmt.Errorf("php: invalid double %q: %w", lit, err)
+	}
+	return f, nil
 }
 
 func (p *parser) string() (any, error) {

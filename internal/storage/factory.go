@@ -79,6 +79,8 @@ type Set struct {
 	PostTrash domain.PostTrasher
 	// Plan 22 additive port: lists trashed rows for the scheduled purge.
 	TrashedPosts domain.TrashedPostLister
+	// Plan 23 additive port: clears theme mods and options that reference a deleted attachment.
+	ThemeMods domain.ThemeModCleaner
 }
 
 // Repositories owns the underlying database handles and exposes the repository
@@ -220,6 +222,7 @@ func New(cfg config.DatabaseConfig) (*Repositories, error) {
 			PostRelationships: posts,
 			PostTrash:         posts,
 			TrashedPosts:      posts,
+			ThemeMods:         options,
 		},
 		db:    db,
 		bunDB: bunDB,

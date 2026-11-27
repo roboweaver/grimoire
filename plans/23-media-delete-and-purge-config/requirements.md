@@ -79,10 +79,10 @@ pointing at a missing attachment.
 1. WHEN the Media_Write_Service deletes an attachment whose id equals the numeric value of the
    `custom_logo` key in the Theme_Mod_Option, THE Theme_Mod_Cleaner SHALL remove the `custom_logo`
    and `header_text` keys from the Theme_Mod_Option, in the same call.
-2. WHEN the Media_Write_Service deletes an attachment whose attachment URL equals the `header_image`
+2. WHEN the Media_Write_Service deletes an attachment whose attachment URL has the same path as the `header_image`
    key of the Theme_Mod_Option, THE Theme_Mod_Cleaner SHALL remove the `header_image` and
    `header_image_data` keys from the Theme_Mod_Option.
-3. WHEN the Media_Write_Service deletes an attachment whose attachment URL equals the
+3. WHEN the Media_Write_Service deletes an attachment whose attachment URL has the same path as the
    `background_image` key of the Theme_Mod_Option, THE Theme_Mod_Cleaner SHALL remove the
    `background_image` key from the Theme_Mod_Option.
 4. WHEN removing a key from the Theme_Mod_Option under Requirement 1.1, 1.2 or 1.3 leaves the

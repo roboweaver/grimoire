@@ -45,6 +45,9 @@ type MediaWriteService struct {
 	meta domain.PostMetaRepository
 	// log receives best-effort file-cleanup warnings; nil means no logging.
 	log *slog.Logger
+	// themeMods is the optional cleaner Delete calls after the database delete
+	// succeeds. Nil means no theme-mod cleanup.
+	themeMods domain.ThemeModCleaner
 }
 
 // MediaWriteOption configures optional MediaWriteService dependencies, mirroring
@@ -69,6 +72,12 @@ func WithMediaMetaReader(r domain.PostMetaRepository) MediaWriteOption {
 // WithMediaLogger wires the logger for best-effort file-cleanup warnings.
 func WithMediaLogger(l *slog.Logger) MediaWriteOption {
 	return func(s *MediaWriteService) { s.log = l }
+}
+
+// WithMediaThemeModCleaner wires the cleaner Delete uses to remove theme mods
+// and options that reference a deleted attachment. Nil disables the cleanup.
+func WithMediaThemeModCleaner(c domain.ThemeModCleaner) MediaWriteOption {
+	return func(s *MediaWriteService) { s.themeMods = c }
 }
 
 // NewMediaWriteService constructs a MediaWriteService over a MediaService (for
@@ -226,6 +235,8 @@ func baseMimeForMedia(s string) string {
 // dropping a thumb another attachment still uses. It then deletes the rows
 // through MediaWriter.Delete and, only on success, removes the files
 // best-effort. A failed database delete therefore leaves every file in place.
+// When a ThemeModCleaner is wired it then runs best-effort too; its error is
+// logged and never changes the result.
 // It returns the attachment as it existed immediately before deletion.
 func (s *MediaWriteService) Delete(ctx context.Context, actor auth.Principal, id int64) (domain.Media, error) {
 	cur, err := s.reader.ByID(ctx, id)
@@ -242,7 +253,14 @@ func (s *MediaWriteService) Delete(ctx context.Context, actor auth.Principal, id
 	if err := s.writer.Delete(ctx, id); err != nil {
 		return domain.Media{}, err
 	}
-	deleteMediaFiles(s.media.Config(), cur.Filename, candidates, s.log)
+	cfg := s.media.Config()
+	deleteMediaFiles(cfg, cur.Filename, candidates, s.log)
+	if s.themeMods != nil {
+		url := strings.TrimRight(cfg.BaseURL, "/") + "/" + cur.Filename
+		if err := s.themeMods.CleanAttachmentReferences(ctx, id, url, cfg.Theme); err != nil {
+			s.warn("media delete: theme-mod cleanup failed", id, err)
+		}
+	}
 	return cur, nil
 }
 

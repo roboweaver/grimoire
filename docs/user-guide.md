@@ -138,7 +138,12 @@ a media item removes its files from the uploads directory as well as its
 database rows: the original, every resized version, the pre-edit backups and
 the original image kept alongside a scaled one. Files outside the uploads
 directory are never touched, and a file that is already missing is not an
-error. Every write passes
+error. It also removes the theme settings that point at the item (the site
+logo and its header text, a header or background image, and the `site_logo`
+and `site_icon` options). The theme settings are found by the `theme:` name
+in your grimoire config, so it must equal the WordPress theme's directory
+name; a header or background image is matched by its relative uploads URL
+only. See [`compatibility.md`](./compatibility.md) for the limits. Every write passes
 through a capability-aware HTML sanitizer at the write boundary (see
 [`compatibility.md`](./compatibility.md) for the tier model).
 

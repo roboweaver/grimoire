@@ -669,6 +669,30 @@ type OptionWriter interface {
 	Delete(ctx context.Context, name string) error
 }
 
+// ThemeModCleaner removes theme mods and options that reference a specific
+// attachment, mirroring WordPress's _delete_attachment_theme_mod() and
+// WP_Site_Icon::delete_attachment_data(). It is additive: no existing port
+// gains a method.
+type ThemeModCleaner interface {
+	// CleanAttachmentReferences removes, in one transaction:
+	//  - the custom_logo and header_text keys of theme_mods_{stylesheet}
+	//    when custom_logo's numeric value equals attachmentID;
+	//  - the header_image and header_image_data keys when header_image's
+	//    value has the same URL path as attachmentURL (scheme and host are
+	//    ignored, so a stored absolute URL matches a relative attachmentURL);
+	//  - the background_image key when background_image's value has the
+	//    same URL path as attachmentURL;
+	//  - option site_logo when its numeric value equals attachmentID;
+	//  - option site_icon when its numeric value equals attachmentID.
+	// When removing keys leaves theme_mods_{stylesheet} with none, the
+	// option row is deleted rather than written back empty. Every other byte
+	// of the stored value is preserved. A no-match, an absent option, or a
+	// value that is not a well-formed serialized array is not an error.
+	// stylesheet is the current "stylesheet" option's value; an empty one
+	// skips the theme mods.
+	CleanAttachmentReferences(ctx context.Context, attachmentID int64, attachmentURL string, stylesheet string) error
+}
+
 // PostDependentsPurger removes the rows that depend on a post and re-points the
 // rows that name it as their parent, mirroring the parts of wp_delete_post that
 // the existing ports cannot reach. It never deletes the post row itself.

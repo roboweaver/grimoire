@@ -338,7 +338,7 @@
 
 ## Phase 9 — `ThemeModCleaner` port and storage implementation (`internal/domain`, `internal/storage/wprepo`, TDD) — PR 3
 
-- [~] 9.1 Write the failing tests first. (a) A pure-logic test (new file
+- [x] 9.1 Write the failing tests first. (a) A pure-logic test (new file
       `internal/storage/wprepo/thememod_test.go` or a package-free pure function test if the
       decision logic is factored out, e.g. `internal/content/thememod_test.go`, for a function
       taking a decoded `map[string]any` plus id/URL/option values and returning the resulting map
@@ -365,11 +365,12 @@
       `CleanAttachmentReferences` do not exist).
       _(Req 1.1-1.9, 6.1, 26.1, 26.2)_
 
-- [~] 9.2 Implement the port and the storage logic. In `internal/domain/repository.go`, add the
+- [x] 9.2 Implement the port and the storage logic. In `internal/domain/repository.go`, add the
       additive `ThemeModCleaner` interface exactly as `design.md` "Components and Interfaces" (PR 3)
       specifies. In `internal/storage/wprepo/` (a new `thememod.go`, or added to the existing
       options-writer file), implement `CleanAttachmentReferences` on `*OptionRepo` as one
-      transaction: decode `theme_mods_{stylesheet}`, apply the pure decision logic from 9.1(a),
+      transaction: read `theme_mods_{stylesheet}` and edit the serialized string by byte span (no
+      decode/re-encode; see `design.md`), applying the pure decision logic from 9.1(a),
       write back or delete the row, then check and delete `site_logo`/`site_icon` as specified.
       Register `_ domain.ThemeModCleaner = (*OptionRepo)(nil)` alongside the existing compile-time
       checks in `internal/storage/wprepo/writers.go`.
@@ -378,7 +379,7 @@
       Verify: `go test ./internal/content ./internal/storage/...` — 9.1 passes; `go build ./...`
       green. _(Req 1.1-1.9, 6.1)_
 
-- [~] 9.3 Cross-vendor verification for the new port, before wiring. Run the whole storage suite
+- [x] 9.3 Cross-vendor verification for the new port, before wiring. Run the whole storage suite
       against throwaway MySQL 8.0 and PostgreSQL 16 containers (`design.md` "Testing Strategy" for
       PR 3), confirming every `ThemeModCleaner` subtest passes under both vendors. Record the
       commands and output; remove the containers afterward. No RED step (verification).
@@ -389,7 +390,7 @@
 
 ## Phase 10 — Wire theme-mod cleanup into `MediaWriteService.Delete` (`internal/content`, `cmd/grimoire`, TDD) — PR 3
 
-- [~] 10.1 Write the failing tests first. In `internal/content/mediawriteservice_test.go`: extend
+- [x] 10.1 Write the failing tests first. In `internal/content/mediawriteservice_test.go`: extend
       `Delete`'s test matrix with a fake `ThemeModCleaner` double: deleting an attachment whose id
       matches a seeded `custom_logo` calls the cleaner with the right id/URL/stylesheet; deleting an
       unrelated attachment does not change the fake's recorded state in a way a no-match wouldn't;
@@ -402,7 +403,7 @@
       `ThemeModCleaner` is never called (no field, no option exists yet on `MediaWriteService`).
       _(Req 1.10-1.12, 26.1, 26.2)_
 
-- [~] 10.2 Extend `MediaWriteService.Delete` and `MediaConfig`. In
+- [x] 10.2 Extend `MediaWriteService.Delete` and `MediaConfig`. In
       `internal/content/mediawriteservice.go`: add an optional `themeMods domain.ThemeModCleaner`
       field and `WithMediaThemeModCleaner(c domain.ThemeModCleaner)` option (nil-safe: `Delete`
       performs no theme-mod cleanup when unwired). In `internal/content/media.go`, add `Theme
@@ -416,7 +417,7 @@
       Files: `internal/content/mediawriteservice.go`, `internal/content/media.go`
       Verify: `go test ./internal/content` — 10.1 passes; `go build ./...` green. _(Req 1.10-1.12)_
 
-- [~] 10.3 Write the failing assembly wiring test first. In `cmd/grimoire`, add a test (e.g.
+- [x] 10.3 Write the failing assembly wiring test first. In `cmd/grimoire`, add a test (e.g.
       `assembly_media_thememod_cleanup_test.go`) that, through `buildHandler`, seeds a
       `theme_mods_{stylesheet}` option whose `custom_logo` equals a seeded attachment's id, deletes
       that attachment via REST `DELETE ?force=true`, and asserts the `custom_logo` key is gone from
@@ -427,7 +428,7 @@
       `cmd/grimoire/assembly.go`).
       _(Req 9-equivalent wiring proof for PR 3)_
 
-- [~] 10.4 Wire the theme-mod cleaner into the real binary. In `cmd/grimoire/assembly.go`: pass
+- [x] 10.4 Wire the theme-mod cleaner into the real binary. In `cmd/grimoire/assembly.go`: pass
       `content.WithMediaThemeModCleaner(repos.Options)` (or the concrete `*wprepo.OptionRepo` the
       factory already constructs, whichever the `storage.Repositories` struct already exposes under
       a name implementing `domain.OptionWriter`) to `content.NewMediaWriteService(...)`, and set
@@ -439,7 +440,7 @@
       `MediaThemeModCleanup` fails (the cleaner looks up `theme_mods_` instead of the seeded
       stylesheet's row); restore.
 
-- [~] 10.5 Final documentation for PR 3. `docs/compatibility.md`: in the M20 PR 2 entry's "Known
+- [x] 10.5 Final documentation for PR 3. `docs/compatibility.md`: in the M20 PR 2 entry's "Known
       gaps" list, remove "Theme mods that reference the attachment (`custom_logo`, `header_image`
       and similar) are not cleared." and replace it with a short description of what is now cleared
       (`custom_logo`/`header_text`, `header_image`/`header_image_data`, `background_image`,
@@ -457,7 +458,7 @@
       historical M20 entry's own corrected wording); `plans/README.md` row 23 reads Implemented.
       _(Req 10-equivalent documentation requirement; Req 11.1)_
 
-- [~] 10.6 Final gate for PR 3, with explicit cross-vendor verification. Confirm: no new file under
+- [x] 10.6 Final gate for PR 3, with explicit cross-vendor verification. Confirm: no new file under
       `internal/storage/migrations`; `git diff main -- internal/domain/repository.go` adds exactly
       one interface (`ThemeModCleaner`); no new capability string; `go.mod`/`go.sum` unchanged; no
       new `GRIMOIRE_TEST_*` variable. Run `gofmt -l .` (empty), `go vet ./...`, `go build ./...`, `go

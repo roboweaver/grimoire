@@ -22,6 +22,9 @@ type MediaConfig struct {
 	// leave it unset (e.g. existing tests) get the same 10 MiB default the
 	// admin API applies in production (Req 5).
 	MaxUploadSize int64
+	// Theme is the active theme's stylesheet slug, used only by Delete's
+	// theme-mod cleanup to name theme_mods_{stylesheet}.
+	Theme string
 }
 
 type MediaUpload struct {
